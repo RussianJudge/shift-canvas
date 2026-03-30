@@ -14,6 +14,11 @@ export interface MonthDay {
   isWeekend: boolean;
 }
 
+function toUtcDayNumber(isoDate: string) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
+}
+
 export function getCurrentMonthKey(timeZone: string) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -50,9 +55,9 @@ export function shiftForDate(schedule: Pick<Schedule, "startDate" | "dayShiftDay
     return "OFF";
   }
 
-  const current = new Date(`${isoDate}T00:00:00Z`).getTime();
-  const start = new Date(`${schedule.startDate}T00:00:00Z`).getTime();
-  const dayDelta = Math.floor((current - start) / 86_400_000);
+  // The start date is the first DAY cell in the pattern, so compare pure calendar
+  // days instead of local timestamps to avoid off-by-one rotation drift.
+  const dayDelta = toUtcDayNumber(isoDate) - toUtcDayNumber(schedule.startDate);
   const index = ((dayDelta % pattern.length) + pattern.length) % pattern.length;
 
   return pattern[index];

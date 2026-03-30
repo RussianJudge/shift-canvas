@@ -120,7 +120,7 @@ export function SchedulesPanel({
         </div>
         <p className="panel-copy">
           Shift patterns do not carry production-unit data anymore. They only define the four shared
-          rotations 601, 602, 603, and 604.
+          rotations 601, 602, 603, and 604. The start date is the first day shift in the cycle.
         </p>
       </div>
 
