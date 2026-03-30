@@ -7,17 +7,15 @@ set
   name = excluded.name,
   description = excluded.description;
 
-insert into teams (id, unit_id, name, description, accent_color)
+insert into teams (id, unit_id, name)
 values
-  ('team-orbit', 'unit-casting', 'Orbit Crew', 'Primary melt team anchored to the 601/602 rotation.', '#f97316'),
-  ('team-anchor', 'unit-casting', 'Anchor Crew', 'Coverage team balancing day and night runs across the hall.', '#0f766e'),
-  ('team-vector', 'unit-dispatch', 'Vector Crew', 'Outbound team for dock release, dispatch staging, and manifests.', '#2563eb')
+  ('team-orbit', 'unit-casting', 'Orbit Crew'),
+  ('team-anchor', 'unit-casting', 'Anchor Crew'),
+  ('team-vector', 'unit-dispatch', 'Vector Crew')
 on conflict (id) do update
 set
   unit_id = excluded.unit_id,
-  name = excluded.name,
-  description = excluded.description,
-  accent_color = excluded.accent_color;
+  name = excluded.name;
 
 insert into competencies (id, unit_id, code, label, color_token)
 values

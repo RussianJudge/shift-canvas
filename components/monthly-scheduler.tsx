@@ -142,6 +142,30 @@ export function MonthlyScheduler({
   const monthDays = getMonthDays(currentMonth);
   const activeTeam = getTeamById(snapshot, selectedTeamId);
 
+  if (!activeTeam) {
+    return (
+      <section className="panel-frame">
+        <div className="panel-heading">
+          <div>
+            <span className="panel-eyebrow">Schedule</span>
+            <h1 className="panel-title">Add teams before building a monthly schedule</h1>
+          </div>
+          <p className="panel-copy">
+            Your Supabase connection is working, but there are no teams to render yet. Add records to
+            `production_units`, `teams`, `employees`, and `competencies`, or run the starter seed data.
+          </p>
+        </div>
+
+        <div className="workspace-toolbar workspace-toolbar--personnel">
+          <div className="workspace-copy workspace-copy--full">
+            <strong>No scheduler rows available yet.</strong>
+            <p>The Personnel page can stay empty until you add your first team and employee records.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   const visibleEmployees = activeTeam.employees.filter((employee) => {
     if (!deferredSearch) {
       return true;

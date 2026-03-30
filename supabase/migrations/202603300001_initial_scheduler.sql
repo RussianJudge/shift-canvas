@@ -9,8 +9,6 @@ create table if not exists teams (
   id text primary key,
   unit_id text not null references production_units (id) on delete cascade,
   name text not null,
-  description text not null default '',
-  accent_color text not null default '#f97316',
   created_at timestamptz not null default now()
 );
 
