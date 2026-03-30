@@ -2,21 +2,23 @@ import "server-only";
 
 import { demoSchedulerSnapshot } from "@/lib/demo-data";
 import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
-import type { Competency, Employee, ProductionUnit, SchedulerSnapshot, StoredAssignment, Team } from "@/lib/types";
+import type { Competency, Employee, ProductionUnit, Schedule, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
 
-type TeamRow = {
+type ScheduleRow = {
   id: string;
   unit_id: string;
   name: string;
+  start_date: string;
+  day_shift_days: number;
+  night_shift_days: number;
+  off_days: number;
 };
 
 type EmployeeRow = {
   id: string;
-  team_id: string;
+  schedule_id: string;
   full_name: string;
   role_title: string | null;
-  schedule_code: Employee["scheduleCode"];
-  rotation_anchor: number | null;
 };
 
 type CompetencyRow = {
@@ -64,14 +66,17 @@ export async function getSchedulerSnapshot(month: string) {
   const monthStart = `${month}-01`;
   const monthEnd = new Date(Date.UTC(year, monthIndex, 0)).toISOString().slice(0, 10);
 
-  const [unitsResult, competenciesResult, teamsResult, employeesResult, employeeCompetenciesResult, assignmentsResult] =
+  const [unitsResult, competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult, assignmentsResult] =
     await Promise.all([
       supabase.from("production_units").select("id, name, description").order("name"),
       supabase.from("competencies").select("id, unit_id, code, label, color_token").order("code"),
-      supabase.from("teams").select("id, unit_id, name").order("name"),
+      supabase
+        .from("schedules")
+        .select("id, unit_id, name, start_date, day_shift_days, night_shift_days, off_days")
+        .order("name"),
       supabase
         .from("employees")
-        .select("id, team_id, full_name, role_title, schedule_code, rotation_anchor")
+        .select("id, schedule_id, full_name, role_title")
         .eq("is_active", true)
         .order("full_name"),
       supabase.from("employee_competencies").select("employee_id, competency_id"),
@@ -85,7 +90,7 @@ export async function getSchedulerSnapshot(month: string) {
   const results = [
     unitsResult,
     competenciesResult,
-    teamsResult,
+    schedulesResult,
     employeesResult,
     employeeCompetenciesResult,
     assignmentsResult,
@@ -117,16 +122,14 @@ export async function getSchedulerSnapshot(month: string) {
     return map;
   }, {});
 
-  const employeesByTeam = (employeesResult.data as EmployeeRow[]).reduce<Record<string, Employee[]>>(
+  const employeesBySchedule = (employeesResult.data as EmployeeRow[]).reduce<Record<string, Employee[]>>(
     (map, row) => {
-      map[row.team_id] ??= [];
-      map[row.team_id].push({
+      map[row.schedule_id] ??= [];
+      map[row.schedule_id].push({
         id: row.id,
         name: row.full_name,
         role: row.role_title ?? "Operator",
-        teamId: row.team_id,
-        scheduleCode: row.schedule_code,
-        rotationAnchor: row.rotation_anchor ?? 0,
+        scheduleId: row.schedule_id,
         competencyIds: competenciesByEmployee[row.id] ?? [],
       });
       return map;
@@ -134,11 +137,15 @@ export async function getSchedulerSnapshot(month: string) {
     {},
   );
 
-  const teams: Team[] = (teamsResult.data as TeamRow[]).map((row) => ({
+  const schedules: Schedule[] = (schedulesResult.data as ScheduleRow[]).map((row) => ({
     id: row.id,
     unitId: row.unit_id,
     name: row.name,
-    employees: employeesByTeam[row.id] ?? [],
+    startDate: row.start_date,
+    dayShiftDays: row.day_shift_days,
+    nightShiftDays: row.night_shift_days,
+    offDays: row.off_days,
+    employees: employeesBySchedule[row.id] ?? [],
   }));
 
   const assignments: StoredAssignment[] = (assignmentsResult.data as AssignmentRow[]).map((row) => ({
@@ -151,7 +158,7 @@ export async function getSchedulerSnapshot(month: string) {
 
   return {
     month,
-    teams,
+    schedules,
     productionUnits,
     competencies,
     assignments,

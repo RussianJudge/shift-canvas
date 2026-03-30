@@ -12,11 +12,11 @@ import {
   getCompetencyMap,
   getEmployeeMap,
   getMonthDays,
+  getScheduleById,
   getSuggestedCompetencyId,
-  getTeamById,
   shiftForDate,
 } from "@/lib/scheduling";
-import type { Competency, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
+import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind } from "@/lib/types";
 
 const STORAGE_KEY = "shift-canvas-drafts";
 
@@ -76,17 +76,22 @@ function isCompetency(competency: Competency | undefined): competency is Compete
 }
 
 function getCompactCode(code: string) {
-  return code
-    .replace("Post ", "P")
-    .replace("Dock ", "D")
-    .replace(/\s+/g, "");
+  if (code.startsWith("Post ")) {
+    return code.replace("Post ", "");
+  }
+
+  if (code.startsWith("Dock ")) {
+    return code.replace("Dock ", "D");
+  }
+
+  return code.replace(/\s+/g, "");
 }
 
-function getTeamAccent(teamId: string) {
+function getScheduleAccent(scheduleId: string) {
   const accents = ["#f97316", "#0f766e", "#2563eb", "#be123c", "#7c3aed", "#4d7c0f"];
   let hash = 0;
 
-  for (const character of teamId) {
+  for (const character of scheduleId) {
     hash = (hash + character.charCodeAt(0)) % accents.length;
   }
 
@@ -123,7 +128,9 @@ export function MonthlyScheduler({
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [currentMonth, setCurrentMonth] = useState(initialSnapshot.month);
-  const [selectedTeamId, setSelectedTeamId] = useState(initialSnapshot.teams[0]?.id ?? "");
+  const [selectedScheduleId, setSelectedScheduleId] = useState(
+    initialSnapshot.schedules[0]?.id ?? "",
+  );
   const [search, setSearch] = useState("");
   const [baselineAssignments, setBaselineAssignments] = useState(() =>
     buildAssignmentIndex(initialSnapshot.assignments),
@@ -138,35 +145,36 @@ export function MonthlyScheduler({
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
   const competencyMap = getCompetencyMap(snapshot.competencies);
-  const employeeMap = getEmployeeMap(snapshot.teams);
+  const employeeMap = getEmployeeMap(snapshot.schedules);
   const monthDays = getMonthDays(currentMonth);
-  const activeTeam = getTeamById(snapshot, selectedTeamId);
+  const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
 
-  if (!activeTeam) {
+  if (!activeSchedule) {
     return (
       <section className="panel-frame">
         <div className="panel-heading">
           <div>
             <span className="panel-eyebrow">Schedule</span>
-            <h1 className="panel-title">Add teams before building a monthly schedule</h1>
+            <h1 className="panel-title">Add schedules before building a monthly calendar</h1>
           </div>
           <p className="panel-copy">
-            Your Supabase connection is working, but there are no teams to render yet. Add records to
-            `production_units`, `teams`, `employees`, and `competencies`, or run the starter seed data.
+            Your Supabase connection is working, but there are no schedules to render yet. Add records
+            to `production_units`, `schedules`, `employees`, and `competencies`, or run the starter
+            seed data.
           </p>
         </div>
 
         <div className="workspace-toolbar workspace-toolbar--personnel">
           <div className="workspace-copy workspace-copy--full">
             <strong>No scheduler rows available yet.</strong>
-            <p>The Personnel page can stay empty until you add your first team and employee records.</p>
+            <p>The Personnel page can stay empty until you add your first schedule and employee rows.</p>
           </div>
         </div>
       </section>
     );
   }
 
-  const visibleEmployees = activeTeam.employees.filter((employee) => {
+  const visibleEmployees = activeSchedule.employees.filter((employee) => {
     if (!deferredSearch) {
       return true;
     }
@@ -194,15 +202,15 @@ export function MonthlyScheduler({
         date,
         competencyId,
         notes: null,
-        shiftKind: shiftForDate(employee.scheduleCode, date, employee.rotationAnchor),
+        shiftKind: shiftForDate(activeSchedule, date),
       },
     ];
   });
 
-  const coverage = countShiftCoverage(activeTeam, monthDays, draftAssignments);
-  const activeUnit = snapshot.productionUnits.find((unit) => unit.id === activeTeam.unitId);
-  const teamCompetencies = snapshot.competencies.filter(
-    (competency) => competency.unitId === activeTeam.unitId,
+  const coverage = countShiftCoverage(activeSchedule, monthDays, draftAssignments);
+  const activeUnit = snapshot.productionUnits.find((unit) => unit.id === activeSchedule.unitId);
+  const scheduleCompetencies = snapshot.competencies.filter(
+    (competency) => competency.unitId === activeSchedule.unitId,
   );
   const gridColumns = `12rem repeat(${monthDays.length}, minmax(0, 1fr))`;
 
@@ -259,8 +267,10 @@ export function MonthlyScheduler({
 
         startTransition(() => {
           setSnapshot(nextSnapshot);
-          setSelectedTeamId((current) =>
-            nextSnapshot.teams.some((team) => team.id === current) ? current : nextSnapshot.teams[0]?.id ?? "",
+          setSelectedScheduleId((current) =>
+            nextSnapshot.schedules.some((schedule) => schedule.id === current)
+              ? current
+              : nextSnapshot.schedules[0]?.id ?? "",
           );
           setBaselineAssignments((current) => ({
             ...stripMonthEntries(current, currentMonth),
@@ -323,7 +333,7 @@ export function MonthlyScheduler({
   return (
     <section
       className="panel-frame"
-      style={{ "--team-accent": getTeamAccent(activeTeam.id) } as CSSProperties}
+      style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
     >
       <div className="panel-heading panel-heading--schedule">
         <div className="planner-actions">
@@ -346,7 +356,7 @@ export function MonthlyScheduler({
 
       <div className="summary-row">
         <SummaryStat label="Month" value={formatMonthLabel(currentMonth)} />
-        <SummaryStat label="Team" value={activeTeam.name} />
+        <SummaryStat label="Schedule" value={activeSchedule.name} />
         <SummaryStat label="Production unit" value={activeUnit?.name ?? "Unassigned"} />
         <SummaryStat label="Day shifts" value={String(coverage.dayShiftCount)} />
         <SummaryStat label="Night shifts" value={String(coverage.nightShiftCount)} />
@@ -355,11 +365,14 @@ export function MonthlyScheduler({
 
       <div className="workspace-toolbar">
         <label className="field">
-          <span>Team</span>
-          <select value={selectedTeamId} onChange={(event) => setSelectedTeamId(event.target.value)}>
-            {snapshot.teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.name}
+          <span>Schedule</span>
+          <select
+            value={selectedScheduleId}
+            onChange={(event) => setSelectedScheduleId(event.target.value)}
+          >
+            {snapshot.schedules.map((schedule) => (
+              <option key={schedule.id} value={schedule.id}>
+                {schedule.name}
               </option>
             ))}
           </select>
@@ -376,17 +389,17 @@ export function MonthlyScheduler({
         </label>
 
         <div className="workspace-copy">
-          <strong>{activeUnit?.name ?? activeTeam.name}</strong>
+          <strong>{activeUnit?.name ?? activeSchedule.name}</strong>
           <p>
             {isMonthLoading
               ? "Loading next month..."
-              : `${statusMessage}. Click a shift cell to cycle posts, shift-click to clear.`}
+              : `${statusMessage}. Click a shift cell to cycle competencies, shift-click to clear.`}
           </p>
         </div>
       </div>
 
       <div className="legend-row">
-        {teamCompetencies.map((competency) => (
+        {scheduleCompetencies.map((competency) => (
           <CompetencyPill key={competency.id} competency={competency} />
         ))}
       </div>
@@ -395,7 +408,7 @@ export function MonthlyScheduler({
         <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
           <div className="employee-header sticky-column">
             <span>Employee</span>
-            <strong>{activeTeam.name}</strong>
+            <strong>{activeSchedule.name}</strong>
           </div>
 
           {monthDays.map((day) => (
@@ -413,6 +426,7 @@ export function MonthlyScheduler({
             <EmployeeRow
               key={employee.id}
               employee={employee}
+              schedule={activeSchedule}
               monthDays={monthDays}
               assignments={draftAssignments}
               competencyMap={competencyMap}
@@ -437,12 +451,14 @@ export function MonthlyScheduler({
 
 function EmployeeRow({
   employee,
+  schedule,
   monthDays,
   assignments,
   competencyMap,
   onAssignmentChange,
 }: {
   employee: Employee;
+  schedule: Schedule;
   monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
   assignments: Record<string, string | null>;
   competencyMap: Record<string, Competency>;
@@ -453,11 +469,11 @@ function EmployeeRow({
       <div className="employee-cell sticky-column">
         <strong>{employee.name}</strong>
         <span>{employee.role}</span>
-        <small>{employee.scheduleCode}</small>
+        <small>{schedule.name}</small>
       </div>
 
       {monthDays.map((day) => {
-        const shiftKind = shiftForDate(employee.scheduleCode, day.date, employee.rotationAnchor);
+        const shiftKind = shiftForDate(schedule, day.date);
         const selectedCompetencyId = getCellCompetency(employee, day, assignments);
         const availableCompetencies = employee.competencyIds
           .map((competencyId) => competencyMap[competencyId])

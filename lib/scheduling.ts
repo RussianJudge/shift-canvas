@@ -1,36 +1,11 @@
 import type {
   Competency,
   Employee,
-  ScheduleCode,
+  Schedule,
   SchedulerSnapshot,
   ShiftKind,
   StoredAssignment,
-  Team,
 } from "@/lib/types";
-
-const BASE_ROTATION: ShiftKind[] = [
-  "DAY",
-  "DAY",
-  "DAY",
-  "NIGHT",
-  "NIGHT",
-  "NIGHT",
-  "OFF",
-  "OFF",
-  "OFF",
-  "OFF",
-  "OFF",
-  "OFF",
-];
-
-const SCHEDULE_OFFSETS: Record<ScheduleCode, number> = {
-  "601": 0,
-  "602": 3,
-  "603": 6,
-  "604": 9,
-};
-
-const ROTATION_REFERENCE = Date.UTC(2026, 0, 1);
 
 export interface MonthDay {
   date: string;
@@ -64,18 +39,23 @@ export function formatMonthLabel(monthKey: string) {
   }).format(date);
 }
 
-export function shiftForDate(
-  scheduleCode: ScheduleCode,
-  isoDate: string,
-  rotationAnchor = 0,
-) {
-  const current = new Date(`${isoDate}T00:00:00Z`).getTime();
-  const dayDelta = Math.floor((current - ROTATION_REFERENCE) / 86_400_000);
-  const index =
-    (dayDelta + SCHEDULE_OFFSETS[scheduleCode] + rotationAnchor + BASE_ROTATION.length * 8) %
-    BASE_ROTATION.length;
+export function shiftForDate(schedule: Pick<Schedule, "startDate" | "dayShiftDays" | "nightShiftDays" | "offDays">, isoDate: string) {
+  const pattern: ShiftKind[] = [
+    ...Array.from({ length: schedule.dayShiftDays }, () => "DAY" as const),
+    ...Array.from({ length: schedule.nightShiftDays }, () => "NIGHT" as const),
+    ...Array.from({ length: schedule.offDays }, () => "OFF" as const),
+  ];
 
-  return BASE_ROTATION[index];
+  if (pattern.length === 0) {
+    return "OFF";
+  }
+
+  const current = new Date(`${isoDate}T00:00:00Z`).getTime();
+  const start = new Date(`${schedule.startDate}T00:00:00Z`).getTime();
+  const dayDelta = Math.floor((current - start) / 86_400_000);
+  const index = ((dayDelta % pattern.length) + pattern.length) % pattern.length;
+
+  return pattern[index];
 }
 
 export function getMonthDays(monthKey: string): MonthDay[] {
@@ -104,11 +84,13 @@ export function getSuggestedCompetencyId(employee: Employee, isoDate: string) {
     return null;
   }
 
-  const dayOffset = Math.floor(
-    (new Date(`${isoDate}T00:00:00Z`).getTime() - ROTATION_REFERENCE) / 86_400_000,
-  );
+  const epochReference = Date.UTC(2026, 0, 1);
+  const employeeOffset = employee.id
+    .split("")
+    .reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  const dayOffset = Math.floor((new Date(`${isoDate}T00:00:00Z`).getTime() - epochReference) / 86_400_000);
 
-  return employee.competencyIds[(dayOffset + employee.rotationAnchor) % employee.competencyIds.length];
+  return employee.competencyIds[(dayOffset + employeeOffset) % employee.competencyIds.length];
 }
 
 export function buildAssignmentIndex(assignments: StoredAssignment[]) {
@@ -122,8 +104,8 @@ export function createAssignmentKey(employeeId: string, date: string) {
   return `${employeeId}:${date}`;
 }
 
-export function getTeamById(snapshot: SchedulerSnapshot, teamId: string) {
-  return snapshot.teams.find((team) => team.id === teamId) ?? snapshot.teams[0];
+export function getScheduleById(snapshot: SchedulerSnapshot, scheduleId: string) {
+  return snapshot.schedules.find((schedule) => schedule.id === scheduleId) ?? snapshot.schedules[0];
 }
 
 export function getCompetencyMap(competencies: Competency[]) {
@@ -133,33 +115,29 @@ export function getCompetencyMap(competencies: Competency[]) {
   }, {});
 }
 
-export function getEmployeeMap(teams: Team[]) {
-  return teams.flatMap((team) => team.employees).reduce<Record<string, Employee>>((map, employee) => {
+export function getEmployeeMap(schedules: Schedule[]) {
+  return schedules.flatMap((schedule) => schedule.employees).reduce<Record<string, Employee>>((map, employee) => {
     map[employee.id] = employee;
     return map;
   }, {});
 }
 
 export function countShiftCoverage(
-  team: Team,
+  schedule: Schedule,
   monthDays: MonthDay[],
   assignments: Record<string, string | null>,
 ) {
   const dayShiftCount = monthDays.reduce((count, day) => {
     return (
       count +
-      team.employees.filter(
-        (employee) => shiftForDate(employee.scheduleCode, day.date, employee.rotationAnchor) === "DAY",
-      ).length
+      schedule.employees.filter(() => shiftForDate(schedule, day.date) === "DAY").length
     );
   }, 0);
 
   const nightShiftCount = monthDays.reduce((count, day) => {
     return (
       count +
-      team.employees.filter(
-        (employee) => shiftForDate(employee.scheduleCode, day.date, employee.rotationAnchor) === "NIGHT",
-      ).length
+      schedule.employees.filter(() => shiftForDate(schedule, day.date) === "NIGHT").length
     );
   }, 0);
 
@@ -168,7 +146,7 @@ export function countShiftCoverage(
       return false;
     }
 
-    return team.employees.some((employee) => key.startsWith(`${employee.id}:`));
+    return schedule.employees.some((employee) => key.startsWith(`${employee.id}:`));
   }).length;
 
   return {

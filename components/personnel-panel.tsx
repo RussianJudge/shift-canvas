@@ -3,15 +3,13 @@
 import { useMemo, useState, useTransition } from "react";
 
 import { savePersonnel } from "@/app/actions";
-import type { PersonnelUpdate, ScheduleCode, SchedulerSnapshot } from "@/lib/types";
+import type { PersonnelUpdate, SchedulerSnapshot } from "@/lib/types";
 
 type EditableEmployee = {
   id: string;
   name: string;
   role: string;
-  teamId: string;
-  scheduleCode: ScheduleCode;
-  rotationAnchor: number;
+  scheduleId: string;
   competencyIds: string[];
 };
 
@@ -20,9 +18,7 @@ function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
     employeeId: employee.id,
     name: employee.name.trim(),
     role: employee.role.trim(),
-    teamId: employee.teamId,
-    scheduleCode: employee.scheduleCode,
-    rotationAnchor: employee.rotationAnchor,
+    scheduleId: employee.scheduleId,
     competencyIds: [...employee.competencyIds].sort(),
   };
 }
@@ -34,14 +30,12 @@ export function PersonnelPanel({
 }) {
   const initialEmployees = useMemo<EditableEmployee[]>(
     () =>
-      snapshot.teams.flatMap((team) =>
-        team.employees.map((employee) => ({
+      snapshot.schedules.flatMap((schedule) =>
+        schedule.employees.map((employee) => ({
           id: employee.id,
           name: employee.name,
           role: employee.role,
-          teamId: employee.teamId,
-          scheduleCode: employee.scheduleCode,
-          rotationAnchor: employee.rotationAnchor,
+          scheduleId: employee.scheduleId,
           competencyIds: employee.competencyIds,
         })),
       ),
@@ -50,7 +44,7 @@ export function PersonnelPanel({
 
   const [employees, setEmployees] = useState(initialEmployees);
   const [baselineEmployees, setBaselineEmployees] = useState(initialEmployees);
-  const [statusMessage, setStatusMessage] = useState("Edit people, teams, and post coverage here.");
+  const [statusMessage, setStatusMessage] = useState("Edit people, schedules, and post coverage here.");
   const [isSaving, startSaveTransition] = useTransition();
 
   const baselineMap = useMemo(
@@ -62,18 +56,18 @@ export function PersonnelPanel({
     .map((employee) => normalizeEmployee(employee))
     .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee));
 
-  function getTeam(teamId: string) {
-    return snapshot.teams.find((team) => team.id === teamId) ?? snapshot.teams[0];
+  function getSchedule(scheduleId: string) {
+    return snapshot.schedules.find((schedule) => schedule.id === scheduleId) ?? snapshot.schedules[0];
   }
 
-  function getUnitName(teamId: string) {
-    const team = getTeam(teamId);
-    return snapshot.productionUnits.find((unit) => unit.id === team.unitId)?.name ?? "Unassigned";
+  function getUnitName(scheduleId: string) {
+    const schedule = getSchedule(scheduleId);
+    return snapshot.productionUnits.find((unit) => unit.id === schedule?.unitId)?.name ?? "Unassigned";
   }
 
-  function getUnitCompetencies(teamId: string) {
-    const team = getTeam(teamId);
-    return snapshot.competencies.filter((competency) => competency.unitId === team.unitId);
+  function getUnitCompetencies(scheduleId: string) {
+    const schedule = getSchedule(scheduleId);
+    return snapshot.competencies.filter((competency) => competency.unitId === schedule?.unitId);
   }
 
   function updateEmployee(employeeId: string, updater: (employee: EditableEmployee) => EditableEmployee) {
@@ -82,13 +76,13 @@ export function PersonnelPanel({
     );
   }
 
-  function handleTeamChange(employeeId: string, teamId: string) {
+  function handleScheduleChange(employeeId: string, scheduleId: string) {
     updateEmployee(employeeId, (employee) => {
-      const validCompetencyIds = new Set(getUnitCompetencies(teamId).map((competency) => competency.id));
+      const validCompetencyIds = new Set(getUnitCompetencies(scheduleId).map((competency) => competency.id));
 
       return {
         ...employee,
-        teamId,
+        scheduleId,
         competencyIds: employee.competencyIds.filter((competencyId) => validCompetencyIds.has(competencyId)),
       };
     });
@@ -118,6 +112,26 @@ export function PersonnelPanel({
     });
   }
 
+  function handleAddEmployee() {
+    const defaultSchedule = snapshot.schedules[0];
+
+    if (!defaultSchedule) {
+      setStatusMessage("Add a schedule first, then new employees can be created here.");
+      return;
+    }
+
+    const nextEmployee: EditableEmployee = {
+      id: `emp-${crypto.randomUUID().slice(0, 8)}`,
+      name: "New Employee",
+      role: "Operator",
+      scheduleId: defaultSchedule.id,
+      competencyIds: [],
+    };
+
+    setEmployees((current) => [nextEmployee, ...current]);
+    setStatusMessage("New employee row added. Edit the fields and save when ready.");
+  }
+
   return (
     <section className="panel-frame">
       <div className="panel-heading">
@@ -126,7 +140,7 @@ export function PersonnelPanel({
           <h1 className="panel-title">People and competency coverage</h1>
         </div>
         <p className="panel-copy">
-          Update names, roles, rotation codes, team placement, and post qualifications before they
+          Update names, roles, assigned schedules, and post qualifications before they
           flow into the monthly schedule.
         </p>
       </div>
@@ -134,9 +148,12 @@ export function PersonnelPanel({
       <div className="workspace-toolbar workspace-toolbar--personnel">
         <div className="workspace-copy workspace-copy--full">
           <strong>{statusMessage}</strong>
-          <p>Changing a team automatically narrows available competencies to that production unit.</p>
+          <p>Changing a schedule automatically narrows competencies to that schedule&apos;s production unit.</p>
         </div>
         <div className="planner-actions">
+          <button type="button" className="ghost-button" onClick={handleAddEmployee}>
+            Add employee
+          </button>
           <button
             type="button"
             className="primary-button"
@@ -154,8 +171,8 @@ export function PersonnelPanel({
           <strong>{employees.length}</strong>
         </div>
         <div className="summary-stat">
-          <span>Teams</span>
-          <strong>{snapshot.teams.length}</strong>
+          <span>Schedules</span>
+          <strong>{snapshot.schedules.length}</strong>
         </div>
         <div className="summary-stat">
           <span>Production units</span>
@@ -173,9 +190,8 @@ export function PersonnelPanel({
             <tr>
               <th>Name</th>
               <th>Role</th>
-              <th>Team</th>
+              <th>Schedule</th>
               <th>Unit</th>
-              <th>Rotation</th>
               <th>Competencies</th>
             </tr>
           </thead>
@@ -209,37 +225,20 @@ export function PersonnelPanel({
                 <td>
                   <select
                     className="table-select"
-                    value={employee.teamId}
-                    onChange={(event) => handleTeamChange(employee.id, event.target.value)}
+                    value={employee.scheduleId}
+                    onChange={(event) => handleScheduleChange(employee.id, event.target.value)}
                   >
-                    {snapshot.teams.map((team) => (
-                      <option key={team.id} value={team.id}>
-                        {team.name}
+                    {snapshot.schedules.map((schedule) => (
+                      <option key={schedule.id} value={schedule.id}>
+                        {schedule.name}
                       </option>
                     ))}
                   </select>
                 </td>
-                <td>{getUnitName(employee.teamId)}</td>
-                <td>
-                  <select
-                    className="table-select"
-                    value={employee.scheduleCode}
-                    onChange={(event) =>
-                      updateEmployee(employee.id, (current) => ({
-                        ...current,
-                        scheduleCode: event.target.value as ScheduleCode,
-                      }))
-                    }
-                  >
-                    <option value="601">601</option>
-                    <option value="602">602</option>
-                    <option value="603">603</option>
-                    <option value="604">604</option>
-                  </select>
-                </td>
+                <td>{getUnitName(employee.scheduleId)}</td>
                 <td>
                   <div className="table-pills table-pills--editable">
-                    {getUnitCompetencies(employee.teamId).map((competency) => {
+                    {getUnitCompetencies(employee.scheduleId).map((competency) => {
                       const isSelected = employee.competencyIds.includes(competency.id);
 
                       return (

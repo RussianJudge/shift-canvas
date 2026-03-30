@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import type { SaveAssignmentsInput, SavePersonnelInput } from "@/lib/types";
+import type { SaveAssignmentsInput, SavePersonnelInput, SaveSchedulesInput } from "@/lib/types";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
 export async function saveAssignments(input: SaveAssignmentsInput) {
@@ -90,9 +90,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
     id: update.employeeId,
     full_name: update.name,
     role_title: update.role,
-    team_id: update.teamId,
-    schedule_code: update.scheduleCode,
-    rotation_anchor: update.rotationAnchor,
+    schedule_id: update.scheduleId,
     is_active: true,
   }));
 
@@ -146,5 +144,48 @@ export async function savePersonnel(input: SavePersonnelInput) {
   return {
     ok: true,
     message: "Personnel changes saved to Supabase.",
+  };
+}
+
+export async function saveSchedules(input: SaveSchedulesInput) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message:
+        "Supabase is not configured yet. Schedule edits are available locally in this browser only.",
+    };
+  }
+
+  const rows = input.updates.map((update) => ({
+    id: update.scheduleId,
+    name: update.name,
+    unit_id: update.unitId,
+    start_date: update.startDate,
+    day_shift_days: update.dayShiftDays,
+    night_shift_days: update.nightShiftDays,
+    off_days: update.offDays,
+  }));
+
+  const { error } = await supabase.from("schedules").upsert(rows, {
+    onConflict: "id",
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not save schedules: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/personnel");
+  revalidatePath("/schedules");
+  revalidatePath("/teams");
+
+  return {
+    ok: true,
+    message: "Schedule changes saved to Supabase.",
   };
 }

@@ -42,7 +42,8 @@ export function WorkspaceShell({
 
           <nav className="workspace-nav" aria-label="Primary">
             <NavLink href="/" label="Schedule" detail="Monthly coverage grid" />
-            <NavLink href="/personnel" label="Personnel" detail="People, roles, competencies" />
+            <NavLink href="/schedules" label="Schedules" detail="Shift patterns and start dates" />
+            <NavLink href="/personnel" label="Personnel" detail="People and competencies" />
           </nav>
         </aside>
 

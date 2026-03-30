@@ -5,10 +5,14 @@ create table if not exists production_units (
   created_at timestamptz not null default now()
 );
 
-create table if not exists teams (
+create table if not exists schedules (
   id text primary key,
   unit_id text not null references production_units (id) on delete cascade,
   name text not null,
+  start_date date not null,
+  day_shift_days integer not null check (day_shift_days >= 0),
+  night_shift_days integer not null check (night_shift_days >= 0),
+  off_days integer not null check (off_days >= 0),
   created_at timestamptz not null default now()
 );
 
@@ -24,11 +28,9 @@ create table if not exists competencies (
 
 create table if not exists employees (
   id text primary key,
-  team_id text not null references teams (id) on delete cascade,
+  schedule_id text not null references schedules (id) on delete cascade,
   full_name text not null,
   role_title text not null default 'Operator',
-  schedule_code text not null check (schedule_code in ('601', '602', '603', '604')),
-  rotation_anchor integer not null default 0,
   is_active boolean not null default true,
   created_at timestamptz not null default now()
 );
@@ -52,9 +54,9 @@ create table if not exists schedule_assignments (
   unique (employee_id, assignment_date)
 );
 
-create index if not exists teams_unit_id_idx on teams (unit_id);
+create index if not exists schedules_unit_id_idx on schedules (unit_id);
 create index if not exists competencies_unit_code_idx on competencies (unit_id, code);
-create index if not exists employees_team_active_idx on employees (team_id) where is_active = true;
+create index if not exists employees_schedule_active_idx on employees (schedule_id) where is_active = true;
 create index if not exists assignments_date_employee_idx on schedule_assignments (assignment_date, employee_id);
 
 create or replace function update_schedule_assignment_timestamp()
@@ -75,7 +77,7 @@ for each row
 execute function update_schedule_assignment_timestamp();
 
 alter table production_units enable row level security;
-alter table teams enable row level security;
+alter table schedules enable row level security;
 alter table competencies enable row level security;
 alter table employees enable row level security;
 alter table employee_competencies enable row level security;
@@ -87,8 +89,8 @@ for select
 to authenticated
 using (true);
 
-create policy "authenticated read teams"
-on teams
+create policy "authenticated read schedules"
+on schedules
 for select
 to authenticated
 using (true);
