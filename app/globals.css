@@ -645,16 +645,21 @@ select {
 }
 
 .assignment-select {
+  appearance: none;
+  -webkit-appearance: none;
   width: 100%;
   min-height: 1.5rem;
   padding: 0.08rem 0.18rem;
   border: 1px solid rgba(23, 20, 17, 0.08);
   border-radius: 0.6rem;
   background: rgba(255, 255, 255, 0.78);
+  background-image: none;
   color: var(--ink);
   font-size: 0.56rem;
   font-weight: 700;
   line-height: 1;
+  text-align: center;
+  text-align-last: center;
 }
 
 .assignment-select:focus {

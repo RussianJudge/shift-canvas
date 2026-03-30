@@ -92,8 +92,7 @@ export function WorkspaceShell({
         <aside className={`workspace-sidebar ${isCollapsed ? "workspace-sidebar--collapsed" : ""}`}>
           <div className="workspace-brand-row">
             <div className="workspace-brand">
-              <span>Shift Canvas</span>
-              <strong>Operations workspace</strong>
+              <strong>Shift Canvas</strong>
             </div>
             <button
               type="button"

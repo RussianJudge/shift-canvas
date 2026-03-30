@@ -560,7 +560,7 @@ function EmployeeRow({
               }}
               onChange={(event) => onAssignmentChange(employee, day.date, decodeAssignmentValue(event.target.value))}
             >
-              <option value="">{shiftKind === "OFF" ? "Off" : "Set"}</option>
+              <option value="">{shiftKind === "OFF" ? "Off" : ""}</option>
               <optgroup label="Time codes">
                 {timeCodes.map((timeCode) => (
                   <option key={timeCode.id} value={`time:${timeCode.id}`}>
