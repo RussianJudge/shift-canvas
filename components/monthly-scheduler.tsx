@@ -71,6 +71,28 @@ function getCellCompetency(
   return getSuggestedCompetencyId(employee, day.date);
 }
 
+function isCompetency(competency: Competency | undefined): competency is Competency {
+  return Boolean(competency);
+}
+
+function getCompactCode(code: string) {
+  return code
+    .replace("Post ", "P")
+    .replace("Dock ", "D")
+    .replace(/\s+/g, "");
+}
+
+function getTeamAccent(teamId: string) {
+  const accents = ["#f97316", "#0f766e", "#2563eb", "#be123c", "#7c3aed", "#4d7c0f"];
+  let hash = 0;
+
+  for (const character of teamId) {
+    hash = (hash + character.charCodeAt(0)) % accents.length;
+  }
+
+  return accents[hash];
+}
+
 function SummaryStat({
   label,
   value,
@@ -158,7 +180,7 @@ export function MonthlyScheduler({
   const teamCompetencies = snapshot.competencies.filter(
     (competency) => competency.unitId === activeTeam.unitId,
   );
-  const gridColumns = `18rem repeat(${monthDays.length}, minmax(8rem, 1fr))`;
+  const gridColumns = `12rem repeat(${monthDays.length}, minmax(0, 1fr))`;
 
   useEffect(() => {
     const savedDrafts = window.localStorage.getItem(STORAGE_KEY);
@@ -277,7 +299,7 @@ export function MonthlyScheduler({
   return (
     <section
       className="panel-frame"
-      style={{ "--team-accent": activeTeam.accentColor } as CSSProperties}
+      style={{ "--team-accent": getTeamAccent(activeTeam.id) } as CSSProperties}
     >
       <div className="panel-heading panel-heading--schedule">
         <div className="planner-actions">
@@ -330,8 +352,12 @@ export function MonthlyScheduler({
         </label>
 
         <div className="workspace-copy">
-          <strong>{activeTeam.description}</strong>
-          <p>{isMonthLoading ? "Loading next month..." : statusMessage}</p>
+          <strong>{activeUnit?.name ?? activeTeam.name}</strong>
+          <p>
+            {isMonthLoading
+              ? "Loading next month..."
+              : `${statusMessage}. Click a shift cell to cycle posts, shift-click to clear.`}
+          </p>
         </div>
       </div>
 
@@ -352,8 +378,9 @@ export function MonthlyScheduler({
             <div
               key={day.date}
               className={`day-header ${day.isWeekend ? "day-header--weekend" : ""}`}
+              title={`${day.dayName} ${day.date}`}
             >
-              <span>{day.dayName}</span>
+              <span>{day.dayName.slice(0, 1)}</span>
               <strong>{day.dayNumber}</strong>
             </div>
           ))}
@@ -402,7 +429,7 @@ function EmployeeRow({
       <div className="employee-cell sticky-column">
         <strong>{employee.name}</strong>
         <span>{employee.role}</span>
-        <small>Rotation {employee.scheduleCode}</small>
+        <small>{employee.scheduleCode}</small>
       </div>
 
       {monthDays.map((day) => {
@@ -410,7 +437,28 @@ function EmployeeRow({
         const selectedCompetencyId = getCellCompetency(employee, day, assignments);
         const availableCompetencies = employee.competencyIds
           .map((competencyId) => competencyMap[competencyId])
-          .filter(Boolean);
+          .filter(isCompetency);
+
+        function handleCycle(clear = false) {
+          if (clear) {
+            onAssignmentChange(employee, day.date, "");
+            return;
+          }
+
+          if (availableCompetencies.length === 0) {
+            return;
+          }
+
+          const currentIndex = availableCompetencies.findIndex(
+            (competency) => competency.id === selectedCompetencyId,
+          );
+          const nextCompetency =
+            currentIndex >= 0
+              ? availableCompetencies[(currentIndex + 1) % availableCompetencies.length]
+              : availableCompetencies[0];
+
+          onAssignmentChange(employee, day.date, nextCompetency.id);
+        }
 
         return (
           <div
@@ -419,27 +467,32 @@ function EmployeeRow({
               day.isWeekend ? "shift-cell--weekend" : ""
             }`}
           >
-            <span className="shift-label">{shiftKind === "OFF" ? "Off" : shiftKind}</span>
+            <span className="shift-label">{shiftKind === "OFF" ? "O" : shiftKind.slice(0, 1)}</span>
 
             {shiftKind === "OFF" ? (
-              <p className="off-copy">Rest window</p>
+              <p className="off-copy">Off</p>
             ) : (
-              <label className="assignment-field">
+              <button
+                type="button"
+                className="assignment-chip"
+                title={`${employee.name} ${day.date}. Click to cycle competency, shift-click to clear.`}
+                onClick={(event) => handleCycle(event.shiftKey)}
+                disabled={availableCompetencies.length === 0}
+              >
                 <span className="sr-only">
                   Assign competency for {employee.name} on {day.date}
                 </span>
-                <select
-                  value={selectedCompetencyId ?? ""}
-                  onChange={(event) => onAssignmentChange(employee, day.date, event.target.value)}
-                >
-                  <option value="">Unassigned</option>
-                  {availableCompetencies.map((competency) => (
-                    <option key={competency.id} value={competency.id}>
-                      {competency.code}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <span className="assignment-chip__value">
+                  {selectedCompetencyId
+                    ? getCompactCode(competencyMap[selectedCompetencyId]?.code ?? "Set")
+                    : "Set"}
+                </span>
+                <span className="assignment-chip__hint">
+                  {selectedCompetencyId
+                    ? competencyMap[selectedCompetencyId]?.label ?? "Assigned"
+                    : "Unassigned"}
+                </span>
+              </button>
             )}
           </div>
         );

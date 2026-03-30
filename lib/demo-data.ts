@@ -28,8 +28,6 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       id: "team-orbit",
       unitId: "unit-casting",
       name: "Orbit Crew",
-      description: "Primary melt team anchored to the 601/602 rotation.",
-      accentColor: "#f97316",
       employees: [
         {
           id: "emp-ava",
@@ -73,8 +71,6 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       id: "team-anchor",
       unitId: "unit-casting",
       name: "Anchor Crew",
-      description: "Coverage team balancing day and night runs across the hall.",
-      accentColor: "#0f766e",
       employees: [
         {
           id: "emp-siena",
@@ -118,8 +114,6 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       id: "team-vector",
       unitId: "unit-dispatch",
       name: "Vector Crew",
-      description: "Outbound team for dock release, dispatch staging, and manifests.",
-      accentColor: "#2563eb",
       employees: [
         {
           id: "emp-cam",

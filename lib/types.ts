@@ -30,8 +30,6 @@ export interface Team {
   id: string;
   unitId: string;
   name: string;
-  description: string;
-  accentColor: string;
   employees: Employee[];
 }
 
@@ -53,4 +51,18 @@ export interface SchedulerSnapshot {
 
 export interface SaveAssignmentsInput {
   updates: StoredAssignment[];
+}
+
+export interface PersonnelUpdate {
+  employeeId: string;
+  name: string;
+  role: string;
+  teamId: string;
+  scheduleCode: ScheduleCode;
+  rotationAnchor: number;
+  competencyIds: string[];
+}
+
+export interface SavePersonnelInput {
+  updates: PersonnelUpdate[];
 }

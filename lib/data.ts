@@ -8,8 +8,6 @@ type TeamRow = {
   id: string;
   unit_id: string;
   name: string;
-  description: string | null;
-  accent_color: string | null;
 };
 
 type EmployeeRow = {
@@ -70,7 +68,7 @@ export async function getSchedulerSnapshot(month: string) {
     await Promise.all([
       supabase.from("production_units").select("id, name, description").order("name"),
       supabase.from("competencies").select("id, unit_id, code, label, color_token").order("code"),
-      supabase.from("teams").select("id, unit_id, name, description, accent_color").order("name"),
+      supabase.from("teams").select("id, unit_id, name").order("name"),
       supabase
         .from("employees")
         .select("id, team_id, full_name, role_title, schedule_code, rotation_anchor")
@@ -140,8 +138,6 @@ export async function getSchedulerSnapshot(month: string) {
     id: row.id,
     unitId: row.unit_id,
     name: row.name,
-    description: row.description ?? "",
-    accentColor: row.accent_color ?? "#f97316",
     employees: employeesByTeam[row.id] ?? [],
   }));
 

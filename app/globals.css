@@ -288,6 +288,16 @@ select {
   color: var(--muted);
 }
 
+.workspace-toolbar--personnel {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.workspace-copy--full {
+  border-left: 0;
+  padding-left: 0;
+}
+
 .legend-row {
   display: flex;
   gap: 0.65rem;
@@ -303,6 +313,7 @@ select {
   border-radius: 999px;
   font-size: 0.8rem;
   font-weight: 600;
+  border: 0;
 }
 
 .legend-pill--amber {
@@ -384,10 +395,23 @@ select {
   gap: 0.45rem;
 }
 
+.table-pills--editable .legend-pill {
+  cursor: pointer;
+}
+
+.legend-pill--selected {
+  box-shadow: inset 0 0 0 2px rgba(23, 20, 17, 0.14);
+}
+
+.legend-pill--muted {
+  opacity: 0.42;
+}
+
 .schedule-grid {
   display: grid;
   align-items: stretch;
-  min-width: max-content;
+  width: 100%;
+  min-width: 0;
 }
 
 .employee-header,
@@ -395,7 +419,6 @@ select {
 .employee-cell,
 .shift-cell,
 .empty-state {
-  min-height: 8rem;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: rgba(255, 252, 247, 0.72);
@@ -412,7 +435,7 @@ select {
 .employee-header {
   display: grid;
   gap: 0.35rem;
-  padding: 1rem 1rem 1rem 1.15rem;
+  padding: 0.75rem 0.9rem 0.75rem 1rem;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--team-accent) 22%, white), rgba(255, 253, 249, 0.96));
 }
@@ -425,26 +448,27 @@ select {
 
 .employee-header strong {
   font-family: var(--font-display), sans-serif;
-  font-size: 1.15rem;
+  font-size: 1rem;
 }
 
 .day-header {
   display: grid;
-  gap: 0.15rem;
-  padding: 0.85rem 0.7rem;
-  text-align: left;
+  justify-items: center;
+  gap: 0.1rem;
+  padding: 0.45rem 0.1rem;
+  text-align: center;
 }
 
 .day-header span {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .day-header strong {
   font-family: var(--font-display), sans-serif;
-  font-size: 1rem;
+  font-size: 0.88rem;
 }
 
 .day-header--weekend {
@@ -460,28 +484,34 @@ select {
 .employee-cell {
   display: grid;
   align-content: center;
-  gap: 0.25rem;
-  padding: 0.95rem 1rem 0.95rem 1.15rem;
+  gap: 0.2rem;
+  min-height: 4.4rem;
+  padding: 0.55rem 0.7rem 0.55rem 0.95rem;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 242, 230, 0.9));
 }
 
 .employee-cell strong {
-  font-size: 1rem;
+  font-size: 0.88rem;
+  line-height: 1.1;
 }
 
 .employee-cell span,
 .employee-cell small {
   color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.1;
 }
 
 .shift-cell {
   display: grid;
-  align-content: start;
-  gap: 0.7rem;
-  padding: 0.85rem 0.65rem;
+  justify-items: center;
+  align-content: center;
+  gap: 0.3rem;
+  min-height: 4.4rem;
+  padding: 0.3rem 0.2rem;
   content-visibility: auto;
-  contain-intrinsic-size: 128px;
+  contain-intrinsic-size: 70px;
 }
 
 .shift-cell--day {
@@ -502,13 +532,13 @@ select {
 
 .shift-label {
   display: inline-flex;
-  width: fit-content;
   align-items: center;
-  min-height: 1.8rem;
-  padding: 0 0.65rem;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
   border-radius: 999px;
   background: rgba(23, 20, 17, 0.08);
-  font-size: 0.74rem;
+  font-size: 0.62rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-weight: 700;
@@ -517,16 +547,62 @@ select {
 .off-copy {
   margin: 0;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.assignment-field {
-  display: block;
+.assignment-chip {
+  display: grid;
+  justify-items: center;
+  gap: 0.08rem;
+  width: 100%;
+  min-height: 1.8rem;
+  padding: 0.2rem;
+  border: 1px solid rgba(23, 20, 17, 0.08);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--ink);
+  cursor: pointer;
 }
 
-.assignment-field select {
-  min-height: 2.4rem;
-  background: rgba(255, 255, 255, 0.86);
+.assignment-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.assignment-chip__value {
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.assignment-chip__hint {
+  max-width: 100%;
+  font-size: 0.5rem;
+  color: var(--muted);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-input,
+.table-select {
+  width: 100%;
+  min-height: 2.35rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+}
+
+.table-input:focus,
+.table-select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--team-accent) 65%, white);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--team-accent) 18%, transparent);
 }
 
 .empty-state {
@@ -587,6 +663,10 @@ select {
     border-top: 1px solid var(--line);
     padding-left: 0;
     padding-right: 0;
+  }
+
+  .workspace-copy--full {
+    border-top: 0;
   }
 }
 

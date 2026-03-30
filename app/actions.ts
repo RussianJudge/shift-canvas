@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import type { SaveAssignmentsInput } from "@/lib/types";
+import type { SaveAssignmentsInput, SavePersonnelInput } from "@/lib/types";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
 export async function saveAssignments(input: SaveAssignmentsInput) {
@@ -72,5 +72,79 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   return {
     ok: true,
     message: "Assignments saved to Supabase.",
+  };
+}
+
+export async function savePersonnel(input: SavePersonnelInput) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message:
+        "Supabase is not configured yet. Personnel edits are available locally in this browser only.",
+    };
+  }
+
+  const employeeRows = input.updates.map((update) => ({
+    id: update.employeeId,
+    full_name: update.name,
+    role_title: update.role,
+    team_id: update.teamId,
+    schedule_code: update.scheduleCode,
+    rotation_anchor: update.rotationAnchor,
+    is_active: true,
+  }));
+
+  const { error: employeeError } = await supabase.from("employees").upsert(employeeRows, {
+    onConflict: "id",
+  });
+
+  if (employeeError) {
+    return {
+      ok: false,
+      message: `Could not save personnel details: ${employeeError.message}`,
+    };
+  }
+
+  const syncResults = await Promise.all(
+    input.updates.map(async (update) => {
+      const deleteResult = await supabase
+        .from("employee_competencies")
+        .delete()
+        .eq("employee_id", update.employeeId);
+
+      if (deleteResult.error) {
+        return deleteResult;
+      }
+
+      if (update.competencyIds.length === 0) {
+        return { error: null };
+      }
+
+      return supabase.from("employee_competencies").insert(
+        update.competencyIds.map((competencyId) => ({
+          employee_id: update.employeeId,
+          competency_id: competencyId,
+        })),
+      );
+    }),
+  );
+
+  const firstSyncError = syncResults.find((result) => result.error)?.error;
+
+  if (firstSyncError) {
+    return {
+      ok: false,
+      message: `Could not save employee competencies: ${firstSyncError.message}`,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/personnel");
+
+  return {
+    ok: true,
+    message: "Personnel changes saved to Supabase.",
   };
 }
