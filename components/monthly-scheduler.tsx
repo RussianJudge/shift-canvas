@@ -19,6 +19,13 @@ import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, Time
 
 const STORAGE_KEY = "shift-canvas-drafts";
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
+type SelectedCell = { employeeId: string; date: string };
+type DragRange = {
+  employeeId: string;
+  startIndex: number;
+  currentIndex: number;
+  selection: AssignmentSelection;
+};
 
 function isMonthKey(value: string) {
   return /^\d{4}-\d{2}$/.test(value);
@@ -170,7 +177,8 @@ export function MonthlyScheduler({
     buildAssignmentIndex(initialSnapshot.assignments),
   );
   const [statusMessage, setStatusMessage] = useState("");
-  const [dragSelection, setDragSelection] = useState<AssignmentSelection | null>(null);
+  const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
+  const [dragRange, setDragRange] = useState<DragRange | null>(null);
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
@@ -265,13 +273,39 @@ export function MonthlyScheduler({
 
   useEffect(() => {
     function handlePointerUp() {
-      setDragSelection(null);
+      if (!dragRange) {
+        return;
+      }
+
+      const startIndex = Math.min(dragRange.startIndex, dragRange.currentIndex);
+      const endIndex = Math.max(dragRange.startIndex, dragRange.currentIndex);
+
+      if (endIndex > startIndex) {
+        const rangeDates = monthDays.slice(startIndex, endIndex + 1).map((day) => day.date);
+
+        startTransition(() => {
+          setDraftAssignments((current) => {
+            const nextAssignments = { ...current };
+
+            for (const date of rangeDates) {
+              nextAssignments[createAssignmentKey(dragRange.employeeId, date)] = {
+                ...dragRange.selection,
+              };
+            }
+
+            return nextAssignments;
+          });
+          setStatusMessage(`Copied assignment across ${rangeDates.length} days`);
+        });
+      }
+
+      setDragRange(null);
     }
 
     window.addEventListener("pointerup", handlePointerUp);
 
     return () => window.removeEventListener("pointerup", handlePointerUp);
-  }, []);
+  }, [dragRange, monthDays]);
 
   useEffect(() => {
     if (currentMonth === snapshot.month || !isMonthKey(currentMonth)) {
@@ -346,16 +380,32 @@ export function MonthlyScheduler({
     });
   }
 
-  function handleDragStart(selection: AssignmentSelection) {
-    setDragSelection(selection);
+  function handleCellPointerDown(
+    employeeId: string,
+    date: string,
+    dayIndex: number,
+    selection: AssignmentSelection,
+  ) {
+    setSelectedCell({ employeeId, date });
+    setDragRange({
+      employeeId,
+      startIndex: dayIndex,
+      currentIndex: dayIndex,
+      selection,
+    });
   }
 
-  function handleDragApply(employee: Employee, date: string) {
-    if (!dragSelection) {
-      return;
-    }
+  function handleDragHover(employeeId: string, dayIndex: number) {
+    setDragRange((current) => {
+      if (!current || current.employeeId !== employeeId || current.currentIndex === dayIndex) {
+        return current;
+      }
 
-    handleAssignmentChange(employee, date, dragSelection);
+      return {
+        ...current,
+        currentIndex: dayIndex,
+      };
+    });
   }
 
   function handleMonthChange(delta: number) {
@@ -380,7 +430,7 @@ export function MonthlyScheduler({
   function handleRevert() {
     startTransition(() => {
       setDraftAssignments(cloneAssignments(baselineAssignments));
-      setDragSelection(null);
+      setDragRange(null);
       setStatusMessage("Changes reverted.");
     });
   }
@@ -471,9 +521,10 @@ export function MonthlyScheduler({
               assignments={draftAssignments}
               competencyMap={competencyMap}
               timeCodes={snapshot.timeCodes}
-              dragSelection={dragSelection}
-              onDragStart={handleDragStart}
-              onDragApply={handleDragApply}
+              selectedCell={selectedCell}
+              dragRange={dragRange}
+              onCellPointerDown={handleCellPointerDown}
+              onDragHover={handleDragHover}
               onAssignmentChange={handleAssignmentChange}
             />
           ))}
@@ -500,9 +551,10 @@ function EmployeeRow({
   assignments,
   competencyMap,
   timeCodes,
-  dragSelection,
-  onDragStart,
-  onDragApply,
+  selectedCell,
+  dragRange,
+  onCellPointerDown,
+  onDragHover,
   onAssignmentChange,
 }: {
   employee: Employee;
@@ -511,9 +563,15 @@ function EmployeeRow({
   assignments: Record<string, AssignmentSelection>;
   competencyMap: Record<string, Competency>;
   timeCodes: TimeCode[];
-  dragSelection: AssignmentSelection | null;
-  onDragStart: (selection: AssignmentSelection) => void;
-  onDragApply: (employee: Employee, date: string) => void;
+  selectedCell: SelectedCell | null;
+  dragRange: DragRange | null;
+  onCellPointerDown: (
+    employeeId: string,
+    date: string,
+    dayIndex: number,
+    selection: AssignmentSelection,
+  ) => void;
+  onDragHover: (employeeId: string, dayIndex: number) => void;
   onAssignmentChange: (
     employee: Employee,
     date: string,
@@ -527,22 +585,37 @@ function EmployeeRow({
         <span>{employee.role}</span>
       </div>
 
-      {monthDays.map((day) => {
+      {monthDays.map((day, dayIndex) => {
         const shiftKind = shiftForDate(schedule, day.date);
         const selection = getCellCompetency(employee, day, shiftKind, assignments);
         const availableCompetencies = employee.competencyIds
           .map((competencyId) => competencyMap[competencyId])
           .filter(isCompetency);
+        const isSelected =
+          selectedCell?.employeeId === employee.id && selectedCell.date === day.date;
+        const isInDragRange =
+          dragRange?.employeeId === employee.id &&
+          dayIndex >= Math.min(dragRange.startIndex, dragRange.currentIndex) &&
+          dayIndex <= Math.max(dragRange.startIndex, dragRange.currentIndex);
 
         return (
           <div
             key={`${employee.id}-${day.date}`}
             className={`shift-cell shift-cell--${getShiftTone(shiftKind)} ${
               day.isWeekend ? "shift-cell--weekend" : ""
+            } ${isSelected ? "shift-cell--selected" : ""} ${
+              isInDragRange ? "shift-cell--range" : ""
             }`}
+            onPointerDown={(event) => {
+              if (event.button !== 0) {
+                return;
+              }
+
+              onCellPointerDown(employee.id, day.date, dayIndex, selection);
+            }}
             onPointerEnter={(event) => {
-              if (dragSelection && event.buttons === 1) {
-                onDragApply(employee, day.date);
+              if (dragRange && event.buttons === 1) {
+                onDragHover(employee.id, dayIndex);
               }
             }}
           >
@@ -551,13 +624,6 @@ function EmployeeRow({
               className="assignment-select"
               value={encodeAssignmentValue(selection)}
               aria-label={`${employee.name} ${day.date} assignment`}
-              onPointerDown={(event) => {
-                if (event.button !== 0) {
-                  return;
-                }
-
-                onDragStart(selection);
-              }}
               onChange={(event) => onAssignmentChange(employee, day.date, decodeAssignmentValue(event.target.value))}
             >
               <option value="">{shiftKind === "OFF" ? "Off" : ""}</option>
