@@ -275,127 +275,112 @@ export function MonthlyScheduler({
   }
 
   return (
-    <main className="shell">
-      <section
-        className="planner-frame"
-        style={{ "--team-accent": activeTeam.accentColor } as CSSProperties}
-      >
-        <div className="planner-topline">
-          <p>Shift Canvas</p>
-          <span>Monthly multi-team scheduling workspace</span>
+    <section
+      className="panel-frame"
+      style={{ "--team-accent": activeTeam.accentColor } as CSSProperties}
+    >
+      <div className="panel-heading panel-heading--schedule">
+        <div className="planner-actions">
+          <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
+            Previous month
+          </button>
+          <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
+            Next month
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={handleSave}
+            disabled={isSaving || dirtyUpdates.length === 0}
+          >
+            {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
+          </button>
         </div>
+      </div>
 
-        <div className="planner-head">
-          <div>
-            <h1>Plan people, competencies, and rotating 601-604 coverage in one monthly view.</h1>
-            <p>
-              Assign every working day to a competency pool, keep off-days visible, and move through
-              each crew without losing the shift rhythm.
-            </p>
+      <div className="summary-row">
+        <SummaryStat label="Month" value={formatMonthLabel(currentMonth)} />
+        <SummaryStat label="Team" value={activeTeam.name} />
+        <SummaryStat label="Production unit" value={activeUnit?.name ?? "Unassigned"} />
+        <SummaryStat label="Day shifts" value={String(coverage.dayShiftCount)} />
+        <SummaryStat label="Night shifts" value={String(coverage.nightShiftCount)} />
+        <SummaryStat label="Pending edits" value={String(dirtyUpdates.length)} />
+      </div>
+
+      <div className="workspace-toolbar">
+        <label className="field">
+          <span>Team</span>
+          <select value={selectedTeamId} onChange={(event) => setSelectedTeamId(event.target.value)}>
+            {snapshot.teams.map((team) => (
+              <option key={team.id} value={team.id}>
+                {team.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Search employee</span>
+          <input
+            type="search"
+            placeholder="Find operator or lead"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+
+        <div className="workspace-copy">
+          <strong>{activeTeam.description}</strong>
+          <p>{isMonthLoading ? "Loading next month..." : statusMessage}</p>
+        </div>
+      </div>
+
+      <div className="legend-row">
+        {teamCompetencies.map((competency) => (
+          <CompetencyPill key={competency.id} competency={competency} />
+        ))}
+      </div>
+
+      <section className="schedule-wrap" aria-label="Monthly schedule grid">
+        <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
+          <div className="employee-header sticky-column">
+            <span>Employee</span>
+            <strong>{activeTeam.name}</strong>
           </div>
 
-          <div className="planner-actions">
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
-              Previous month
-            </button>
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
-              Next month
-            </button>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={handleSave}
-              disabled={isSaving || dirtyUpdates.length === 0}
+          {monthDays.map((day) => (
+            <div
+              key={day.date}
+              className={`day-header ${day.isWeekend ? "day-header--weekend" : ""}`}
             >
-              {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
-            </button>
-          </div>
-        </div>
-
-        <div className="summary-row">
-          <SummaryStat label="Month" value={formatMonthLabel(currentMonth)} />
-          <SummaryStat label="Team" value={activeTeam.name} />
-          <SummaryStat label="Production unit" value={activeUnit?.name ?? "Unassigned"} />
-          <SummaryStat label="Day shifts" value={String(coverage.dayShiftCount)} />
-          <SummaryStat label="Night shifts" value={String(coverage.nightShiftCount)} />
-          <SummaryStat label="Pending edits" value={String(dirtyUpdates.length)} />
-        </div>
-
-        <div className="workspace-toolbar">
-          <label className="field">
-            <span>Team</span>
-            <select value={selectedTeamId} onChange={(event) => setSelectedTeamId(event.target.value)}>
-              {snapshot.teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field">
-            <span>Search employee</span>
-            <input
-              type="search"
-              placeholder="Find operator or lead"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-
-          <div className="workspace-copy">
-            <strong>{activeTeam.description}</strong>
-            <p>{isMonthLoading ? "Loading next month..." : statusMessage}</p>
-          </div>
-        </div>
-
-        <div className="legend-row">
-          {teamCompetencies.map((competency) => (
-            <CompetencyPill key={competency.id} competency={competency} />
-          ))}
-        </div>
-
-        <section className="schedule-wrap" aria-label="Monthly schedule grid">
-          <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
-            <div className="employee-header sticky-column">
-              <span>Employee</span>
-              <strong>{activeTeam.name}</strong>
+              <span>{day.dayName}</span>
+              <strong>{day.dayNumber}</strong>
             </div>
+          ))}
 
-            {monthDays.map((day) => (
-              <div
-                key={day.date}
-                className={`day-header ${day.isWeekend ? "day-header--weekend" : ""}`}
-              >
-                <span>{day.dayName}</span>
-                <strong>{day.dayNumber}</strong>
-              </div>
-            ))}
+          {visibleEmployees.map((employee) => (
+            <EmployeeRow
+              key={employee.id}
+              employee={employee}
+              monthDays={monthDays}
+              assignments={draftAssignments}
+              competencyMap={competencyMap}
+              onAssignmentChange={handleAssignmentChange}
+            />
+          ))}
 
-            {visibleEmployees.map((employee) => (
-              <EmployeeRow
-                key={employee.id}
-                employee={employee}
-                monthDays={monthDays}
-                assignments={draftAssignments}
-                competencyMap={competencyMap}
-                onAssignmentChange={handleAssignmentChange}
-              />
-            ))}
-
-            {visibleEmployees.length === 0 ? (
-              <div
-                className="empty-state sticky-column"
-                style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
-              >
-                <strong>No employees matched that search.</strong>
-                <span>Try a different name, role, or clear the filter.</span>
-              </div>
-            ) : null}
-          </div>
-        </section>
+          {visibleEmployees.length === 0 ? (
+            <div
+              className="empty-state sticky-column"
+              style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
+            >
+              <strong>No employees matched that search.</strong>
+              <span>Try a different name, role, or clear the filter.</span>
+            </div>
+          ) : null}
+        </div>
       </section>
-    </main>
+    </section>
   );
 }
 

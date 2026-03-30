@@ -1,17 +1,17 @@
-import { MonthlyScheduler } from "@/components/monthly-scheduler";
+import { PersonnelPanel } from "@/components/personnel-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { getCurrentMonthKey } from "@/lib/scheduling";
 import { getSchedulerSnapshot } from "@/lib/data";
+import { getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
+export default async function PersonnelPage() {
   const month = getCurrentMonthKey("America/Edmonton");
   const snapshot = await getSchedulerSnapshot(month);
 
   return (
     <WorkspaceShell>
-      <MonthlyScheduler initialSnapshot={snapshot} />
+      <PersonnelPanel snapshot={snapshot} />
     </WorkspaceShell>
   );
 }
