@@ -29,10 +29,26 @@ function CompetenciesIcon() {
   );
 }
 
+function TimeCodesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 7v5l3 2M12 4a8 8 0 1 1 0 16a8 8 0 0 1 0-16Z" />
+    </svg>
+  );
+}
+
 function PersonnelIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 12a3 3 0 1 0 0-6a3 3 0 0 0 0 6ZM6 19a6 6 0 0 1 12 0" />
+    </svg>
+  );
+}
+
+function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 6l6 6-6 6" transform={collapsed ? undefined : "translate(24 24) rotate(180)"} />
     </svg>
   );
 }
@@ -86,14 +102,15 @@ export function WorkspaceShell({
               aria-label={isCollapsed ? "Expand toolbar" : "Collapse toolbar"}
               aria-pressed={isCollapsed}
             >
-              {isCollapsed ? ">" : "<"}
+              <SidebarToggleIcon collapsed={isCollapsed} />
             </button>
           </div>
 
           <nav className="workspace-nav" aria-label="Primary">
             <NavLink href="/" label="Schedule" icon={<ScheduleIcon />} collapsed={isCollapsed} />
-            <NavLink href="/schedules" label="Schedules" icon={<PatternsIcon />} collapsed={isCollapsed} />
+            <NavLink href="/schedules" label="Shifts" icon={<PatternsIcon />} collapsed={isCollapsed} />
             <NavLink href="/competencies" label="Competencies" icon={<CompetenciesIcon />} collapsed={isCollapsed} />
+            <NavLink href="/time-codes" label="Time Codes" icon={<TimeCodesIcon />} collapsed={isCollapsed} />
             <NavLink href="/personnel" label="Personnel" icon={<PersonnelIcon />} collapsed={isCollapsed} />
           </nav>
         </aside>

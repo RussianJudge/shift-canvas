@@ -5,6 +5,7 @@ import type {
   SchedulerSnapshot,
   ShiftKind,
   StoredAssignment,
+  TimeCode,
 } from "@/lib/types";
 
 export interface MonthDay {
@@ -99,10 +100,16 @@ export function getSuggestedCompetencyId(employee: Employee, isoDate: string) {
 }
 
 export function buildAssignmentIndex(assignments: StoredAssignment[]) {
-  return assignments.reduce<Record<string, string | null>>((index, assignment) => {
-    index[createAssignmentKey(assignment.employeeId, assignment.date)] = assignment.competencyId;
-    return index;
-  }, {});
+  return assignments.reduce<Record<string, { competencyId: string | null; timeCodeId: string | null }>>(
+    (index, assignment) => {
+      index[createAssignmentKey(assignment.employeeId, assignment.date)] = {
+        competencyId: assignment.competencyId,
+        timeCodeId: assignment.timeCodeId,
+      };
+      return index;
+    },
+    {},
+  );
 }
 
 export function createAssignmentKey(employeeId: string, date: string) {
@@ -120,43 +127,16 @@ export function getCompetencyMap(competencies: Competency[]) {
   }, {});
 }
 
+export function getTimeCodeMap(timeCodes: TimeCode[]) {
+  return timeCodes.reduce<Record<string, TimeCode>>((map, timeCode) => {
+    map[timeCode.id] = timeCode;
+    return map;
+  }, {});
+}
+
 export function getEmployeeMap(schedules: Schedule[]) {
   return schedules.flatMap((schedule) => schedule.employees).reduce<Record<string, Employee>>((map, employee) => {
     map[employee.id] = employee;
     return map;
   }, {});
-}
-
-export function countShiftCoverage(
-  schedule: Schedule,
-  monthDays: MonthDay[],
-  assignments: Record<string, string | null>,
-) {
-  const dayShiftCount = monthDays.reduce((count, day) => {
-    return (
-      count +
-      schedule.employees.filter(() => shiftForDate(schedule, day.date) === "DAY").length
-    );
-  }, 0);
-
-  const nightShiftCount = monthDays.reduce((count, day) => {
-    return (
-      count +
-      schedule.employees.filter(() => shiftForDate(schedule, day.date) === "NIGHT").length
-    );
-  }, 0);
-
-  const assignedCount = Object.entries(assignments).filter(([key, competencyId]) => {
-    if (!competencyId) {
-      return false;
-    }
-
-    return schedule.employees.some((employee) => key.startsWith(`${employee.id}:`));
-  }).length;
-
-  return {
-    dayShiftCount,
-    nightShiftCount,
-    assignedCount,
-  };
 }

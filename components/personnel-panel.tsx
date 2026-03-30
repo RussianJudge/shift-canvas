@@ -14,6 +14,13 @@ type EditableEmployee = {
   competencyIds: string[];
 };
 
+function cloneEmployees(employees: EditableEmployee[]) {
+  return employees.map((employee) => ({
+    ...employee,
+    competencyIds: [...employee.competencyIds],
+  }));
+}
+
 function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   return {
     employeeId: employee.id,
@@ -59,6 +66,7 @@ export function PersonnelPanel({
   const dirtyUpdates = employees
     .map((employee) => normalizeEmployee(employee))
     .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee));
+  const hasChanges = dirtyUpdates.length > 0 || deletedEmployeeIds.length > 0;
 
   function updateEmployee(employeeId: string, updater: (employee: EditableEmployee) => EditableEmployee) {
     setEmployees((current) =>
@@ -88,10 +96,16 @@ export function PersonnelPanel({
       setStatusMessage(result.message);
 
       if (result.ok) {
-        setBaselineEmployees(employees.map((employee) => ({ ...employee, competencyIds: [...employee.competencyIds] })));
+        setBaselineEmployees(cloneEmployees(employees));
         setDeletedEmployeeIds([]);
       }
     });
+  }
+
+  function handleRevert() {
+    setEmployees(cloneEmployees(baselineEmployees));
+    setDeletedEmployeeIds([]);
+    setStatusMessage("Changes reverted.");
   }
 
   function handleAddEmployee() {
@@ -102,7 +116,7 @@ export function PersonnelPanel({
     const defaultUnit = snapshot.productionUnits[0];
 
     if (!defaultSchedule || !defaultUnit) {
-      setStatusMessage("Add a schedule and a production unit first.");
+      setStatusMessage("Complete setup first.");
       return;
     }
 
@@ -140,11 +154,14 @@ export function PersonnelPanel({
           <button type="button" className="ghost-button" onClick={handleAddEmployee}>
             Add employee
           </button>
+          <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+            Revert
+          </button>
           <button
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || (dirtyUpdates.length === 0 && deletedEmployeeIds.length === 0)}
+            disabled={isSaving || !hasChanges}
           >
             {isSaving ? "Saving..." : "Save"}
           </button>
@@ -158,8 +175,7 @@ export function PersonnelPanel({
             <tr>
               <th>Name</th>
               <th>Role</th>
-              <th>Shift</th>
-              <th>Production unit</th>
+              <th className="column-shift">Shift</th>
               <th>Competencies</th>
               <th />
             </tr>
@@ -191,7 +207,7 @@ export function PersonnelPanel({
                     }
                   />
                 </td>
-                <td>
+                <td className="column-shift">
                   <select
                     className="table-select"
                     value={employee.scheduleId}
@@ -205,24 +221,6 @@ export function PersonnelPanel({
                     {snapshot.schedules.map((schedule) => (
                       <option key={schedule.id} value={schedule.id}>
                         {schedule.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    className="table-select"
-                    value={employee.unitId}
-                    onChange={(event) =>
-                      updateEmployee(employee.id, (current) => ({
-                        ...current,
-                        unitId: event.target.value,
-                      }))
-                    }
-                  >
-                    {snapshot.productionUnits.map((unit) => (
-                      <option key={unit.id} value={unit.id}>
-                        {unit.name}
                       </option>
                     ))}
                   </select>
@@ -261,7 +259,7 @@ export function PersonnelPanel({
             ))}
             {employees.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={5}>
                   <div className="empty-state">
                     <strong>No employees yet.</strong>
                     <span>Add an employee to start staffing the shifts.</span>

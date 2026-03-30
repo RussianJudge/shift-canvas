@@ -17,6 +17,13 @@ export interface Competency {
   colorToken: string;
 }
 
+export interface TimeCode {
+  id: string;
+  code: string;
+  label: string;
+  colorToken: string;
+}
+
 export interface Employee {
   id: string;
   name: string;
@@ -40,6 +47,7 @@ export interface StoredAssignment {
   employeeId: string;
   date: string;
   competencyId: string | null;
+  timeCodeId: string | null;
   notes?: string | null;
   shiftKind: ShiftKind;
 }
@@ -49,6 +57,7 @@ export interface SchedulerSnapshot {
   schedules: Schedule[];
   productionUnits: ProductionUnit[];
   competencies: Competency[];
+  timeCodes: TimeCode[];
   assignments: StoredAssignment[];
 }
 
@@ -94,4 +103,16 @@ export interface CompetencyUpdate {
 export interface SaveCompetenciesInput {
   updates: CompetencyUpdate[];
   deletedCompetencyIds: string[];
+}
+
+export interface TimeCodeUpdate {
+  timeCodeId: string;
+  code: string;
+  label: string;
+  colorToken: string;
+}
+
+export interface SaveTimeCodesInput {
+  updates: TimeCodeUpdate[];
+  deletedTimeCodeIds: string[];
 }

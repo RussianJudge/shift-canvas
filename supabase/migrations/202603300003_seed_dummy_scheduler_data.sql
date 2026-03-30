@@ -40,6 +40,21 @@ set
   label = excluded.label,
   color_token = excluded.color_token;
 
+insert into time_codes (id, code, label, color_token)
+values
+  ('time-ill', 'ILL', 'Illness', 'rose'),
+  ('time-absa', 'ABSA', 'Absent', 'orange'),
+  ('time-bot', 'BOT', 'Booked off', 'amber'),
+  ('time-days', 'DAYS', 'Day assignment', 'blue'),
+  ('time-nights', 'NIGHTS', 'Night assignment', 'violet'),
+  ('time-sim', 'SIM', 'Simulation', 'teal'),
+  ('time-v', 'V', 'Vacation', 'lime')
+on conflict (id) do update
+set
+  code = excluded.code,
+  label = excluded.label,
+  color_token = excluded.color_token;
+
 insert into employees (id, schedule_id, unit_id, full_name, role_title)
 values
   ('emp-ava', 'schedule-601', 'unit-casting', 'Ava Patel', 'Senior Operator'),

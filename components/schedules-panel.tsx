@@ -15,6 +15,10 @@ type EditableSchedule = {
   employeeCount: number;
 };
 
+function cloneSchedules(schedules: EditableSchedule[]) {
+  return schedules.map((schedule) => ({ ...schedule }));
+}
+
 function normalizeSchedule(schedule: EditableSchedule): ScheduleUpdate {
   return {
     scheduleId: schedule.id,
@@ -61,6 +65,7 @@ export function SchedulesPanel({
     .filter(
       (schedule) => JSON.stringify(baselineMap.get(schedule.scheduleId)) !== JSON.stringify(schedule),
     );
+  const hasChanges = dirtyUpdates.length > 0 || deletedScheduleIds.length > 0;
 
   function updateSchedule(
     scheduleId: string,
@@ -120,16 +125,22 @@ export function SchedulesPanel({
       setStatusMessage(result.message);
 
       if (result.ok) {
-        setBaselineSchedules(schedules.map((schedule) => ({ ...schedule })));
+        setBaselineSchedules(cloneSchedules(schedules));
         setDeletedScheduleIds([]);
       }
     });
   }
 
+  function handleRevert() {
+    setSchedules(cloneSchedules(baselineSchedules));
+    setDeletedScheduleIds([]);
+    setStatusMessage("Changes reverted.");
+  }
+
   return (
     <section className="panel-frame">
       <div className="panel-heading panel-heading--simple">
-        <h1 className="panel-title">Schedules</h1>
+        <h1 className="panel-title">Shifts</h1>
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--actions">
@@ -137,11 +148,14 @@ export function SchedulesPanel({
           <button type="button" className="ghost-button" onClick={handleAddSchedule}>
             Add schedule
           </button>
+          <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+            Revert
+          </button>
           <button
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || (dirtyUpdates.length === 0 && deletedScheduleIds.length === 0)}
+            disabled={isSaving || !hasChanges}
           >
             {isSaving ? "Saving..." : "Save"}
           </button>

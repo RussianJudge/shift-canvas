@@ -7,6 +7,7 @@ import type {
   SaveCompetenciesInput,
   SavePersonnelInput,
   SaveSchedulesInput,
+  SaveTimeCodesInput,
 } from "@/lib/types";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
@@ -22,17 +23,18 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   }
 
   const rowsToUpsert = input.updates
-    .filter((update) => update.competencyId)
+    .filter((update) => update.competencyId || update.timeCodeId)
     .map((update) => ({
       employee_id: update.employeeId,
       assignment_date: update.date,
       competency_id: update.competencyId,
+      time_code_id: update.timeCodeId,
       notes: update.notes ?? null,
       shift_kind: update.shiftKind,
     }));
 
   const rowsToDelete = input.updates
-    .filter((update) => !update.competencyId)
+    .filter((update) => !update.competencyId && !update.timeCodeId)
     .map((update) => ({
       employee_id: update.employeeId,
       assignment_date: update.date,
@@ -285,9 +287,67 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
   revalidatePath("/");
   revalidatePath("/personnel");
   revalidatePath("/competencies");
+  revalidatePath("/time-codes");
 
   return {
     ok: true,
     message: "Competency changes saved to Supabase.",
+  };
+}
+
+export async function saveTimeCodes(input: SaveTimeCodesInput) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message:
+        "Supabase is not configured yet. Time code edits are available locally in this browser only.",
+    };
+  }
+
+  const rows = input.updates.map((update) => ({
+    id: update.timeCodeId,
+    code: update.code,
+    label: update.label,
+    color_token: update.colorToken,
+  }));
+
+  const error =
+    rows.length > 0
+      ? (
+          await supabase.from("time_codes").upsert(rows, {
+            onConflict: "id",
+          })
+        ).error
+      : null;
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not save time codes: ${error.message}`,
+    };
+  }
+
+  if (input.deletedTimeCodeIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("time_codes")
+      .delete()
+      .in("id", input.deletedTimeCodeIds);
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not remove time codes: ${deleteError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/time-codes");
+
+  return {
+    ok: true,
+    message: "Time code changes saved to Supabase.",
   };
 }

@@ -31,6 +31,15 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
     { id: "comp-pack-6", code: "Pack 6", label: "Palletizing", colorToken: "blue" },
     { id: "comp-pack-9", code: "Pack 9", label: "Final QA hold", colorToken: "rose" },
   ],
+  timeCodes: [
+    { id: "time-ill", code: "ILL", label: "Illness", colorToken: "rose" },
+    { id: "time-absa", code: "ABSA", label: "Absent", colorToken: "orange" },
+    { id: "time-bot", code: "BOT", label: "Booked off", colorToken: "amber" },
+    { id: "time-days", code: "DAYS", label: "Day assignment", colorToken: "blue" },
+    { id: "time-nights", code: "NIGHTS", label: "Night assignment", colorToken: "violet" },
+    { id: "time-sim", code: "SIM", label: "Simulation", colorToken: "teal" },
+    { id: "time-v", code: "V", label: "Vacation", colorToken: "lime" },
+  ],
   schedules: [
     {
       id: "schedule-601",

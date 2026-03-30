@@ -108,6 +108,28 @@ select {
   background: rgba(255, 255, 255, 0.72);
   color: var(--ink);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.sidebar-toggle:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.sidebar-toggle svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .workspace-nav {
@@ -239,7 +261,8 @@ select {
   box-shadow: 0 12px 24px rgba(23, 20, 17, 0.16);
 }
 
-.primary-button:disabled {
+.primary-button:disabled,
+.ghost-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
   transform: none;
@@ -459,6 +482,13 @@ select {
   letter-spacing: 0.08em;
 }
 
+.personnel-table th.column-shift,
+.personnel-table td.column-shift {
+  min-width: 8.5rem;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
 .table-pills {
   display: flex;
   flex-wrap: wrap;
@@ -614,47 +644,23 @@ select {
   font-weight: 700;
 }
 
-.off-copy {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.54rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.assignment-chip {
-  display: grid;
-  justify-items: center;
-  gap: 0.08rem;
+.assignment-select {
   width: 100%;
-  min-height: 1.42rem;
-  padding: 0.14rem;
+  min-height: 1.5rem;
+  padding: 0.08rem 0.18rem;
   border: 1px solid rgba(23, 20, 17, 0.08);
   border-radius: 0.6rem;
   background: rgba(255, 255, 255, 0.78);
   color: var(--ink);
-  cursor: pointer;
-}
-
-.assignment-chip:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.assignment-chip__value {
   font-size: 0.56rem;
   font-weight: 700;
   line-height: 1;
 }
 
-.assignment-chip__hint {
-  max-width: 100%;
-  font-size: 0.44rem;
-  color: var(--muted);
-  line-height: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.assignment-select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--team-accent) 65%, white);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--team-accent) 16%, transparent);
 }
 
 .table-input,

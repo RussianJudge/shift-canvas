@@ -2,7 +2,15 @@ import "server-only";
 
 import { demoSchedulerSnapshot } from "@/lib/demo-data";
 import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
-import type { Competency, Employee, ProductionUnit, Schedule, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
+import type {
+  Competency,
+  Employee,
+  ProductionUnit,
+  Schedule,
+  SchedulerSnapshot,
+  StoredAssignment,
+  TimeCode,
+} from "@/lib/types";
 
 type ScheduleRow = {
   id: string;
@@ -28,6 +36,13 @@ type CompetencyRow = {
   color_token: string | null;
 };
 
+type TimeCodeRow = {
+  id: string;
+  code: string;
+  label: string;
+  color_token: string | null;
+};
+
 type EmployeeCompetencyRow = {
   employee_id: string;
   competency_id: string;
@@ -37,6 +52,7 @@ type AssignmentRow = {
   employee_id: string;
   assignment_date: string;
   competency_id: string | null;
+  time_code_id: string | null;
   notes: string | null;
   shift_kind: StoredAssignment["shiftKind"];
 };
@@ -65,10 +81,19 @@ export async function getSchedulerSnapshot(month: string) {
   const monthStart = `${month}-01`;
   const monthEnd = new Date(Date.UTC(year, monthIndex, 0)).toISOString().slice(0, 10);
 
-  const [unitsResult, competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult, assignmentsResult] =
+  const [
+    unitsResult,
+    competenciesResult,
+    timeCodesResult,
+    schedulesResult,
+    employeesResult,
+    employeeCompetenciesResult,
+    assignmentsResult,
+  ] =
     await Promise.all([
       supabase.from("production_units").select("id, name, description").order("name"),
       supabase.from("competencies").select("id, code, label, color_token").order("code"),
+      supabase.from("time_codes").select("id, code, label, color_token").order("code"),
       supabase
         .from("schedules")
         .select("id, name, start_date, day_shift_days, night_shift_days, off_days")
@@ -81,7 +106,7 @@ export async function getSchedulerSnapshot(month: string) {
       supabase.from("employee_competencies").select("employee_id, competency_id"),
       supabase
         .from("schedule_assignments")
-        .select("employee_id, assignment_date, competency_id, notes, shift_kind")
+        .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
         .gte("assignment_date", monthStart)
         .lte("assignment_date", monthEnd),
     ]);
@@ -89,6 +114,7 @@ export async function getSchedulerSnapshot(month: string) {
   const results = [
     unitsResult,
     competenciesResult,
+    timeCodesResult,
     schedulesResult,
     employeesResult,
     employeeCompetenciesResult,
@@ -106,6 +132,13 @@ export async function getSchedulerSnapshot(month: string) {
   }));
 
   const competencies: Competency[] = (competenciesResult.data as CompetencyRow[]).map((row) => ({
+    id: row.id,
+    code: row.code,
+    label: row.label,
+    colorToken: row.color_token ?? "slate",
+  }));
+
+  const timeCodes: TimeCode[] = (timeCodesResult.data as TimeCodeRow[]).map((row) => ({
     id: row.id,
     code: row.code,
     label: row.label,
@@ -150,6 +183,7 @@ export async function getSchedulerSnapshot(month: string) {
     employeeId: row.employee_id,
     date: row.assignment_date,
     competencyId: row.competency_id,
+    timeCodeId: row.time_code_id,
     notes: row.notes,
     shiftKind: row.shift_kind,
   }));
@@ -159,6 +193,7 @@ export async function getSchedulerSnapshot(month: string) {
     schedules,
     productionUnits,
     competencies,
+    timeCodes,
     assignments,
   };
 }

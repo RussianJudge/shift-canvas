@@ -2,92 +2,91 @@
 
 import { useMemo, useState, useTransition } from "react";
 
-import { saveCompetencies } from "@/app/actions";
-import type { CompetencyUpdate, SaveCompetenciesInput, SchedulerSnapshot } from "@/lib/types";
+import { saveTimeCodes } from "@/app/actions";
+import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate } from "@/lib/types";
 
 const COLOR_TOKENS = ["amber", "teal", "violet", "rose", "blue", "lime", "orange", "slate"];
 
-type EditableCompetency = {
+type EditableTimeCode = {
   id: string;
   code: string;
   label: string;
   colorToken: string;
 };
 
-function cloneCompetencies(competencies: EditableCompetency[]) {
-  return competencies.map((competency) => ({ ...competency }));
+function cloneTimeCodes(timeCodes: EditableTimeCode[]) {
+  return timeCodes.map((timeCode) => ({ ...timeCode }));
 }
 
-function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
+function normalizeTimeCode(timeCode: EditableTimeCode): TimeCodeUpdate {
   return {
-    competencyId: competency.id,
-    code: competency.code.trim(),
-    label: competency.label.trim(),
-    colorToken: competency.colorToken,
+    timeCodeId: timeCode.id,
+    code: timeCode.code.trim(),
+    label: timeCode.label.trim(),
+    colorToken: timeCode.colorToken,
   };
 }
 
-export function CompetenciesPanel({
+export function TimeCodesPanel({
   snapshot,
 }: {
   snapshot: SchedulerSnapshot;
 }) {
-  const initialCompetencies = useMemo<EditableCompetency[]>(
+  const initialTimeCodes = useMemo<EditableTimeCode[]>(
     () =>
-      snapshot.competencies.map((competency) => ({
-        id: competency.id,
-        code: competency.code,
-        label: competency.label,
-        colorToken: competency.colorToken,
+      snapshot.timeCodes.map((timeCode) => ({
+        id: timeCode.id,
+        code: timeCode.code,
+        label: timeCode.label,
+        colorToken: timeCode.colorToken,
       })),
-    [snapshot.competencies],
+    [snapshot.timeCodes],
   );
 
-  const [competencies, setCompetencies] = useState(initialCompetencies);
-  const [baselineCompetencies, setBaselineCompetencies] = useState(initialCompetencies);
-  const [deletedCompetencyIds, setDeletedCompetencyIds] = useState<string[]>([]);
+  const [timeCodes, setTimeCodes] = useState(initialTimeCodes);
+  const [baselineTimeCodes, setBaselineTimeCodes] = useState(initialTimeCodes);
+  const [deletedTimeCodeIds, setDeletedTimeCodeIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
 
   const baselineMap = useMemo(
-    () => new Map(baselineCompetencies.map((competency) => [competency.id, normalizeCompetency(competency)])),
-    [baselineCompetencies],
+    () => new Map(baselineTimeCodes.map((timeCode) => [timeCode.id, normalizeTimeCode(timeCode)])),
+    [baselineTimeCodes],
   );
 
-  const dirtyUpdates = competencies
-    .map((competency) => normalizeCompetency(competency))
+  const dirtyUpdates = timeCodes
+    .map((timeCode) => normalizeTimeCode(timeCode))
     .filter(
-      (competency) =>
-        JSON.stringify(baselineMap.get(competency.competencyId)) !== JSON.stringify(competency),
+      (timeCode) => JSON.stringify(baselineMap.get(timeCode.timeCodeId)) !== JSON.stringify(timeCode),
     );
-  const hasChanges = dirtyUpdates.length > 0 || deletedCompetencyIds.length > 0;
+  const hasChanges = dirtyUpdates.length > 0 || deletedTimeCodeIds.length > 0;
 
-  function updateCompetency(
-    competencyId: string,
-    updater: (competency: EditableCompetency) => EditableCompetency,
+  function updateTimeCode(
+    timeCodeId: string,
+    updater: (timeCode: EditableTimeCode) => EditableTimeCode,
   ) {
-    setCompetencies((current) =>
-      current.map((competency) => (competency.id === competencyId ? updater(competency) : competency)),
+    setTimeCodes((current) =>
+      current.map((timeCode) => (timeCode.id === timeCodeId ? updater(timeCode) : timeCode)),
     );
   }
 
-  function handleAddCompetency() {
-    const nextCompetency: EditableCompetency = {
-      id: `comp-${crypto.randomUUID().slice(0, 8)}`,
-      code: "Post 99",
-      label: "New competency",
+  function handleAddTimeCode() {
+    const nextTimeCode: EditableTimeCode = {
+      id: `time-${crypto.randomUUID().slice(0, 8)}`,
+      code: "NEW",
+      label: "New time code",
       colorToken: "slate",
     };
 
-    setCompetencies((current) => [nextCompetency, ...current]);
+    setTimeCodes((current) => [nextTimeCode, ...current]);
     setStatusMessage("");
   }
 
-  function handleRemoveCompetency(competencyId: string) {
-    setCompetencies((current) => current.filter((competency) => competency.id !== competencyId));
+  function handleRemoveTimeCode(timeCodeId: string) {
+    setTimeCodes((current) => current.filter((timeCode) => timeCode.id !== timeCodeId));
 
-    if (baselineMap.has(competencyId)) {
-      setDeletedCompetencyIds((current) => [...current, competencyId]);
+    if (baselineMap.has(timeCodeId)) {
+      setDeletedTimeCodeIds((current) => [...current, timeCodeId]);
     }
 
     setStatusMessage("");
@@ -95,35 +94,35 @@ export function CompetenciesPanel({
 
   function handleSave() {
     startSaveTransition(async () => {
-      const result = await saveCompetencies({
+      const result = await saveTimeCodes({
         updates: dirtyUpdates,
-        deletedCompetencyIds,
-      } as SaveCompetenciesInput);
+        deletedTimeCodeIds,
+      } as SaveTimeCodesInput);
       setStatusMessage(result.message);
 
       if (result.ok) {
-        setBaselineCompetencies(cloneCompetencies(competencies));
-        setDeletedCompetencyIds([]);
+        setBaselineTimeCodes(cloneTimeCodes(timeCodes));
+        setDeletedTimeCodeIds([]);
       }
     });
   }
 
   function handleRevert() {
-    setCompetencies(cloneCompetencies(baselineCompetencies));
-    setDeletedCompetencyIds([]);
+    setTimeCodes(cloneTimeCodes(baselineTimeCodes));
+    setDeletedTimeCodeIds([]);
     setStatusMessage("Changes reverted.");
   }
 
   return (
     <section className="panel-frame">
       <div className="panel-heading panel-heading--simple">
-        <h1 className="panel-title">Competencies</h1>
+        <h1 className="panel-title">Time Codes</h1>
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--actions">
         <div className="planner-actions">
-          <button type="button" className="ghost-button" onClick={handleAddCompetency}>
-            Add competency
+          <button type="button" className="ghost-button" onClick={handleAddTimeCode}>
+            Add time code
           </button>
           <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
             Revert
@@ -152,16 +151,16 @@ export function CompetenciesPanel({
             </tr>
           </thead>
           <tbody>
-            {competencies.map((competency) => (
-              <tr key={competency.id}>
+            {timeCodes.map((timeCode) => (
+              <tr key={timeCode.id}>
                 <td>
                   <input
                     className="table-input"
-                    value={competency.code}
+                    value={timeCode.code}
                     onChange={(event) =>
-                      updateCompetency(competency.id, (current) => ({
+                      updateTimeCode(timeCode.id, (current) => ({
                         ...current,
-                        code: event.target.value,
+                        code: event.target.value.toUpperCase(),
                       }))
                     }
                   />
@@ -169,9 +168,9 @@ export function CompetenciesPanel({
                 <td>
                   <input
                     className="table-input"
-                    value={competency.label}
+                    value={timeCode.label}
                     onChange={(event) =>
-                      updateCompetency(competency.id, (current) => ({
+                      updateTimeCode(timeCode.id, (current) => ({
                         ...current,
                         label: event.target.value,
                       }))
@@ -181,9 +180,9 @@ export function CompetenciesPanel({
                 <td>
                   <select
                     className="table-select"
-                    value={competency.colorToken}
+                    value={timeCode.colorToken}
                     onChange={(event) =>
-                      updateCompetency(competency.id, (current) => ({
+                      updateTimeCode(timeCode.id, (current) => ({
                         ...current,
                         colorToken: event.target.value,
                       }))
@@ -197,27 +196,27 @@ export function CompetenciesPanel({
                   </select>
                 </td>
                 <td>
-                  <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
-                    {competency.code}
+                  <span className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()}`}>
+                    {timeCode.code}
                   </span>
                 </td>
                 <td className="table-actions-cell">
                   <button
                     type="button"
                     className="table-action table-action--danger"
-                    onClick={() => handleRemoveCompetency(competency.id)}
+                    onClick={() => handleRemoveTimeCode(timeCode.id)}
                   >
                     Remove
                   </button>
                 </td>
               </tr>
             ))}
-            {competencies.length === 0 ? (
+            {timeCodes.length === 0 ? (
               <tr>
                 <td colSpan={5}>
                   <div className="empty-state">
-                    <strong>No competencies yet.</strong>
-                    <span>Add a competency to populate the schedule options.</span>
+                    <strong>No time codes yet.</strong>
+                    <span>Add a code to use it in the schedule grid.</span>
                   </div>
                 </td>
               </tr>

@@ -15,9 +15,10 @@ import {
   getSuggestedCompetencyId,
   shiftForDate,
 } from "@/lib/scheduling";
-import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind } from "@/lib/types";
+import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
 
 const STORAGE_KEY = "shift-canvas-drafts";
+type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
 
 function isMonthKey(value: string) {
   return /^\d{4}-\d{2}$/.test(value);
@@ -44,13 +45,13 @@ function getShiftTone(shift: ShiftKind) {
   return "off";
 }
 
-function stripMonthEntries(assignments: Record<string, string | null>, monthKey: string) {
+function stripMonthEntries(assignments: Record<string, AssignmentSelection>, monthKey: string) {
   return Object.fromEntries(
     Object.entries(assignments).filter((entry) => !entry[0].includes(`:${monthKey}-`)),
   );
 }
 
-function pickMonthEntries(assignments: Record<string, string | null>, monthKey: string) {
+function pickMonthEntries(assignments: Record<string, AssignmentSelection>, monthKey: string) {
   return Object.fromEntries(
     Object.entries(assignments).filter((entry) => entry[0].includes(`:${monthKey}-`)),
   );
@@ -59,7 +60,8 @@ function pickMonthEntries(assignments: Record<string, string | null>, monthKey: 
 function getCellCompetency(
   employee: Employee,
   day: { date: string },
-  assignments: Record<string, string | null>,
+  shiftKind: ShiftKind,
+  assignments: Record<string, AssignmentSelection>,
 ) {
   const key = createAssignmentKey(employee.id, day.date);
 
@@ -67,7 +69,17 @@ function getCellCompetency(
     return assignments[key];
   }
 
-  return getSuggestedCompetencyId(employee, day.date);
+  if (shiftKind === "OFF") {
+    return {
+      competencyId: null,
+      timeCodeId: null,
+    };
+  }
+
+  return {
+    competencyId: getSuggestedCompetencyId(employee, day.date),
+    timeCodeId: null,
+  };
 }
 
 function isCompetency(competency: Competency | undefined): competency is Competency {
@@ -101,6 +113,45 @@ function getScheduleAccent(scheduleId: string) {
   return accents[hash];
 }
 
+function encodeAssignmentValue(selection: AssignmentSelection) {
+  if (selection.timeCodeId) {
+    return `time:${selection.timeCodeId}`;
+  }
+
+  if (selection.competencyId) {
+    return `competency:${selection.competencyId}`;
+  }
+
+  return "";
+}
+
+function decodeAssignmentValue(value: string) {
+  if (value.startsWith("time:")) {
+    return {
+      competencyId: null,
+      timeCodeId: value.replace("time:", ""),
+    };
+  }
+
+  if (value.startsWith("competency:")) {
+    return {
+      competencyId: value.replace("competency:", ""),
+      timeCodeId: null,
+    };
+  }
+
+  return {
+    competencyId: null,
+    timeCodeId: null,
+  };
+}
+
+function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
+  return Object.fromEntries(
+    Object.entries(assignments).map(([key, selection]) => [key, { ...selection }]),
+  );
+}
+
 export function MonthlyScheduler({
   initialSnapshot,
 }: {
@@ -119,6 +170,7 @@ export function MonthlyScheduler({
     buildAssignmentIndex(initialSnapshot.assignments),
   );
   const [statusMessage, setStatusMessage] = useState("");
+  const [dragSelection, setDragSelection] = useState<AssignmentSelection | null>(null);
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
@@ -128,10 +180,6 @@ export function MonthlyScheduler({
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const monthDays = useMemo(() => getMonthDays(currentMonth), [currentMonth]);
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
-  const unitById = useMemo(
-    () => new Map(snapshot.productionUnits.map((unit) => [unit.id, unit])),
-    [snapshot.productionUnits],
-  );
 
   if (!activeSchedule) {
     return (
@@ -155,10 +203,13 @@ export function MonthlyScheduler({
     return `${employee.name} ${employee.role}`.toLowerCase().includes(deferredSearch);
   });
 
-  const dirtyUpdates = Object.entries(draftAssignments).flatMap(([key, competencyId]) => {
-    const baseline = baselineAssignments[key] ?? null;
+  const dirtyUpdates = Object.entries(draftAssignments).flatMap(([key, selection]) => {
+    const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null };
 
-    if (baseline === competencyId) {
+    if (
+      baseline.competencyId === selection.competencyId &&
+      baseline.timeCodeId === selection.timeCodeId
+    ) {
       return [];
     }
 
@@ -174,12 +225,14 @@ export function MonthlyScheduler({
       {
         employeeId,
         date,
-        competencyId,
+        competencyId: selection.competencyId,
+        timeCodeId: selection.timeCodeId,
         notes: null,
         shiftKind: shiftForDate(employeeSchedule, date),
       },
     ];
   });
+  const hasChanges = dirtyUpdates.length > 0;
 
   const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.45rem, 1fr))`;
 
@@ -188,7 +241,7 @@ export function MonthlyScheduler({
 
     if (savedDrafts) {
       try {
-        const parsed = JSON.parse(savedDrafts) as Record<string, string | null>;
+        const parsed = JSON.parse(savedDrafts) as Record<string, AssignmentSelection>;
         setDraftAssignments((current) => ({ ...current, ...parsed }));
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
@@ -209,6 +262,16 @@ export function MonthlyScheduler({
 
     return () => window.clearTimeout(timer);
   }, [draftAssignments, isDraftHydrated]);
+
+  useEffect(() => {
+    function handlePointerUp() {
+      setDragSelection(null);
+    }
+
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => window.removeEventListener("pointerup", handlePointerUp);
+  }, []);
 
   useEffect(() => {
     if (currentMonth === snapshot.month || !isMonthKey(currentMonth)) {
@@ -267,17 +330,32 @@ export function MonthlyScheduler({
     };
   }, [currentMonth, snapshot.month]);
 
-  function handleAssignmentChange(employee: Employee, date: string, competencyId: string) {
+  function handleAssignmentChange(
+    employee: Employee,
+    date: string,
+    selection: AssignmentSelection,
+  ) {
     const key = createAssignmentKey(employee.id, date);
-    const nextValue = competencyId || null;
 
     startTransition(() => {
       setDraftAssignments((current) => ({
         ...current,
-        [key]: nextValue,
+        [key]: selection,
       }));
       setStatusMessage("Draft updated locally");
     });
+  }
+
+  function handleDragStart(selection: AssignmentSelection) {
+    setDragSelection(selection);
+  }
+
+  function handleDragApply(employee: Employee, date: string) {
+    if (!dragSelection) {
+      return;
+    }
+
+    handleAssignmentChange(employee, date, dragSelection);
   }
 
   function handleMonthChange(delta: number) {
@@ -294,8 +372,16 @@ export function MonthlyScheduler({
       setStatusMessage(result.message);
 
       if (result.ok) {
-        setBaselineAssignments({ ...draftAssignments });
+        setBaselineAssignments(cloneAssignments(draftAssignments));
       }
+    });
+  }
+
+  function handleRevert() {
+    startTransition(() => {
+      setDraftAssignments(cloneAssignments(baselineAssignments));
+      setDragSelection(null);
+      setStatusMessage("Changes reverted.");
     });
   }
 
@@ -314,11 +400,14 @@ export function MonthlyScheduler({
           <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
             Next month
           </button>
+          <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+            Revert
+          </button>
           <button
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || dirtyUpdates.length === 0}
+            disabled={isSaving || !hasChanges}
           >
             {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
           </button>
@@ -327,7 +416,7 @@ export function MonthlyScheduler({
 
       <div className="workspace-toolbar">
         <label className="field">
-          <span>Pattern</span>
+          <span>Shift</span>
           <select
             value={selectedScheduleId}
             onChange={(event) => setSelectedScheduleId(event.target.value)}
@@ -344,7 +433,7 @@ export function MonthlyScheduler({
           <span>Search employee</span>
           <input
             type="search"
-            placeholder="Find operator or lead"
+            placeholder="Enter employee name"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -381,7 +470,10 @@ export function MonthlyScheduler({
               monthDays={monthDays}
               assignments={draftAssignments}
               competencyMap={competencyMap}
-              unitName={unitById.get(employee.unitId)?.name ?? "Unassigned unit"}
+              timeCodes={snapshot.timeCodes}
+              dragSelection={dragSelection}
+              onDragStart={handleDragStart}
+              onDragApply={handleDragApply}
               onAssignmentChange={handleAssignmentChange}
             />
           ))}
@@ -407,52 +499,40 @@ function EmployeeRow({
   monthDays,
   assignments,
   competencyMap,
-  unitName,
+  timeCodes,
+  dragSelection,
+  onDragStart,
+  onDragApply,
   onAssignmentChange,
 }: {
   employee: Employee;
   schedule: Schedule;
   monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
-  assignments: Record<string, string | null>;
+  assignments: Record<string, AssignmentSelection>;
   competencyMap: Record<string, Competency>;
-  unitName: string;
-  onAssignmentChange: (employee: Employee, date: string, competencyId: string) => void;
+  timeCodes: TimeCode[];
+  dragSelection: AssignmentSelection | null;
+  onDragStart: (selection: AssignmentSelection) => void;
+  onDragApply: (employee: Employee, date: string) => void;
+  onAssignmentChange: (
+    employee: Employee,
+    date: string,
+    selection: AssignmentSelection,
+  ) => void;
 }) {
   return (
     <>
       <div className="employee-cell sticky-column">
         <strong>{employee.name}</strong>
         <span>{employee.role}</span>
-        <small>{unitName}</small>
       </div>
 
       {monthDays.map((day) => {
         const shiftKind = shiftForDate(schedule, day.date);
-        const selectedCompetencyId = getCellCompetency(employee, day, assignments);
+        const selection = getCellCompetency(employee, day, shiftKind, assignments);
         const availableCompetencies = employee.competencyIds
           .map((competencyId) => competencyMap[competencyId])
           .filter(isCompetency);
-
-        function handleCycle(clear = false) {
-          if (clear) {
-            onAssignmentChange(employee, day.date, "");
-            return;
-          }
-
-          if (availableCompetencies.length === 0) {
-            return;
-          }
-
-          const currentIndex = availableCompetencies.findIndex(
-            (competency) => competency.id === selectedCompetencyId,
-          );
-          const nextCompetency =
-            currentIndex >= 0
-              ? availableCompetencies[(currentIndex + 1) % availableCompetencies.length]
-              : availableCompetencies[0];
-
-          onAssignmentChange(employee, day.date, nextCompetency.id);
-        }
 
         return (
           <div
@@ -460,24 +540,44 @@ function EmployeeRow({
             className={`shift-cell shift-cell--${getShiftTone(shiftKind)} ${
               day.isWeekend ? "shift-cell--weekend" : ""
             }`}
+            onPointerEnter={(event) => {
+              if (dragSelection && event.buttons === 1) {
+                onDragApply(employee, day.date);
+              }
+            }}
           >
             <span className="shift-label">{shiftKind === "OFF" ? "O" : shiftKind.slice(0, 1)}</span>
+            <select
+              className="assignment-select"
+              value={encodeAssignmentValue(selection)}
+              aria-label={`${employee.name} ${day.date} assignment`}
+              onPointerDown={(event) => {
+                if (event.button !== 0) {
+                  return;
+                }
 
-            {shiftKind === "OFF" ? (
-              <p className="off-copy">Off</p>
-            ) : (
-              <button
-                type="button"
-                className="assignment-chip"
-                title={`${employee.name} ${day.date}. Click to cycle competency, shift-click to clear.`}
-                onClick={(event) => handleCycle(event.shiftKey)}
-                disabled={availableCompetencies.length === 0}
-              >
-                <span className="assignment-chip__value">
-                  {selectedCompetencyId ? getCompactCode(competencyMap[selectedCompetencyId]?.code ?? "Set") : "Set"}
-                </span>
-              </button>
-            )}
+                onDragStart(selection);
+              }}
+              onChange={(event) => onAssignmentChange(employee, day.date, decodeAssignmentValue(event.target.value))}
+            >
+              <option value="">{shiftKind === "OFF" ? "Off" : "Set"}</option>
+              <optgroup label="Time codes">
+                {timeCodes.map((timeCode) => (
+                  <option key={timeCode.id} value={`time:${timeCode.id}`}>
+                    {timeCode.code}
+                  </option>
+                ))}
+              </optgroup>
+              {availableCompetencies.length > 0 ? (
+                <optgroup label="Competencies">
+                  {availableCompetencies.map((competency) => (
+                    <option key={competency.id} value={`competency:${competency.id}`}>
+                      {getCompactCode(competency.code)}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </select>
           </div>
         );
       })}

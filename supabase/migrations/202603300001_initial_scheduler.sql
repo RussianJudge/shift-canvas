@@ -24,6 +24,15 @@ create table if not exists competencies (
   unique (code)
 );
 
+create table if not exists time_codes (
+  id text primary key,
+  code text not null,
+  label text not null,
+  color_token text not null default 'slate',
+  created_at timestamptz not null default now(),
+  unique (code)
+);
+
 create table if not exists employees (
   id text primary key,
   schedule_id text not null references schedules (id) on delete cascade,
@@ -46,14 +55,17 @@ create table if not exists schedule_assignments (
   employee_id text not null references employees (id) on delete cascade,
   assignment_date date not null,
   competency_id text references competencies (id) on delete set null,
+  time_code_id text references time_codes (id) on delete set null,
   shift_kind text not null check (shift_kind in ('DAY', 'NIGHT', 'OFF')),
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  check (num_nonnulls(competency_id, time_code_id) <= 1),
   unique (employee_id, assignment_date)
 );
 
 create index if not exists competencies_code_idx on competencies (code);
+create index if not exists time_codes_code_idx on time_codes (code);
 create index if not exists employees_schedule_active_idx on employees (schedule_id) where is_active = true;
 create index if not exists employees_unit_id_idx on employees (unit_id);
 create index if not exists assignments_date_employee_idx on schedule_assignments (assignment_date, employee_id);
@@ -78,6 +90,7 @@ execute function update_schedule_assignment_timestamp();
 alter table production_units enable row level security;
 alter table schedules enable row level security;
 alter table competencies enable row level security;
+alter table time_codes enable row level security;
 alter table employees enable row level security;
 alter table employee_competencies enable row level security;
 alter table schedule_assignments enable row level security;
@@ -96,6 +109,12 @@ using (true);
 
 create policy "authenticated read competencies"
 on competencies
+for select
+to authenticated
+using (true);
+
+create policy "authenticated read time codes"
+on time_codes
 for select
 to authenticated
 using (true);
