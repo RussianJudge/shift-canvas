@@ -3,8 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 
 import { savePersonnel } from "@/app/actions";
-import { REQUIRED_SHIFT_CODES } from "@/lib/types";
-import type { PersonnelUpdate, SchedulerSnapshot } from "@/lib/types";
+import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
 
 type EditableEmployee = {
   id: string;
@@ -48,9 +47,8 @@ export function PersonnelPanel({
 
   const [employees, setEmployees] = useState(initialEmployees);
   const [baselineEmployees, setBaselineEmployees] = useState(initialEmployees);
-  const [statusMessage, setStatusMessage] = useState(
-    "Every employee belongs to one of the four shared shifts 601-604 and carries their own production unit.",
-  );
+  const [deletedEmployeeIds, setDeletedEmployeeIds] = useState<string[]>([]);
+  const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
 
   const baselineMap = useMemo(
@@ -58,42 +56,14 @@ export function PersonnelPanel({
     [baselineEmployees],
   );
 
-  const unitById = useMemo(
-    () => new Map(snapshot.productionUnits.map((unit) => [unit.id, unit])),
-    [snapshot.productionUnits],
-  );
-
   const dirtyUpdates = employees
     .map((employee) => normalizeEmployee(employee))
     .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee));
-
-  function getUnitCompetencies(unitId: string) {
-    return snapshot.competencies.filter((competency) => competency.unitId === unitId);
-  }
 
   function updateEmployee(employeeId: string, updater: (employee: EditableEmployee) => EditableEmployee) {
     setEmployees((current) =>
       current.map((employee) => (employee.id === employeeId ? updater(employee) : employee)),
     );
-  }
-
-  function handleScheduleChange(employeeId: string, scheduleId: string) {
-    updateEmployee(employeeId, (employee) => ({
-      ...employee,
-      scheduleId,
-    }));
-  }
-
-  function handleUnitChange(employeeId: string, unitId: string) {
-    updateEmployee(employeeId, (employee) => {
-      const validCompetencyIds = new Set(getUnitCompetencies(unitId).map((competency) => competency.id));
-
-      return {
-        ...employee,
-        unitId,
-        competencyIds: employee.competencyIds.filter((competencyId) => validCompetencyIds.has(competencyId)),
-      };
-    });
   }
 
   function toggleCompetency(employeeId: string, competencyId: string) {
@@ -111,11 +81,15 @@ export function PersonnelPanel({
 
   function handleSave() {
     startSaveTransition(async () => {
-      const result = await savePersonnel({ updates: dirtyUpdates });
+      const result = await savePersonnel({
+        updates: dirtyUpdates,
+        deletedEmployeeIds,
+      } as SavePersonnelInput);
       setStatusMessage(result.message);
 
       if (result.ok) {
         setBaselineEmployees(employees.map((employee) => ({ ...employee, competencyIds: [...employee.competencyIds] })));
+        setDeletedEmployeeIds([]);
       }
     });
   }
@@ -128,7 +102,7 @@ export function PersonnelPanel({
     const defaultUnit = snapshot.productionUnits[0];
 
     if (!defaultSchedule || !defaultUnit) {
-      setStatusMessage("Add at least one shift and one production unit before creating employees.");
+      setStatusMessage("Add a schedule and a production unit first.");
       return;
     }
 
@@ -142,36 +116,26 @@ export function PersonnelPanel({
     };
 
     setEmployees((current) => [nextEmployee, ...current]);
-    setStatusMessage(`New employee row added on shift ${defaultSchedule.name}. Edit the unit and competencies, then save.`);
+    setStatusMessage("");
   }
 
-  const shiftCounts = snapshot.schedules.map((schedule) => ({
-    name: schedule.name,
-    count: employees.filter((employee) => employee.scheduleId === schedule.id).length,
-  }));
+  function handleRemoveEmployee(employeeId: string) {
+    setEmployees((current) => current.filter((employee) => employee.id !== employeeId));
 
-  const shiftSummary = REQUIRED_SHIFT_CODES.map(
-    (code) => `${code}: ${shiftCounts.find((shift) => shift.name === code)?.count ?? 0}`,
-  ).join("  |  ");
+    if (baselineMap.has(employeeId)) {
+      setDeletedEmployeeIds((current) => [...current, employeeId]);
+    }
+
+    setStatusMessage("");
+  }
 
   return (
     <section className="panel-frame">
-      <div className="panel-heading">
-        <div>
-          <span className="panel-eyebrow">Personnel</span>
-          <h1 className="panel-title">People, shifts, and qualifications</h1>
-        </div>
-        <p className="panel-copy">
-          Assign each person to one of the four shared shifts, set their production unit, and keep
-          their valid post coverage aligned to that unit.
-        </p>
+      <div className="panel-heading panel-heading--simple">
+        <h1 className="panel-title">Personnel</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--personnel">
-        <div className="workspace-copy workspace-copy--full">
-          <strong>{statusMessage}</strong>
-          <p>{shiftSummary}</p>
-        </div>
+      <div className="workspace-toolbar workspace-toolbar--actions">
         <div className="planner-actions">
           <button type="button" className="ghost-button" onClick={handleAddEmployee}>
             Add employee
@@ -180,34 +144,12 @@ export function PersonnelPanel({
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || dirtyUpdates.length === 0}
+            disabled={isSaving || (dirtyUpdates.length === 0 && deletedEmployeeIds.length === 0)}
           >
-            {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
+            {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
-      </div>
-
-      <div className="summary-row">
-        <div className="summary-stat">
-          <span>Total employees</span>
-          <strong>{employees.length}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Shifts</span>
-          <strong>{snapshot.schedules.length}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Production units</span>
-          <strong>{snapshot.productionUnits.length}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Qualified posts</span>
-          <strong>{snapshot.competencies.length}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Pending edits</span>
-          <strong>{dirtyUpdates.length}</strong>
-        </div>
+        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
       </div>
 
       <div className="personnel-table-wrap">
@@ -219,6 +161,7 @@ export function PersonnelPanel({
               <th>Shift</th>
               <th>Production unit</th>
               <th>Competencies</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -252,7 +195,12 @@ export function PersonnelPanel({
                   <select
                     className="table-select"
                     value={employee.scheduleId}
-                    onChange={(event) => handleScheduleChange(employee.id, event.target.value)}
+                    onChange={(event) =>
+                      updateEmployee(employee.id, (current) => ({
+                        ...current,
+                        scheduleId: event.target.value,
+                      }))
+                    }
                   >
                     {snapshot.schedules.map((schedule) => (
                       <option key={schedule.id} value={schedule.id}>
@@ -265,7 +213,12 @@ export function PersonnelPanel({
                   <select
                     className="table-select"
                     value={employee.unitId}
-                    onChange={(event) => handleUnitChange(employee.id, event.target.value)}
+                    onChange={(event) =>
+                      updateEmployee(employee.id, (current) => ({
+                        ...current,
+                        unitId: event.target.value,
+                      }))
+                    }
                   >
                     {snapshot.productionUnits.map((unit) => (
                       <option key={unit.id} value={unit.id}>
@@ -276,7 +229,7 @@ export function PersonnelPanel({
                 </td>
                 <td>
                   <div className="table-pills table-pills--editable">
-                    {getUnitCompetencies(employee.unitId).map((competency) => {
+                    {snapshot.competencies.map((competency) => {
                       const isSelected = employee.competencyIds.includes(competency.id);
 
                       return (
@@ -287,7 +240,7 @@ export function PersonnelPanel({
                           className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
                             isSelected ? "legend-pill--selected" : "legend-pill--muted"
                           }`}
-                          title={`${unitById.get(employee.unitId)?.name ?? "Unit"}: ${competency.label}`}
+                          title={competency.label}
                         >
                           {competency.code}
                         </button>
@@ -295,8 +248,27 @@ export function PersonnelPanel({
                     })}
                   </div>
                 </td>
+                <td className="table-actions-cell">
+                  <button
+                    type="button"
+                    className="table-action table-action--danger"
+                    onClick={() => handleRemoveEmployee(employee.id)}
+                  >
+                    Remove
+                  </button>
+                </td>
               </tr>
             ))}
+            {employees.length === 0 ? (
+              <tr>
+                <td colSpan={6}>
+                  <div className="empty-state">
+                    <strong>No employees yet.</strong>
+                    <span>Add an employee to start staffing the shifts.</span>
+                  </div>
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>

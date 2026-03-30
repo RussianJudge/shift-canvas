@@ -23,7 +23,6 @@ type EmployeeRow = {
 
 type CompetencyRow = {
   id: string;
-  unit_id: string;
   code: string;
   label: string;
   color_token: string | null;
@@ -69,7 +68,7 @@ export async function getSchedulerSnapshot(month: string) {
   const [unitsResult, competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult, assignmentsResult] =
     await Promise.all([
       supabase.from("production_units").select("id, name, description").order("name"),
-      supabase.from("competencies").select("id, unit_id, code, label, color_token").order("code"),
+      supabase.from("competencies").select("id, code, label, color_token").order("code"),
       supabase
         .from("schedules")
         .select("id, name, start_date, day_shift_days, night_shift_days, off_days")
@@ -108,7 +107,6 @@ export async function getSchedulerSnapshot(month: string) {
 
   const competencies: Competency[] = (competenciesResult.data as CompetencyRow[]).map((row) => ({
     id: row.id,
-    unitId: row.unit_id,
     code: row.code,
     label: row.label,
     colorToken: row.color_token ?? "slate",

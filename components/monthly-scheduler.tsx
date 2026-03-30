@@ -6,7 +6,6 @@ import { useDeferredValue, useEffect, useMemo, useState, useTransition, startTra
 import { saveAssignments } from "@/app/actions";
 import {
   buildAssignmentIndex,
-  countShiftCoverage,
   createAssignmentKey,
   formatMonthLabel,
   getCompetencyMap,
@@ -102,32 +101,6 @@ function getScheduleAccent(scheduleId: string) {
   return accents[hash];
 }
 
-function SummaryStat({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="summary-stat">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function CompetencyPill({ competency }: { competency: Competency }) {
-  return (
-    <span
-      className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}
-      title={competency.label}
-    >
-      {getCompactCode(competency.code)}
-    </span>
-  );
-}
-
 export function MonthlyScheduler({
   initialSnapshot,
 }: {
@@ -145,7 +118,7 @@ export function MonthlyScheduler({
   const [draftAssignments, setDraftAssignments] = useState(() =>
     buildAssignmentIndex(initialSnapshot.assignments),
   );
-  const [statusMessage, setStatusMessage] = useState("Drafting locally");
+  const [statusMessage, setStatusMessage] = useState("");
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
@@ -164,22 +137,11 @@ export function MonthlyScheduler({
     return (
       <section className="panel-frame">
         <div className="panel-heading">
-          <div>
-            <span className="panel-eyebrow">Schedule</span>
-            <h1 className="panel-title">Add shifts before building a monthly calendar</h1>
-          </div>
-          <p className="panel-copy">
-            Your Supabase connection is working, but there are no shift rows to render yet. Add
-            records to `production_units`, `schedules`, `employees`, and `competencies`, or run the
-            starter seed data.
-          </p>
+          <h1 className="panel-title">Schedule</h1>
         </div>
 
         <div className="workspace-toolbar workspace-toolbar--personnel">
-          <div className="workspace-copy workspace-copy--full">
-            <strong>No scheduler rows available yet.</strong>
-            <p>The Personnel page can stay empty until you add your first shift and employee rows.</p>
-          </div>
+          <p className="toolbar-status">No schedules available.</p>
         </div>
       </section>
     );
@@ -219,14 +181,6 @@ export function MonthlyScheduler({
     ];
   });
 
-  const coverage = countShiftCoverage(activeSchedule, monthDays, draftAssignments);
-  const activeUnitIds = [...new Set(activeSchedule.employees.map((employee) => employee.unitId))];
-  const unitNames = activeUnitIds
-    .map((unitId) => unitById.get(unitId)?.name)
-    .filter((unitName): unitName is string => Boolean(unitName));
-  const scheduleCompetencies = snapshot.competencies.filter((competency) =>
-    activeUnitIds.includes(competency.unitId),
-  );
   const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.45rem, 1fr))`;
 
   useEffect(() => {
@@ -350,8 +304,10 @@ export function MonthlyScheduler({
       className="panel-frame"
       style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
     >
-      <div className="panel-heading panel-heading--schedule">
+      <div className="panel-heading panel-heading--split">
+        <h1 className="panel-title">Schedule</h1>
         <div className="planner-actions">
+          <span className="month-indicator">{formatMonthLabel(currentMonth)}</span>
           <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
             Previous month
           </button>
@@ -369,18 +325,9 @@ export function MonthlyScheduler({
         </div>
       </div>
 
-      <div className="summary-row">
-        <SummaryStat label="Month" value={formatMonthLabel(currentMonth)} />
-        <SummaryStat label="Shift" value={activeSchedule.name} />
-        <SummaryStat label="Unit coverage" value={`${activeUnitIds.length} units`} />
-        <SummaryStat label="Day shifts" value={String(coverage.dayShiftCount)} />
-        <SummaryStat label="Night shifts" value={String(coverage.nightShiftCount)} />
-        <SummaryStat label="Pending edits" value={String(dirtyUpdates.length)} />
-      </div>
-
       <div className="workspace-toolbar">
         <label className="field">
-          <span>Shift</span>
+          <span>Pattern</span>
           <select
             value={selectedScheduleId}
             onChange={(event) => setSelectedScheduleId(event.target.value)}
@@ -402,28 +349,17 @@ export function MonthlyScheduler({
             onChange={(event) => setSearch(event.target.value)}
           />
         </label>
-
-        <div className="workspace-copy">
-          <strong>{`Shift ${activeSchedule.name}`}</strong>
-          <p>
-            {isMonthLoading
-              ? "Loading next month..."
-              : `${unitNames.join(", ")}. ${statusMessage}. Click a shift cell to cycle competencies, shift-click to clear.`}
-          </p>
+        <div className="toolbar-status-wrap">
+          {isMonthLoading ? <p className="toolbar-status">Loading month...</p> : null}
+          {!isMonthLoading && statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
         </div>
-      </div>
-
-      <div className="legend-row">
-        {scheduleCompetencies.map((competency) => (
-          <CompetencyPill key={competency.id} competency={competency} />
-        ))}
       </div>
 
       <section className="schedule-wrap" aria-label="Monthly schedule grid">
         <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
           <div className="employee-header sticky-column">
-            <span>Employee</span>
-            <strong>{`Shift ${activeSchedule.name}`}</strong>
+            <span>{formatMonthLabel(currentMonth)}</span>
+            <strong>Employees</strong>
           </div>
 
           {monthDays.map((day) => (
@@ -539,9 +475,6 @@ function EmployeeRow({
               >
                 <span className="assignment-chip__value">
                   {selectedCompetencyId ? getCompactCode(competencyMap[selectedCompetencyId]?.code ?? "Set") : "Set"}
-                </span>
-                <span className="assignment-chip__hint">
-                  {selectedCompetencyId ? competencyMap[selectedCompetencyId]?.label : "No post"}
                 </span>
               </button>
             )}

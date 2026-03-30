@@ -100,9 +100,14 @@ export async function savePersonnel(input: SavePersonnelInput) {
     is_active: true,
   }));
 
-  const { error: employeeError } = await supabase.from("employees").upsert(employeeRows, {
-    onConflict: "id",
-  });
+  const employeeError =
+    employeeRows.length > 0
+      ? (
+          await supabase.from("employees").upsert(employeeRows, {
+            onConflict: "id",
+          })
+        ).error
+      : null;
 
   if (employeeError) {
     return {
@@ -144,6 +149,20 @@ export async function savePersonnel(input: SavePersonnelInput) {
     };
   }
 
+  if (input.deletedEmployeeIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("employees")
+      .delete()
+      .in("id", input.deletedEmployeeIds);
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not remove employees: ${deleteError.message}`,
+      };
+    }
+  }
+
   revalidatePath("/");
   revalidatePath("/personnel");
 
@@ -173,15 +192,34 @@ export async function saveSchedules(input: SaveSchedulesInput) {
     off_days: update.offDays,
   }));
 
-  const { error } = await supabase.from("schedules").upsert(rows, {
-    onConflict: "id",
-  });
+  const error =
+    rows.length > 0
+      ? (
+          await supabase.from("schedules").upsert(rows, {
+            onConflict: "id",
+          })
+        ).error
+      : null;
 
   if (error) {
     return {
       ok: false,
       message: `Could not save schedules: ${error.message}`,
     };
+  }
+
+  if (input.deletedScheduleIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("schedules")
+      .delete()
+      .in("id", input.deletedScheduleIds);
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not remove schedules: ${deleteError.message}`,
+      };
+    }
   }
 
   revalidatePath("/");
@@ -209,21 +247,39 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
 
   const rows = input.updates.map((update) => ({
     id: update.competencyId,
-    unit_id: update.unitId,
     code: update.code,
     label: update.label,
     color_token: update.colorToken,
   }));
 
-  const { error } = await supabase.from("competencies").upsert(rows, {
-    onConflict: "id",
-  });
+  const error =
+    rows.length > 0
+      ? (
+          await supabase.from("competencies").upsert(rows, {
+            onConflict: "id",
+          })
+        ).error
+      : null;
 
   if (error) {
     return {
       ok: false,
       message: `Could not save competencies: ${error.message}`,
     };
+  }
+
+  if (input.deletedCompetencyIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("competencies")
+      .delete()
+      .in("id", input.deletedCompetencyIds);
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not remove competencies: ${deleteError.message}`,
+      };
+    }
   }
 
   revalidatePath("/");

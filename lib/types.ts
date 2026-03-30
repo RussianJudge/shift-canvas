@@ -12,7 +12,6 @@ export interface ProductionUnit {
 
 export interface Competency {
   id: string;
-  unitId: string;
   code: string;
   label: string;
   colorToken: string;
@@ -68,6 +67,7 @@ export interface PersonnelUpdate {
 
 export interface SavePersonnelInput {
   updates: PersonnelUpdate[];
+  deletedEmployeeIds: string[];
 }
 
 export interface ScheduleUpdate {
@@ -81,11 +81,11 @@ export interface ScheduleUpdate {
 
 export interface SaveSchedulesInput {
   updates: ScheduleUpdate[];
+  deletedScheduleIds: string[];
 }
 
 export interface CompetencyUpdate {
   competencyId: string;
-  unitId: string;
   code: string;
   label: string;
   colorToken: string;
@@ -93,4 +93,5 @@ export interface CompetencyUpdate {
 
 export interface SaveCompetenciesInput {
   updates: CompetencyUpdate[];
+  deletedCompetencyIds: string[];
 }

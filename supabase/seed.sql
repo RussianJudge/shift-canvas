@@ -22,21 +22,20 @@ set
   night_shift_days = excluded.night_shift_days,
   off_days = excluded.off_days;
 
-insert into competencies (id, unit_id, code, label, color_token)
+insert into competencies (id, code, label, color_token)
 values
-  ('comp-post-1', 'unit-casting', 'Post 1', 'Furnace feed', 'amber'),
-  ('comp-post-11', 'unit-casting', 'Post 11', 'Mold prep', 'teal'),
-  ('comp-post-12', 'unit-casting', 'Post 12', 'Pour line', 'violet'),
-  ('comp-post-21', 'unit-casting', 'Post 21', 'Quality bay', 'rose'),
-  ('comp-dock-2', 'unit-dispatch', 'Dock 2', 'Scale + manifest', 'blue'),
-  ('comp-dock-7', 'unit-dispatch', 'Dock 7', 'Release gate', 'lime'),
-  ('comp-dock-9', 'unit-dispatch', 'Dock 9', 'Outbound staging', 'orange'),
-  ('comp-pack-3', 'unit-packaging', 'Pack 3', 'Case pack line', 'teal'),
-  ('comp-pack-6', 'unit-packaging', 'Pack 6', 'Palletizing', 'blue'),
-  ('comp-pack-9', 'unit-packaging', 'Pack 9', 'Final QA hold', 'rose')
+  ('comp-post-1', 'Post 1', 'Furnace feed', 'amber'),
+  ('comp-post-11', 'Post 11', 'Mold prep', 'teal'),
+  ('comp-post-12', 'Post 12', 'Pour line', 'violet'),
+  ('comp-post-21', 'Post 21', 'Quality bay', 'rose'),
+  ('comp-dock-2', 'Dock 2', 'Scale + manifest', 'blue'),
+  ('comp-dock-7', 'Dock 7', 'Release gate', 'lime'),
+  ('comp-dock-9', 'Dock 9', 'Outbound staging', 'orange'),
+  ('comp-pack-3', 'Pack 3', 'Case pack line', 'teal'),
+  ('comp-pack-6', 'Pack 6', 'Palletizing', 'blue'),
+  ('comp-pack-9', 'Pack 9', 'Final QA hold', 'rose')
 on conflict (id) do update
 set
-  unit_id = excluded.unit_id,
   code = excluded.code,
   label = excluded.label,
   color_token = excluded.color_token;

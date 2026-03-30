@@ -3,13 +3,12 @@
 import { useMemo, useState, useTransition } from "react";
 
 import { saveCompetencies } from "@/app/actions";
-import type { CompetencyUpdate, SchedulerSnapshot } from "@/lib/types";
+import type { CompetencyUpdate, SaveCompetenciesInput, SchedulerSnapshot } from "@/lib/types";
 
 const COLOR_TOKENS = ["amber", "teal", "violet", "rose", "blue", "lime", "orange", "slate"];
 
 type EditableCompetency = {
   id: string;
-  unitId: string;
   code: string;
   label: string;
   colorToken: string;
@@ -18,7 +17,6 @@ type EditableCompetency = {
 function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
   return {
     competencyId: competency.id,
-    unitId: competency.unitId,
     code: competency.code.trim(),
     label: competency.label.trim(),
     colorToken: competency.colorToken,
@@ -34,7 +32,6 @@ export function CompetenciesPanel({
     () =>
       snapshot.competencies.map((competency) => ({
         id: competency.id,
-        unitId: competency.unitId,
         code: competency.code,
         label: competency.label,
         colorToken: competency.colorToken,
@@ -44,9 +41,8 @@ export function CompetenciesPanel({
 
   const [competencies, setCompetencies] = useState(initialCompetencies);
   const [baselineCompetencies, setBaselineCompetencies] = useState(initialCompetencies);
-  const [statusMessage, setStatusMessage] = useState(
-    "Maintain the post library here. Each competency belongs to one production unit.",
-  );
+  const [deletedCompetencyIds, setDeletedCompetencyIds] = useState<string[]>([]);
+  const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
 
   const baselineMap = useMemo(
@@ -71,54 +67,49 @@ export function CompetenciesPanel({
   }
 
   function handleAddCompetency() {
-    const defaultUnit = snapshot.productionUnits[0];
-
-    if (!defaultUnit) {
-      setStatusMessage("Add a production unit first, then create competencies.");
-      return;
-    }
-
     const nextCompetency: EditableCompetency = {
       id: `comp-${crypto.randomUUID().slice(0, 8)}`,
-      unitId: defaultUnit.id,
       code: "Post 99",
       label: "New competency",
       colorToken: "slate",
     };
 
     setCompetencies((current) => [nextCompetency, ...current]);
-    setStatusMessage("New competency row added. Edit the post code, label, and unit, then save.");
+    setStatusMessage("");
+  }
+
+  function handleRemoveCompetency(competencyId: string) {
+    setCompetencies((current) => current.filter((competency) => competency.id !== competencyId));
+
+    if (baselineMap.has(competencyId)) {
+      setDeletedCompetencyIds((current) => [...current, competencyId]);
+    }
+
+    setStatusMessage("");
   }
 
   function handleSave() {
     startSaveTransition(async () => {
-      const result = await saveCompetencies({ updates: dirtyUpdates });
+      const result = await saveCompetencies({
+        updates: dirtyUpdates,
+        deletedCompetencyIds,
+      } as SaveCompetenciesInput);
       setStatusMessage(result.message);
 
       if (result.ok) {
         setBaselineCompetencies(competencies.map((competency) => ({ ...competency })));
+        setDeletedCompetencyIds([]);
       }
     });
   }
 
   return (
     <section className="panel-frame">
-      <div className="panel-heading">
-        <div>
-          <span className="panel-eyebrow">Competencies</span>
-          <h1 className="panel-title">Posts and coverage definitions</h1>
-        </div>
-        <p className="panel-copy">
-          Create and refine the post list used in the calendar. These rows are saved directly to the
-          Supabase `competencies` table.
-        </p>
+      <div className="panel-heading panel-heading--simple">
+        <h1 className="panel-title">Competencies</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--personnel">
-        <div className="workspace-copy workspace-copy--full">
-          <strong>{statusMessage}</strong>
-          <p>Calendar cells use the compact code, while personnel and setup screens keep the full label.</p>
-        </div>
+      <div className="workspace-toolbar workspace-toolbar--actions">
         <div className="planner-actions">
           <button type="button" className="ghost-button" onClick={handleAddCompetency}>
             Add competency
@@ -127,30 +118,12 @@ export function CompetenciesPanel({
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || dirtyUpdates.length === 0}
+            disabled={isSaving || (dirtyUpdates.length === 0 && deletedCompetencyIds.length === 0)}
           >
-            {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
+            {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
-      </div>
-
-      <div className="summary-row">
-        <div className="summary-stat">
-          <span>Total competencies</span>
-          <strong>{competencies.length}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Production units</span>
-          <strong>{snapshot.productionUnits.length}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Color tokens</span>
-          <strong>{new Set(competencies.map((competency) => competency.colorToken)).size}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Pending edits</span>
-          <strong>{dirtyUpdates.length}</strong>
-        </div>
+        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
       </div>
 
       <div className="personnel-table-wrap">
@@ -159,9 +132,9 @@ export function CompetenciesPanel({
             <tr>
               <th>Code</th>
               <th>Label</th>
-              <th>Production unit</th>
               <th>Color</th>
               <th>Preview</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -194,24 +167,6 @@ export function CompetenciesPanel({
                 <td>
                   <select
                     className="table-select"
-                    value={competency.unitId}
-                    onChange={(event) =>
-                      updateCompetency(competency.id, (current) => ({
-                        ...current,
-                        unitId: event.target.value,
-                      }))
-                    }
-                  >
-                    {snapshot.productionUnits.map((unit) => (
-                      <option key={unit.id} value={unit.id}>
-                        {unit.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    className="table-select"
                     value={competency.colorToken}
                     onChange={(event) =>
                       updateCompetency(competency.id, (current) => ({
@@ -232,8 +187,27 @@ export function CompetenciesPanel({
                     {competency.code}
                   </span>
                 </td>
+                <td className="table-actions-cell">
+                  <button
+                    type="button"
+                    className="table-action table-action--danger"
+                    onClick={() => handleRemoveCompetency(competency.id)}
+                  >
+                    Remove
+                  </button>
+                </td>
               </tr>
             ))}
+            {competencies.length === 0 ? (
+              <tr>
+                <td colSpan={5}>
+                  <div className="empty-state">
+                    <strong>No competencies yet.</strong>
+                    <span>Add a competency to populate the schedule options.</span>
+                  </div>
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>

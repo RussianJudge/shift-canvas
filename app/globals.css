@@ -55,6 +55,10 @@ select {
   grid-template-columns: 16rem minmax(0, 1fr);
 }
 
+.workspace-frame--collapsed {
+  grid-template-columns: 4.75rem minmax(0, 1fr);
+}
+
 .workspace-sidebar {
   display: grid;
   align-content: start;
@@ -63,6 +67,17 @@ select {
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(255, 252, 248, 0.95), rgba(245, 236, 223, 0.85));
+}
+
+.workspace-sidebar--collapsed {
+  width: 4.75rem;
+}
+
+.workspace-brand-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .workspace-brand {
@@ -85,14 +100,25 @@ select {
   font-weight: 600;
 }
 
+.sidebar-toggle {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  cursor: pointer;
+}
+
 .workspace-nav {
   display: grid;
   gap: 0.5rem;
 }
 
 .workspace-nav-link {
-  display: grid;
-  gap: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   padding: 0.9rem 1rem;
   border-radius: 1rem;
   color: inherit;
@@ -100,14 +126,30 @@ select {
   border: 1px solid transparent;
 }
 
-.workspace-nav-link strong {
-  font-size: 0.98rem;
+.workspace-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(23, 20, 17, 0.08);
+  flex: 0 0 auto;
 }
 
-.workspace-nav-link span {
-  color: var(--muted);
-  font-size: 0.84rem;
-  line-height: 1.4;
+.workspace-nav-icon svg {
+  width: 1rem;
+  height: 1rem;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.workspace-nav-link strong {
+  font-size: 0.98rem;
 }
 
 .workspace-nav-link--active {
@@ -139,6 +181,14 @@ select {
   padding: 1.25rem 1.5rem 1rem;
 }
 
+.panel-heading--simple {
+  grid-template-columns: 1fr;
+}
+
+.panel-heading--split {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .panel-title {
   margin: 0;
   font-family: var(--font-display), sans-serif;
@@ -147,21 +197,19 @@ select {
   letter-spacing: -0.04em;
 }
 
-.panel-copy {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.55;
-}
-
-.panel-heading--schedule {
-  grid-template-columns: 1fr;
-  justify-items: end;
-}
-
 .planner-actions {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.month-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 600;
 }
 
 .primary-button,
@@ -293,9 +341,26 @@ select {
   align-items: center;
 }
 
+.workspace-toolbar--actions {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
 .workspace-copy--full {
   border-left: 0;
   padding-left: 0;
+}
+
+.toolbar-status-wrap {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.toolbar-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
 }
 
 .legend-row {
@@ -618,6 +683,25 @@ select {
   font-size: 0.78rem;
 }
 
+.table-actions-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.table-action {
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.table-action--danger {
+  color: #991b1b;
+}
+
 .empty-state {
   display: grid;
   align-content: center;
@@ -662,6 +746,10 @@ select {
     border-bottom: 1px solid var(--line);
   }
 
+  .workspace-sidebar--collapsed {
+    width: auto;
+  }
+
   .panel-heading,
   .workspace-toolbar {
     grid-template-columns: 1fr;
@@ -681,6 +769,21 @@ select {
   .workspace-copy--full {
     border-top: 0;
   }
+}
+
+.workspace-sidebar--collapsed .workspace-brand span,
+.workspace-sidebar--collapsed .workspace-brand strong,
+.workspace-sidebar--collapsed .workspace-nav-link strong {
+  display: none;
+}
+
+.workspace-sidebar--collapsed .workspace-brand {
+  padding-right: 0;
+}
+
+.workspace-sidebar--collapsed .workspace-nav-link {
+  justify-content: center;
+  padding-inline: 0.5rem;
 }
 
 @media (max-width: 720px) {

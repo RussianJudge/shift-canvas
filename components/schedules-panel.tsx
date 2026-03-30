@@ -3,7 +3,6 @@
 import { useMemo, useState, useTransition } from "react";
 
 import { saveSchedules } from "@/app/actions";
-import { REQUIRED_SHIFT_CODES } from "@/lib/types";
 import type { SaveSchedulesInput, ScheduleUpdate, SchedulerSnapshot } from "@/lib/types";
 
 type EditableSchedule = {
@@ -27,57 +26,29 @@ function normalizeSchedule(schedule: EditableSchedule): ScheduleUpdate {
   };
 }
 
-function createShiftTemplate(code: string): EditableSchedule {
-  const startDates: Record<string, string> = {
-    "601": "2026-01-01",
-    "602": "2026-01-04",
-    "603": "2026-01-07",
-    "604": "2026-01-10",
-  };
-
-  return {
-    id: `schedule-${code}`,
-    name: code,
-    startDate: startDates[code] ?? new Date().toISOString().slice(0, 10),
-    dayShiftDays: 3,
-    nightShiftDays: 3,
-    offDays: 6,
-    employeeCount: 0,
-  };
-}
-
 export function SchedulesPanel({
   snapshot,
 }: {
   snapshot: SchedulerSnapshot;
 }) {
   const initialSchedules = useMemo<EditableSchedule[]>(
-    () => {
-      const existing = new Map(
-        snapshot.schedules.map((schedule) => [
-          schedule.name,
-          {
-            id: schedule.id,
-            name: schedule.name,
-            startDate: schedule.startDate,
-            dayShiftDays: schedule.dayShiftDays,
-            nightShiftDays: schedule.nightShiftDays,
-            offDays: schedule.offDays,
-            employeeCount: schedule.employees.length,
-          },
-        ]),
-      );
-
-      return REQUIRED_SHIFT_CODES.map((code) => existing.get(code) ?? createShiftTemplate(code));
-    },
+    () =>
+      snapshot.schedules.map((schedule) => ({
+        id: schedule.id,
+        name: schedule.name,
+        startDate: schedule.startDate,
+        dayShiftDays: schedule.dayShiftDays,
+        nightShiftDays: schedule.nightShiftDays,
+        offDays: schedule.offDays,
+        employeeCount: schedule.employees.length,
+      })),
     [snapshot],
   );
 
   const [schedules, setSchedules] = useState(initialSchedules);
   const [baselineSchedules, setBaselineSchedules] = useState(initialSchedules);
-  const [statusMessage, setStatusMessage] = useState(
-    "These four shared shifts define the rotation pattern for every employee across the site.",
-  );
+  const [deletedScheduleIds, setDeletedScheduleIds] = useState<string[]>([]);
+  const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
 
   const baselineMap = useMemo(
@@ -100,87 +71,111 @@ export function SchedulesPanel({
     );
   }
 
+  function handleAddSchedule() {
+    const nextSchedule: EditableSchedule = {
+      id: `schedule-${crypto.randomUUID().slice(0, 8)}`,
+      name: "New Pattern",
+      startDate: new Date().toISOString().slice(0, 10),
+      dayShiftDays: 3,
+      nightShiftDays: 3,
+      offDays: 6,
+      employeeCount: 0,
+    };
+
+    setSchedules((current) => [nextSchedule, ...current]);
+    setStatusMessage("");
+  }
+
+  function handleRemoveSchedule(scheduleId: string) {
+    const schedule = schedules.find((entry) => entry.id === scheduleId);
+
+    if (!schedule) {
+      return;
+    }
+
+    const confirmation =
+      schedule.employeeCount > 0
+        ? `Remove ${schedule.name}? Employees linked to this pattern will also be removed.`
+        : `Remove ${schedule.name}?`;
+
+    if (!window.confirm(confirmation)) {
+      return;
+    }
+
+    setSchedules((current) => current.filter((entry) => entry.id !== scheduleId));
+
+    if (baselineMap.has(scheduleId)) {
+      setDeletedScheduleIds((current) => [...current, scheduleId]);
+    }
+
+    setStatusMessage("");
+  }
+
   function handleSave() {
     startSaveTransition(async () => {
-      const result = await saveSchedules({ updates: dirtyUpdates } as SaveSchedulesInput);
+      const result = await saveSchedules({
+        updates: dirtyUpdates,
+        deletedScheduleIds,
+      } as SaveSchedulesInput);
       setStatusMessage(result.message);
 
       if (result.ok) {
         setBaselineSchedules(schedules.map((schedule) => ({ ...schedule })));
+        setDeletedScheduleIds([]);
       }
     });
   }
 
   return (
     <section className="panel-frame">
-      <div className="panel-heading">
-        <div>
-          <span className="panel-eyebrow">Schedules</span>
-          <h1 className="panel-title">Shared shift patterns</h1>
-        </div>
-        <p className="panel-copy">
-          Shift patterns do not carry production-unit data anymore. They only define the four shared
-          rotations 601, 602, 603, and 604. The start date is the first day shift in the cycle.
-        </p>
+      <div className="panel-heading panel-heading--simple">
+        <h1 className="panel-title">Schedules</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--personnel">
-        <div className="workspace-copy workspace-copy--full">
-          <strong>{statusMessage}</strong>
-          <p>Personnel can be distributed across these four shifts from the Personnel page.</p>
-        </div>
+      <div className="workspace-toolbar workspace-toolbar--actions">
         <div className="planner-actions">
+          <button type="button" className="ghost-button" onClick={handleAddSchedule}>
+            Add schedule
+          </button>
           <button
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || dirtyUpdates.length === 0}
+            disabled={isSaving || (dirtyUpdates.length === 0 && deletedScheduleIds.length === 0)}
           >
-            {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
+            {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
-      </div>
-
-      <div className="summary-row">
-        <div className="summary-stat">
-          <span>Total shifts</span>
-          <strong>{schedules.length}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Pattern length</span>
-          <strong>
-            {Math.max(
-              ...schedules.map((schedule) => schedule.dayShiftDays + schedule.nightShiftDays + schedule.offDays),
-            )}
-          </strong>
-        </div>
-        <div className="summary-stat">
-          <span>Employees linked</span>
-          <strong>{schedules.reduce((total, schedule) => total + schedule.employeeCount, 0)}</strong>
-        </div>
-        <div className="summary-stat">
-          <span>Pending edits</span>
-          <strong>{dirtyUpdates.length}</strong>
-        </div>
+        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
       </div>
 
       <div className="personnel-table-wrap">
         <table className="personnel-table">
           <thead>
             <tr>
-              <th>Shift</th>
+              <th>Name</th>
               <th>Start date</th>
               <th>Day on</th>
               <th>Night on</th>
               <th>Off days</th>
               <th>Employees</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {schedules.map((schedule) => (
               <tr key={schedule.id}>
                 <td>
-                  <span className="table-code">{schedule.name}</span>
+                  <input
+                    className="table-input"
+                    value={schedule.name}
+                    onChange={(event) =>
+                      updateSchedule(schedule.id, (current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                  />
                 </td>
                 <td>
                   <input
@@ -238,8 +233,27 @@ export function SchedulesPanel({
                   />
                 </td>
                 <td>{schedule.employeeCount}</td>
+                <td className="table-actions-cell">
+                  <button
+                    type="button"
+                    className="table-action table-action--danger"
+                    onClick={() => handleRemoveSchedule(schedule.id)}
+                  >
+                    Remove
+                  </button>
+                </td>
               </tr>
             ))}
+            {schedules.length === 0 ? (
+              <tr>
+                <td colSpan={7}>
+                  <div className="empty-state">
+                    <strong>No schedules yet.</strong>
+                    <span>Add a schedule to start building patterns.</span>
+                  </div>
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>

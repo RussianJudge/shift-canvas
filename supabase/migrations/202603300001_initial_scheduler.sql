@@ -17,12 +17,11 @@ create table if not exists schedules (
 
 create table if not exists competencies (
   id text primary key,
-  unit_id text not null references production_units (id) on delete cascade,
   code text not null,
   label text not null,
   color_token text not null default 'slate',
   created_at timestamptz not null default now(),
-  unique (unit_id, code)
+  unique (code)
 );
 
 create table if not exists employees (
@@ -54,7 +53,7 @@ create table if not exists schedule_assignments (
   unique (employee_id, assignment_date)
 );
 
-create index if not exists competencies_unit_code_idx on competencies (unit_id, code);
+create index if not exists competencies_code_idx on competencies (code);
 create index if not exists employees_schedule_active_idx on employees (schedule_id) where is_active = true;
 create index if not exists employees_unit_id_idx on employees (unit_id);
 create index if not exists assignments_date_employee_idx on schedule_assignments (assignment_date, employee_id);
