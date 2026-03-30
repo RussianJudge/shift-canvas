@@ -3,12 +3,12 @@
 import { useMemo, useState, useTransition } from "react";
 
 import { saveSchedules } from "@/app/actions";
+import { REQUIRED_SHIFT_CODES } from "@/lib/types";
 import type { SaveSchedulesInput, ScheduleUpdate, SchedulerSnapshot } from "@/lib/types";
 
 type EditableSchedule = {
   id: string;
   name: string;
-  unitId: string;
   startDate: string;
   dayShiftDays: number;
   nightShiftDays: number;
@@ -20,11 +20,29 @@ function normalizeSchedule(schedule: EditableSchedule): ScheduleUpdate {
   return {
     scheduleId: schedule.id,
     name: schedule.name.trim(),
-    unitId: schedule.unitId,
     startDate: schedule.startDate,
     dayShiftDays: schedule.dayShiftDays,
     nightShiftDays: schedule.nightShiftDays,
     offDays: schedule.offDays,
+  };
+}
+
+function createShiftTemplate(code: string): EditableSchedule {
+  const startDates: Record<string, string> = {
+    "601": "2026-01-01",
+    "602": "2026-01-04",
+    "603": "2026-01-07",
+    "604": "2026-01-10",
+  };
+
+  return {
+    id: `schedule-${code}`,
+    name: code,
+    startDate: startDates[code] ?? new Date().toISOString().slice(0, 10),
+    dayShiftDays: 3,
+    nightShiftDays: 3,
+    offDays: 6,
+    employeeCount: 0,
   };
 }
 
@@ -34,24 +52,31 @@ export function SchedulesPanel({
   snapshot: SchedulerSnapshot;
 }) {
   const initialSchedules = useMemo<EditableSchedule[]>(
-    () =>
-      snapshot.schedules.map((schedule) => ({
-        id: schedule.id,
-        name: schedule.name,
-        unitId: schedule.unitId,
-        startDate: schedule.startDate,
-        dayShiftDays: schedule.dayShiftDays,
-        nightShiftDays: schedule.nightShiftDays,
-        offDays: schedule.offDays,
-        employeeCount: schedule.employees.length,
-      })),
+    () => {
+      const existing = new Map(
+        snapshot.schedules.map((schedule) => [
+          schedule.name,
+          {
+            id: schedule.id,
+            name: schedule.name,
+            startDate: schedule.startDate,
+            dayShiftDays: schedule.dayShiftDays,
+            nightShiftDays: schedule.nightShiftDays,
+            offDays: schedule.offDays,
+            employeeCount: schedule.employees.length,
+          },
+        ]),
+      );
+
+      return REQUIRED_SHIFT_CODES.map((code) => existing.get(code) ?? createShiftTemplate(code));
+    },
     [snapshot],
   );
 
   const [schedules, setSchedules] = useState(initialSchedules);
   const [baselineSchedules, setBaselineSchedules] = useState(initialSchedules);
   const [statusMessage, setStatusMessage] = useState(
-    "Create schedules and define how many day shifts, night shifts, and off days they repeat through.",
+    "These four shared shifts define the rotation pattern for every employee across the site.",
   );
   const [isSaving, startSaveTransition] = useTransition();
 
@@ -75,29 +100,6 @@ export function SchedulesPanel({
     );
   }
 
-  function handleAddSchedule() {
-    const defaultUnit = snapshot.productionUnits[0];
-
-    if (!defaultUnit) {
-      setStatusMessage("Add a production unit first, then create schedules here.");
-      return;
-    }
-
-    const nextSchedule: EditableSchedule = {
-      id: `schedule-${crypto.randomUUID().slice(0, 8)}`,
-      name: "New Schedule",
-      unitId: defaultUnit.id,
-      startDate: new Date().toISOString().slice(0, 10),
-      dayShiftDays: 3,
-      nightShiftDays: 3,
-      offDays: 6,
-      employeeCount: 0,
-    };
-
-    setSchedules((current) => [nextSchedule, ...current]);
-    setStatusMessage("New schedule row added. Set the pattern and save when ready.");
-  }
-
   function handleSave() {
     startSaveTransition(async () => {
       const result = await saveSchedules({ updates: dirtyUpdates } as SaveSchedulesInput);
@@ -114,23 +116,20 @@ export function SchedulesPanel({
       <div className="panel-heading">
         <div>
           <span className="panel-eyebrow">Schedules</span>
-          <h1 className="panel-title">Shift pattern setup</h1>
+          <h1 className="panel-title">Shared shift patterns</h1>
         </div>
         <p className="panel-copy">
-          Each schedule defines a production unit, a start date, and the repeating counts for day
-          shifts, night shifts, and off days.
+          Shift patterns do not carry production-unit data anymore. They only define the four shared
+          rotations 601, 602, 603, and 604.
         </p>
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--personnel">
         <div className="workspace-copy workspace-copy--full">
           <strong>{statusMessage}</strong>
-          <p>Personnel are assigned to schedules on the Personnel page.</p>
+          <p>Personnel can be distributed across these four shifts from the Personnel page.</p>
         </div>
         <div className="planner-actions">
-          <button type="button" className="ghost-button" onClick={handleAddSchedule}>
-            Add schedule
-          </button>
           <button
             type="button"
             className="primary-button"
@@ -144,12 +143,16 @@ export function SchedulesPanel({
 
       <div className="summary-row">
         <div className="summary-stat">
-          <span>Total schedules</span>
+          <span>Total shifts</span>
           <strong>{schedules.length}</strong>
         </div>
         <div className="summary-stat">
-          <span>Production units</span>
-          <strong>{snapshot.productionUnits.length}</strong>
+          <span>Pattern length</span>
+          <strong>
+            {Math.max(
+              ...schedules.map((schedule) => schedule.dayShiftDays + schedule.nightShiftDays + schedule.offDays),
+            )}
+          </strong>
         </div>
         <div className="summary-stat">
           <span>Employees linked</span>
@@ -165,8 +168,7 @@ export function SchedulesPanel({
         <table className="personnel-table">
           <thead>
             <tr>
-              <th>Schedule name</th>
-              <th>Production unit</th>
+              <th>Shift</th>
               <th>Start date</th>
               <th>Day on</th>
               <th>Night on</th>
@@ -178,34 +180,7 @@ export function SchedulesPanel({
             {schedules.map((schedule) => (
               <tr key={schedule.id}>
                 <td>
-                  <input
-                    className="table-input"
-                    value={schedule.name}
-                    onChange={(event) =>
-                      updateSchedule(schedule.id, (current) => ({
-                        ...current,
-                        name: event.target.value,
-                      }))
-                    }
-                  />
-                </td>
-                <td>
-                  <select
-                    className="table-select"
-                    value={schedule.unitId}
-                    onChange={(event) =>
-                      updateSchedule(schedule.id, (current) => ({
-                        ...current,
-                        unitId: event.target.value,
-                      }))
-                    }
-                  >
-                    {snapshot.productionUnits.map((unit) => (
-                      <option key={unit.id} value={unit.id}>
-                        {unit.name}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="table-code">{schedule.name}</span>
                 </td>
                 <td>
                   <input

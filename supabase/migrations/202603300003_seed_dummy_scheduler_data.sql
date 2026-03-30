@@ -8,21 +8,14 @@ set
   name = excluded.name,
   description = excluded.description;
 
-insert into schedules (id, unit_id, name, start_date, day_shift_days, night_shift_days, off_days)
+insert into schedules (id, name, start_date, day_shift_days, night_shift_days, off_days)
 values
-  ('schedule-casting-601', 'unit-casting', 'Casting 601', '2026-01-01', 3, 3, 6),
-  ('schedule-casting-602', 'unit-casting', 'Casting 602', '2026-01-04', 3, 3, 6),
-  ('schedule-casting-603', 'unit-casting', 'Casting 603', '2026-01-07', 3, 3, 6),
-  ('schedule-casting-604', 'unit-casting', 'Casting 604', '2026-01-10', 3, 3, 6),
-  ('schedule-dispatch-601', 'unit-dispatch', 'Dispatch 601', '2026-01-01', 3, 3, 6),
-  ('schedule-dispatch-602', 'unit-dispatch', 'Dispatch 602', '2026-01-04', 3, 3, 6),
-  ('schedule-dispatch-603', 'unit-dispatch', 'Dispatch 603', '2026-01-07', 3, 3, 6),
-  ('schedule-dispatch-604', 'unit-dispatch', 'Dispatch 604', '2026-01-10', 3, 3, 6),
-  ('schedule-packaging-601', 'unit-packaging', 'Packaging 601', '2026-01-01', 4, 2, 4),
-  ('schedule-packaging-603', 'unit-packaging', 'Packaging 603', '2026-01-07', 4, 2, 4)
+  ('schedule-601', '601', '2026-01-01', 3, 3, 6),
+  ('schedule-602', '602', '2026-01-04', 3, 3, 6),
+  ('schedule-603', '603', '2026-01-07', 3, 3, 6),
+  ('schedule-604', '604', '2026-01-10', 3, 3, 6)
 on conflict (id) do update
 set
-  unit_id = excluded.unit_id,
   name = excluded.name,
   start_date = excluded.start_date,
   day_shift_days = excluded.day_shift_days,
@@ -48,35 +41,36 @@ set
   label = excluded.label,
   color_token = excluded.color_token;
 
-insert into employees (id, schedule_id, full_name, role_title)
+insert into employees (id, schedule_id, unit_id, full_name, role_title)
 values
-  ('emp-ava', 'schedule-casting-601', 'Ava Patel', 'Senior Operator'),
-  ('emp-noah', 'schedule-casting-602', 'Noah Kim', 'Relief Operator'),
-  ('emp-jules', 'schedule-casting-603', 'Jules Martin', 'Coordinator'),
-  ('emp-mika', 'schedule-casting-604', 'Mika Stone', 'Operator'),
-  ('emp-siena', 'schedule-casting-601', 'Siena Morales', 'Team Lead'),
-  ('emp-owen', 'schedule-casting-602', 'Owen Clarke', 'Operator'),
-  ('emp-rina', 'schedule-casting-603', 'Rina Das', 'Utility Relief'),
-  ('emp-teo', 'schedule-casting-604', 'Teo Ramirez', 'Operator'),
-  ('emp-cam', 'schedule-dispatch-601', 'Cam Russell', 'Dispatch Lead'),
-  ('emp-lena', 'schedule-dispatch-602', 'Lena Abbas', 'Yard Specialist'),
-  ('emp-eli', 'schedule-dispatch-603', 'Eli Foster', 'Coordinator'),
-  ('emp-zara', 'schedule-dispatch-604', 'Zara Shah', 'Relief Operator'),
-  ('emp-nina', 'schedule-dispatch-601', 'Nina Brooks', 'Yard Controller'),
-  ('emp-hugo', 'schedule-dispatch-602', 'Hugo Tran', 'Manifest Clerk'),
-  ('emp-iris', 'schedule-dispatch-603', 'Iris Bennett', 'Dispatch Operator'),
-  ('emp-omar', 'schedule-dispatch-604', 'Omar Vega', 'Release Specialist'),
-  ('emp-kira', 'schedule-packaging-601', 'Kira Walsh', 'Packaging Lead'),
-  ('emp-joel', 'schedule-packaging-601', 'Joel Park', 'Case Packer'),
-  ('emp-maia', 'schedule-packaging-603', 'Maia Chen', 'QA Tech'),
-  ('emp-rhett', 'schedule-packaging-603', 'Rhett Cole', 'Forklift Operator'),
-  ('emp-dina', 'schedule-packaging-601', 'Dina Scott', 'Line Operator'),
-  ('emp-finn', 'schedule-packaging-601', 'Finn Alvarez', 'Palletizer'),
-  ('emp-gia', 'schedule-packaging-603', 'Gia Turner', 'Packaging Tech'),
-  ('emp-leo', 'schedule-packaging-603', 'Leo Morris', 'Inventory Relief')
+  ('emp-ava', 'schedule-601', 'unit-casting', 'Ava Patel', 'Senior Operator'),
+  ('emp-noah', 'schedule-602', 'unit-casting', 'Noah Kim', 'Relief Operator'),
+  ('emp-jules', 'schedule-603', 'unit-casting', 'Jules Martin', 'Coordinator'),
+  ('emp-mika', 'schedule-604', 'unit-casting', 'Mika Stone', 'Operator'),
+  ('emp-siena', 'schedule-601', 'unit-casting', 'Siena Morales', 'Team Lead'),
+  ('emp-owen', 'schedule-602', 'unit-casting', 'Owen Clarke', 'Operator'),
+  ('emp-rina', 'schedule-603', 'unit-casting', 'Rina Das', 'Utility Relief'),
+  ('emp-teo', 'schedule-604', 'unit-casting', 'Teo Ramirez', 'Operator'),
+  ('emp-cam', 'schedule-601', 'unit-dispatch', 'Cam Russell', 'Dispatch Lead'),
+  ('emp-lena', 'schedule-602', 'unit-dispatch', 'Lena Abbas', 'Yard Specialist'),
+  ('emp-eli', 'schedule-603', 'unit-dispatch', 'Eli Foster', 'Coordinator'),
+  ('emp-zara', 'schedule-604', 'unit-dispatch', 'Zara Shah', 'Relief Operator'),
+  ('emp-nina', 'schedule-601', 'unit-dispatch', 'Nina Brooks', 'Yard Controller'),
+  ('emp-hugo', 'schedule-602', 'unit-dispatch', 'Hugo Tran', 'Manifest Clerk'),
+  ('emp-iris', 'schedule-603', 'unit-dispatch', 'Iris Bennett', 'Dispatch Operator'),
+  ('emp-omar', 'schedule-604', 'unit-dispatch', 'Omar Vega', 'Release Specialist'),
+  ('emp-kira', 'schedule-601', 'unit-packaging', 'Kira Walsh', 'Packaging Lead'),
+  ('emp-joel', 'schedule-602', 'unit-packaging', 'Joel Park', 'Case Packer'),
+  ('emp-maia', 'schedule-603', 'unit-packaging', 'Maia Chen', 'QA Tech'),
+  ('emp-rhett', 'schedule-604', 'unit-packaging', 'Rhett Cole', 'Forklift Operator'),
+  ('emp-dina', 'schedule-601', 'unit-packaging', 'Dina Scott', 'Line Operator'),
+  ('emp-finn', 'schedule-602', 'unit-packaging', 'Finn Alvarez', 'Palletizer'),
+  ('emp-gia', 'schedule-603', 'unit-packaging', 'Gia Turner', 'Packaging Tech'),
+  ('emp-leo', 'schedule-604', 'unit-packaging', 'Leo Morris', 'Inventory Relief')
 on conflict (id) do update
 set
   schedule_id = excluded.schedule_id,
+  unit_id = excluded.unit_id,
   full_name = excluded.full_name,
   role_title = excluded.role_title;
 

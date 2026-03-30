@@ -2,6 +2,8 @@ export type ShiftKind = "DAY" | "NIGHT" | "OFF";
 
 export type ScheduleCode = "601" | "602" | "603" | "604";
 
+export const REQUIRED_SHIFT_CODES: ScheduleCode[] = ["601", "602", "603", "604"];
+
 export interface ProductionUnit {
   id: string;
   name: string;
@@ -21,12 +23,12 @@ export interface Employee {
   name: string;
   role: string;
   scheduleId: string;
+  unitId: string;
   competencyIds: string[];
 }
 
 export interface Schedule {
   id: string;
-  unitId: string;
   name: string;
   startDate: string;
   dayShiftDays: number;
@@ -60,6 +62,7 @@ export interface PersonnelUpdate {
   name: string;
   role: string;
   scheduleId: string;
+  unitId: string;
   competencyIds: string[];
 }
 
@@ -70,7 +73,6 @@ export interface SavePersonnelInput {
 export interface ScheduleUpdate {
   scheduleId: string;
   name: string;
-  unitId: string;
   startDate: string;
   dayShiftDays: number;
   nightShiftDays: number;
@@ -79,4 +81,16 @@ export interface ScheduleUpdate {
 
 export interface SaveSchedulesInput {
   updates: ScheduleUpdate[];
+}
+
+export interface CompetencyUpdate {
+  competencyId: string;
+  unitId: string;
+  code: string;
+  label: string;
+  colorToken: string;
+}
+
+export interface SaveCompetenciesInput {
+  updates: CompetencyUpdate[];
 }

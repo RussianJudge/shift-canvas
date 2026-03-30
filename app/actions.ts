@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
-import type { SaveAssignmentsInput, SavePersonnelInput, SaveSchedulesInput } from "@/lib/types";
+import type {
+  SaveAssignmentsInput,
+  SaveCompetenciesInput,
+  SavePersonnelInput,
+  SaveSchedulesInput,
+} from "@/lib/types";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
 export async function saveAssignments(input: SaveAssignmentsInput) {
@@ -91,6 +96,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
     full_name: update.name,
     role_title: update.role,
     schedule_id: update.scheduleId,
+    unit_id: update.unitId,
     is_active: true,
   }));
 
@@ -161,7 +167,6 @@ export async function saveSchedules(input: SaveSchedulesInput) {
   const rows = input.updates.map((update) => ({
     id: update.scheduleId,
     name: update.name,
-    unit_id: update.unitId,
     start_date: update.startDate,
     day_shift_days: update.dayShiftDays,
     night_shift_days: update.nightShiftDays,
@@ -183,9 +188,50 @@ export async function saveSchedules(input: SaveSchedulesInput) {
   revalidatePath("/personnel");
   revalidatePath("/schedules");
   revalidatePath("/teams");
+  revalidatePath("/competencies");
 
   return {
     ok: true,
     message: "Schedule changes saved to Supabase.",
+  };
+}
+
+export async function saveCompetencies(input: SaveCompetenciesInput) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message:
+        "Supabase is not configured yet. Competency edits are available locally in this browser only.",
+    };
+  }
+
+  const rows = input.updates.map((update) => ({
+    id: update.competencyId,
+    unit_id: update.unitId,
+    code: update.code,
+    label: update.label,
+    color_token: update.colorToken,
+  }));
+
+  const { error } = await supabase.from("competencies").upsert(rows, {
+    onConflict: "id",
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not save competencies: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/personnel");
+  revalidatePath("/competencies");
+
+  return {
+    ok: true,
+    message: "Competency changes saved to Supabase.",
   };
 }

@@ -8,15 +8,14 @@ set
   name = excluded.name,
   description = excluded.description;
 
-insert into schedules (id, unit_id, name, start_date, day_shift_days, night_shift_days, off_days)
+insert into schedules (id, name, start_date, day_shift_days, night_shift_days, off_days)
 values
-  ('schedule-casting-601', 'unit-casting', 'Casting 601', '2026-01-01', 3, 3, 6),
-  ('schedule-casting-602', 'unit-casting', 'Casting 602', '2026-01-04', 3, 3, 6),
-  ('schedule-dispatch-601', 'unit-dispatch', 'Dispatch 601', '2026-01-01', 3, 3, 6),
-  ('schedule-packaging-603', 'unit-packaging', 'Packaging 603', '2026-01-07', 3, 3, 6)
+  ('schedule-601', '601', '2026-01-01', 3, 3, 6),
+  ('schedule-602', '602', '2026-01-04', 3, 3, 6),
+  ('schedule-603', '603', '2026-01-07', 3, 3, 6),
+  ('schedule-604', '604', '2026-01-10', 3, 3, 6)
 on conflict (id) do update
 set
-  unit_id = excluded.unit_id,
   name = excluded.name,
   start_date = excluded.start_date,
   day_shift_days = excluded.day_shift_days,
@@ -31,7 +30,10 @@ values
   ('comp-post-21', 'unit-casting', 'Post 21', 'Quality bay', 'rose'),
   ('comp-dock-2', 'unit-dispatch', 'Dock 2', 'Scale + manifest', 'blue'),
   ('comp-dock-7', 'unit-dispatch', 'Dock 7', 'Release gate', 'lime'),
-  ('comp-dock-9', 'unit-dispatch', 'Dock 9', 'Outbound staging', 'orange')
+  ('comp-dock-9', 'unit-dispatch', 'Dock 9', 'Outbound staging', 'orange'),
+  ('comp-pack-3', 'unit-packaging', 'Pack 3', 'Case pack line', 'teal'),
+  ('comp-pack-6', 'unit-packaging', 'Pack 6', 'Palletizing', 'blue'),
+  ('comp-pack-9', 'unit-packaging', 'Pack 9', 'Final QA hold', 'rose')
 on conflict (id) do update
 set
   unit_id = excluded.unit_id,
@@ -39,21 +41,26 @@ set
   label = excluded.label,
   color_token = excluded.color_token;
 
-insert into employees (id, schedule_id, full_name, role_title)
+insert into employees (id, schedule_id, unit_id, full_name, role_title)
 values
-  ('emp-ava', 'schedule-casting-601', 'Ava Patel', 'Senior Operator'),
-  ('emp-noah', 'schedule-casting-602', 'Noah Kim', 'Relief Operator'),
-  ('emp-jules', 'schedule-casting-601', 'Jules Martin', 'Coordinator'),
-  ('emp-mika', 'schedule-casting-602', 'Mika Stone', 'Operator'),
-  ('emp-siena', 'schedule-casting-601', 'Siena Morales', 'Team Lead'),
-  ('emp-owen', 'schedule-casting-602', 'Owen Clarke', 'Operator'),
-  ('emp-cam', 'schedule-dispatch-601', 'Cam Russell', 'Dispatch Lead'),
-  ('emp-lena', 'schedule-dispatch-601', 'Lena Abbas', 'Yard Specialist'),
-  ('emp-maia', 'schedule-packaging-603', 'Maia Chen', 'QA Tech'),
-  ('emp-gia', 'schedule-packaging-603', 'Gia Turner', 'Packaging Tech')
+  ('emp-ava', 'schedule-601', 'unit-casting', 'Ava Patel', 'Senior Operator'),
+  ('emp-noah', 'schedule-602', 'unit-casting', 'Noah Kim', 'Relief Operator'),
+  ('emp-jules', 'schedule-603', 'unit-casting', 'Jules Martin', 'Coordinator'),
+  ('emp-mika', 'schedule-604', 'unit-casting', 'Mika Stone', 'Operator'),
+  ('emp-siena', 'schedule-601', 'unit-casting', 'Siena Morales', 'Team Lead'),
+  ('emp-owen', 'schedule-602', 'unit-casting', 'Owen Clarke', 'Operator'),
+  ('emp-cam', 'schedule-601', 'unit-dispatch', 'Cam Russell', 'Dispatch Lead'),
+  ('emp-lena', 'schedule-602', 'unit-dispatch', 'Lena Abbas', 'Yard Specialist'),
+  ('emp-eli', 'schedule-603', 'unit-dispatch', 'Eli Foster', 'Coordinator'),
+  ('emp-zara', 'schedule-604', 'unit-dispatch', 'Zara Shah', 'Relief Operator'),
+  ('emp-kira', 'schedule-601', 'unit-packaging', 'Kira Walsh', 'Packaging Lead'),
+  ('emp-joel', 'schedule-602', 'unit-packaging', 'Joel Park', 'Case Packer'),
+  ('emp-maia', 'schedule-603', 'unit-packaging', 'Maia Chen', 'QA Tech'),
+  ('emp-rhett', 'schedule-604', 'unit-packaging', 'Rhett Cole', 'Forklift Operator')
 on conflict (id) do update
 set
   schedule_id = excluded.schedule_id,
+  unit_id = excluded.unit_id,
   full_name = excluded.full_name,
   role_title = excluded.role_title;
 
@@ -76,9 +83,17 @@ values
   ('emp-cam', 'comp-dock-7'),
   ('emp-lena', 'comp-dock-7'),
   ('emp-lena', 'comp-dock-9'),
+  ('emp-eli', 'comp-dock-2'),
+  ('emp-eli', 'comp-dock-9'),
+  ('emp-zara', 'comp-dock-2'),
+  ('emp-zara', 'comp-dock-7'),
+  ('emp-zara', 'comp-dock-9'),
+  ('emp-kira', 'comp-pack-3'),
+  ('emp-kira', 'comp-pack-6'),
+  ('emp-joel', 'comp-pack-3'),
+  ('emp-joel', 'comp-pack-9'),
   ('emp-maia', 'comp-pack-6'),
   ('emp-maia', 'comp-pack-9'),
-  ('emp-gia', 'comp-pack-3'),
-  ('emp-gia', 'comp-pack-6'),
-  ('emp-gia', 'comp-pack-9')
+  ('emp-rhett', 'comp-pack-3'),
+  ('emp-rhett', 'comp-pack-6')
 on conflict (employee_id, competency_id) do nothing;

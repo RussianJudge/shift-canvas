@@ -6,7 +6,6 @@ import type { Competency, Employee, ProductionUnit, Schedule, SchedulerSnapshot,
 
 type ScheduleRow = {
   id: string;
-  unit_id: string;
   name: string;
   start_date: string;
   day_shift_days: number;
@@ -17,6 +16,7 @@ type ScheduleRow = {
 type EmployeeRow = {
   id: string;
   schedule_id: string;
+  unit_id: string;
   full_name: string;
   role_title: string | null;
 };
@@ -72,11 +72,11 @@ export async function getSchedulerSnapshot(month: string) {
       supabase.from("competencies").select("id, unit_id, code, label, color_token").order("code"),
       supabase
         .from("schedules")
-        .select("id, unit_id, name, start_date, day_shift_days, night_shift_days, off_days")
+        .select("id, name, start_date, day_shift_days, night_shift_days, off_days")
         .order("name"),
       supabase
         .from("employees")
-        .select("id, schedule_id, full_name, role_title")
+        .select("id, schedule_id, unit_id, full_name, role_title")
         .eq("is_active", true)
         .order("full_name"),
       supabase.from("employee_competencies").select("employee_id, competency_id"),
@@ -130,6 +130,7 @@ export async function getSchedulerSnapshot(month: string) {
         name: row.full_name,
         role: row.role_title ?? "Operator",
         scheduleId: row.schedule_id,
+        unitId: row.unit_id,
         competencyIds: competenciesByEmployee[row.id] ?? [],
       });
       return map;
@@ -139,7 +140,6 @@ export async function getSchedulerSnapshot(month: string) {
 
   const schedules: Schedule[] = (schedulesResult.data as ScheduleRow[]).map((row) => ({
     id: row.id,
-    unitId: row.unit_id,
     name: row.name,
     startDate: row.start_date,
     dayShiftDays: row.day_shift_days,

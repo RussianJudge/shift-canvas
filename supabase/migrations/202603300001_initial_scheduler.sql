@@ -7,7 +7,6 @@ create table if not exists production_units (
 
 create table if not exists schedules (
   id text primary key,
-  unit_id text not null references production_units (id) on delete cascade,
   name text not null,
   start_date date not null,
   day_shift_days integer not null check (day_shift_days >= 0),
@@ -29,6 +28,7 @@ create table if not exists competencies (
 create table if not exists employees (
   id text primary key,
   schedule_id text not null references schedules (id) on delete cascade,
+  unit_id text not null references production_units (id) on delete cascade,
   full_name text not null,
   role_title text not null default 'Operator',
   is_active boolean not null default true,
@@ -54,9 +54,9 @@ create table if not exists schedule_assignments (
   unique (employee_id, assignment_date)
 );
 
-create index if not exists schedules_unit_id_idx on schedules (unit_id);
 create index if not exists competencies_unit_code_idx on competencies (unit_id, code);
 create index if not exists employees_schedule_active_idx on employees (schedule_id) where is_active = true;
+create index if not exists employees_unit_id_idx on employees (unit_id);
 create index if not exists assignments_date_employee_idx on schedule_assignments (assignment_date, employee_id);
 
 create or replace function update_schedule_assignment_timestamp()
