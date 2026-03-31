@@ -408,6 +408,35 @@ export function MonthlyScheduler({
       return map;
     }, {});
   }, [activeSchedule, draftAssignments, employeeMap, selectedSetDays, snapshot.competencies, snapshot.overtimeClaims, snapshot.timeCodes]);
+  const unassignedSetCells = useMemo(() => {
+    if (selectedSetDays.length === 0) {
+      return [];
+    }
+
+    return activeSchedule.employees.flatMap((employee) =>
+      selectedSetDays.flatMap((day) => {
+        const shiftKind = shiftForDate(activeSchedule, day.date);
+        const selection = getSelectionForCell(
+          employee.id,
+          day.date,
+          shiftKind,
+          draftAssignments,
+          snapshot.timeCodes,
+        );
+
+        if (selection.competencyId || selection.timeCodeId) {
+          return [];
+        }
+
+        return [
+          {
+            employeeName: employee.name,
+            date: day.date,
+          },
+        ];
+      }),
+    );
+  }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.timeCodes]);
   const displayEmployees = useMemo<DisplayEmployee[]>(() => {
     const baseRows = activeSchedule.employees.map((employee) => ({
       rowId: `base:${employee.id}`,
@@ -816,6 +845,23 @@ export function MonthlyScheduler({
     const startDate = selectedSetDays[0].date;
     const endDate = selectedSetDays[selectedSetDays.length - 1].date;
     const nextIsComplete = !isSelectedSetComplete;
+
+    if (nextIsComplete && unassignedSetCells.length > 0) {
+      const preview = unassignedSetCells
+        .slice(0, 3)
+        .map((cell) => `${cell.employeeName} on ${formatShortDate(cell.date)}`)
+        .join(", ");
+      const remainingCount = Math.max(0, unassignedSetCells.length - 3);
+      const shouldContinue = window.confirm(
+        `${unassignedSetCells.length} working cell${unassignedSetCells.length === 1 ? " is" : "s are"} still blank in this set${
+          preview ? `, including ${preview}` : ""
+        }${remainingCount > 0 ? `, plus ${remainingCount} more` : ""}. If you continue, those staff will be treated as off and overtime will post as needed. Continue?`,
+      );
+
+      if (!shouldContinue) {
+        return;
+      }
+    }
 
     startSetCompletionTransition(async () => {
       const result = await setScheduleSetCompletion({
