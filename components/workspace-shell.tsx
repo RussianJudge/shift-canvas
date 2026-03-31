@@ -56,7 +56,10 @@ function PersonnelIcon() {
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M9 6l6 6-6 6" transform={collapsed ? undefined : "translate(24 24) rotate(180)"} />
+      <path
+        d="M8.25 8.25L4.5 12m0 0l3.75 3.75M4.5 12h10.5M13.5 5.25h4.125c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125H13.5"
+        transform={collapsed ? "translate(24 24) rotate(180)" : undefined}
+      />
     </svg>
   );
 }

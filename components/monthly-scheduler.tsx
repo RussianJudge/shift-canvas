@@ -592,6 +592,14 @@ export function MonthlyScheduler({
   }, [displayEmployees, editorCell, monthDays]);
 
   useEffect(() => {
+    if (!editorCell || !completedSetDates.has(editorCell.date)) {
+      return;
+    }
+
+    setEditorCell(null);
+  }, [completedSetDates, editorCell]);
+
+  useEffect(() => {
     if (!selectedSetAnchorDate || monthDays.some((day) => day.date === selectedSetAnchorDate)) {
       return;
     }
@@ -1101,6 +1109,7 @@ export function MonthlyScheduler({
               competencyMap={competencyMap}
               timeCodeMap={timeCodeMap}
               timeCodes={snapshot.timeCodes}
+              completedSetDates={completedSetDates}
               selectedCell={selectedCell}
               dragRange={dragRange}
               highlightedMissingDates={highlightedMissingDates}
@@ -1156,6 +1165,7 @@ function EmployeeRow({
   competencyMap,
   timeCodeMap,
   timeCodes,
+  completedSetDates,
   selectedCell,
   dragRange,
   highlightedMissingDates,
@@ -1172,6 +1182,7 @@ function EmployeeRow({
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
   timeCodes: TimeCode[];
+  completedSetDates: Set<string>;
   selectedCell: SelectedCell | null;
   dragRange: DragRange | null;
   highlightedMissingDates: Set<string>;
@@ -1198,6 +1209,7 @@ function EmployeeRow({
 
       {monthDays.map((day, dayIndex) => {
         const isOvertimeCell = !overtimeDateSet || overtimeDateSet.has(day.date);
+        const isLockedCell = completedSetDates.has(day.date);
         const shiftKind = isOvertimeCell ? shiftForDate(schedule, day.date) : "OFF";
         const selection = isOvertimeCell
           ? getSelectionForCell(
@@ -1233,20 +1245,22 @@ function EmployeeRow({
               day.isWeekend ? "shift-cell--weekend" : ""
             } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
               activeColorToken ? "shift-cell--coded" : ""
+            } ${isLockedCell ? "shift-cell--locked" : ""} ${
+              isLockedCell && activeColorToken ? "shift-cell--locked-coded" : ""
             } ${isSelected ? "shift-cell--selected" : ""} ${
               isInDragRange ? "shift-cell--range" : ""
             } ${highlightedMissingDates.has(day.date) && setDates.has(day.date) ? "shift-cell--missing-column" : ""} ${
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
             }`}
             onPointerDown={(event) => {
-              if (event.button !== 0 || !isOvertimeCell) {
+              if (event.button !== 0 || !isOvertimeCell || isLockedCell) {
                 return;
               }
 
               onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, selection);
             }}
             onPointerEnter={(event) => {
-              if (isOvertimeCell && dragRange && event.buttons === 1) {
+              if (isOvertimeCell && !isLockedCell && dragRange && event.buttons === 1) {
                 onDragHover(employee.sourceEmployeeId, dayIndex);
               }
             }}
@@ -1257,13 +1271,13 @@ function EmployeeRow({
                 activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
               }`}
               onClick={() => {
-                if (!isOvertimeCell) {
+                if (!isOvertimeCell || isLockedCell) {
                   return;
                 }
 
                 onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date });
               }}
-              disabled={!isOvertimeCell}
+              disabled={!isOvertimeCell || isLockedCell}
               aria-label={`${employee.name} ${day.date} assignment`}
             >
               {getSelectionCode(selection, competencyMap, timeCodeMap)}
