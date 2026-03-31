@@ -1,4 +1,5 @@
 import type {
+  CompletedSet,
   Competency,
   Employee,
   Schedule,
@@ -83,6 +84,51 @@ export function getMonthDays(monthKey: string): MonthDay[] {
       isWeekend: weekday === 0 || weekday === 6,
     };
   });
+}
+
+export function getWorkedSetDays(
+  schedule: Pick<Schedule, "startDate" | "dayShiftDays" | "nightShiftDays" | "offDays"> | null,
+  monthDays: Array<Pick<MonthDay, "date">>,
+  anchorDate: string | null,
+) {
+  if (!schedule || !anchorDate) {
+    return [];
+  }
+
+  const anchorIndex = monthDays.findIndex((day) => day.date === anchorDate);
+
+  if (anchorIndex === -1 || shiftForDate(schedule, anchorDate) === "OFF") {
+    return [];
+  }
+
+  let startIndex = anchorIndex;
+  let endIndex = anchorIndex;
+
+  while (startIndex > 0 && shiftForDate(schedule, monthDays[startIndex - 1].date) !== "OFF") {
+    startIndex -= 1;
+  }
+
+  while (
+    endIndex < monthDays.length - 1 &&
+    shiftForDate(schedule, monthDays[endIndex + 1].date) !== "OFF"
+  ) {
+    endIndex += 1;
+  }
+
+  return monthDays.slice(startIndex, endIndex + 1);
+}
+
+export function createCompletedSetKey(
+  scheduleId: string,
+  month: string,
+  startDate: string,
+  endDate: string,
+) {
+  return `${scheduleId}:${month}:${startDate}:${endDate}`;
+}
+
+export function createCompletedSetKeyFromEntry(entry: CompletedSet) {
+  return createCompletedSetKey(entry.scheduleId, entry.month, entry.startDate, entry.endDate);
 }
 
 export function getSuggestedCompetencyId(employee: Pick<Employee, "id" | "competencyIds">, isoDate: string) {

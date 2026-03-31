@@ -61,6 +61,13 @@ export interface OvertimeClaim {
   date: string;
 }
 
+export interface CompletedSet {
+  scheduleId: string;
+  month: string;
+  startDate: string;
+  endDate: string;
+}
+
 export interface SchedulerSnapshot {
   month: string;
   schedules: Schedule[];
@@ -69,6 +76,7 @@ export interface SchedulerSnapshot {
   timeCodes: TimeCode[];
   assignments: StoredAssignment[];
   overtimeClaims: OvertimeClaim[];
+  completedSets: CompletedSet[];
 }
 
 export interface SaveAssignmentsInput {
@@ -87,6 +95,14 @@ export interface ReleaseOvertimePostingInput {
   employeeId: string;
   competencyId: string;
   dates: string[];
+}
+
+export interface SetScheduleCompletionInput {
+  scheduleId: string;
+  month: string;
+  startDate: string;
+  endDate: string;
+  isComplete: boolean;
 }
 
 export interface PersonnelUpdate {

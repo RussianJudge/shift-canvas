@@ -274,6 +274,11 @@ select {
   color: var(--ink);
 }
 
+.ghost-button--active {
+  background: color-mix(in srgb, var(--team-accent) 12%, white);
+  border-color: color-mix(in srgb, var(--team-accent) 38%, white);
+}
+
 .summary-row {
   display: grid;
   grid-template-columns: repeat(6, minmax(8rem, 1fr));
@@ -375,7 +380,7 @@ select {
 }
 
 .workspace-toolbar--overtime {
-  grid-template-columns: repeat(3, minmax(12rem, 16rem)) minmax(0, 1fr);
+  grid-template-columns: repeat(4, minmax(10rem, 14rem)) minmax(0, 1fr);
 }
 
 .workspace-copy--full {
@@ -406,6 +411,14 @@ select {
   align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.set-builder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 .set-builder-legend {
@@ -835,7 +848,7 @@ select {
   align-content: center;
   gap: 0;
   min-height: 3.6rem;
-  padding: 0.2rem 0.08rem;
+  padding: 0.28rem 0.14rem;
   content-visibility: auto;
   contain-intrinsic-size: 58px;
 }
@@ -915,13 +928,13 @@ select {
 
 .shift-cell-button {
   width: 100%;
-  min-height: 1.7rem;
-  padding: 0.12rem 0.2rem;
+  min-height: 1.85rem;
+  padding: 0.18rem 0.28rem;
   border: 1px solid rgba(23, 20, 17, 0.08);
   border-radius: 0.6rem;
   background: rgba(255, 255, 255, 0.78);
   color: var(--ink);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
   line-height: 1;
   text-align: center;

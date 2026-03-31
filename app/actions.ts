@@ -10,13 +10,16 @@ import type {
   SavePersonnelInput,
   SaveSchedulesInput,
   SaveTimeCodesInput,
+  SetScheduleCompletionInput,
 } from "@/lib/types";
 import { getSchedulerSnapshot } from "@/lib/data";
 import {
   buildAssignmentIndex,
+  createCompletedSetKey,
   getEmployeeMap,
   getMonthDays,
   getScheduleById,
+  getWorkedSetDays,
   shiftForDate,
 } from "@/lib/scheduling";
 import { getSupabaseAdminClient } from "@/lib/supabase";
@@ -40,6 +43,15 @@ async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: 
     const snapshot = await getSchedulerSnapshot(month);
     const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
     const monthDays = getMonthDays(month);
+    const completedDateKeys = snapshot.completedSets.reduce<Set<string>>((set, completedSet) => {
+      for (const day of monthDays) {
+        if (day.date >= completedSet.startDate && day.date <= completedSet.endDate) {
+          set.add(`${completedSet.scheduleId}:${day.date}`);
+        }
+      }
+
+      return set;
+    }, new Set<string>());
     const claimsByCoverageKey = snapshot.overtimeClaims.reduce<Record<string, typeof snapshot.overtimeClaims>>(
       (map, claim) => {
         const key = `${claim.scheduleId}:${claim.competencyId}:${claim.date}`;
@@ -63,6 +75,10 @@ async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: 
 
           if (claims.length === 0) {
             return [];
+          }
+
+          if (!completedDateKeys.has(`${schedule.id}:${day.date}`)) {
+            return claims;
           }
 
           const regularFilled = schedule.employees.reduce((count, employee) => {
@@ -201,6 +217,125 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   };
 }
 
+export async function setScheduleSetCompletion(input: SetScheduleCompletionInput) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Set completion is unavailable.",
+    };
+  }
+
+  if (
+    isBlank(input.scheduleId) ||
+    isBlank(input.month) ||
+    isBlank(input.startDate) ||
+    isBlank(input.endDate)
+  ) {
+    return {
+      ok: false,
+      message: "Set completion is missing required details.",
+    };
+  }
+
+  if (input.isComplete) {
+    const { error } = await supabase.from("completed_sets").upsert(
+      {
+        schedule_id: input.scheduleId,
+        month_key: input.month,
+        start_date: input.startDate,
+        end_date: input.endDate,
+      },
+      {
+        onConflict: "schedule_id,month_key,start_date,end_date",
+      },
+    );
+
+    if (error) {
+      return {
+        ok: false,
+        message: `Could not mark that set complete: ${error.message}`,
+      };
+    }
+  } else {
+    const claimsResult = await supabase
+      .from("overtime_claims")
+      .select("id, employee_id, competency_id, assignment_date")
+      .eq("schedule_id", input.scheduleId)
+      .gte("assignment_date", input.startDate)
+      .lte("assignment_date", input.endDate);
+
+    if (claimsResult.error) {
+      return {
+        ok: false,
+        message: `Could not look up overtime claims for that set: ${claimsResult.error.message}`,
+      };
+    }
+
+    if ((claimsResult.data ?? []).length > 0) {
+      const claimRows = claimsResult.data as Array<{
+        id: string;
+        employee_id: string;
+        competency_id: string;
+        assignment_date: string;
+      }>;
+      const claimIds = claimRows.map((claim) => claim.id);
+      const { error: deleteClaimsError } = await supabase.from("overtime_claims").delete().in("id", claimIds);
+
+      if (deleteClaimsError) {
+        return {
+          ok: false,
+          message: `Could not clear overtime claims for that set: ${deleteClaimsError.message}`,
+        };
+      }
+
+      const assignmentDeleteResults = await Promise.all(
+        claimRows.map((claim) =>
+          supabase
+            .from("schedule_assignments")
+            .delete()
+            .eq("employee_id", claim.employee_id)
+            .eq("assignment_date", claim.assignment_date)
+            .eq("competency_id", claim.competency_id)
+            .eq("notes", "Overtime"),
+        ),
+      );
+      const assignmentDeleteError = assignmentDeleteResults.find((result) => result.error)?.error;
+
+      if (assignmentDeleteError) {
+        return {
+          ok: false,
+          message: `Set was unmarked, but overtime cleanup failed: ${assignmentDeleteError.message}`,
+        };
+      }
+    }
+
+    const { error } = await supabase
+      .from("completed_sets")
+      .delete()
+      .eq("schedule_id", input.scheduleId)
+      .eq("month_key", input.month)
+      .eq("start_date", input.startDate)
+      .eq("end_date", input.endDate);
+
+    if (error) {
+      return {
+        ok: false,
+        message: `Could not unmark that set: ${error.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: input.isComplete ? "Set marked schedule complete." : "Set reopened and overtime cleared.",
+  };
+}
+
 export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   const supabase = getSupabaseAdminClient();
 
@@ -227,7 +362,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
   const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
 
-  if (!employee || !employeeSchedule || !competency) {
+  if (!employee || !employeeSchedule || !competency || !targetSchedule) {
     return {
       ok: false,
       message: "Could not find the employee or competency for this posting.",
@@ -238,6 +373,26 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     return {
       ok: false,
       message: `${employee.name} is not qualified for ${competency.code}.`,
+    };
+  }
+
+  const fullSetDays = getWorkedSetDays(targetSchedule, getMonthDays(month), input.dates[0] ?? null);
+  const completedSetKeys = new Set(snapshot.completedSets.map((entry) => createCompletedSetKey(entry.scheduleId, entry.month, entry.startDate, entry.endDate)));
+
+  if (
+    fullSetDays.length === 0 ||
+    !completedSetKeys.has(
+      createCompletedSetKey(
+        input.scheduleId,
+        month,
+        fullSetDays[0].date,
+        fullSetDays[fullSetDays.length - 1].date,
+      ),
+    )
+  ) {
+    return {
+      ok: false,
+      message: "That set is not marked schedule complete yet.",
     };
   }
 

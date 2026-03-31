@@ -3,9 +3,11 @@
 import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useState, useTransition, startTransition } from "react";
 
-import { saveAssignments } from "@/app/actions";
+import { saveAssignments, setScheduleSetCompletion } from "@/app/actions";
 import {
   buildAssignmentIndex,
+  createCompletedSetKey,
+  createCompletedSetKeyFromEntry,
   createAssignmentKey,
   formatMonthLabel,
   getCompetencyMap,
@@ -13,6 +15,7 @@ import {
   getMonthDays,
   getScheduleById,
   getTimeCodeMap,
+  getWorkedSetDays,
   shiftForDate,
 } from "@/lib/scheduling";
 import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
@@ -33,6 +36,7 @@ type DisplayEmployee = {
   name: string;
   role: string;
   competencyIds: string[];
+  overtimeDates?: string[];
 };
 
 type CoverageSummary = {
@@ -125,38 +129,6 @@ function formatShortDate(isoDate: string) {
 
 function formatStaffCount(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-function getSetDays(
-  schedule: Schedule | null,
-  monthDays: Array<{ date: string }>,
-  anchorDate: string | null,
-) {
-  if (!schedule || !anchorDate) {
-    return [];
-  }
-
-  const anchorIndex = monthDays.findIndex((day) => day.date === anchorDate);
-
-  if (anchorIndex === -1 || shiftForDate(schedule, anchorDate) === "OFF") {
-    return [];
-  }
-
-  let startIndex = anchorIndex;
-  let endIndex = anchorIndex;
-
-  while (startIndex > 0 && shiftForDate(schedule, monthDays[startIndex - 1].date) !== "OFF") {
-    startIndex -= 1;
-  }
-
-  while (
-    endIndex < monthDays.length - 1 &&
-    shiftForDate(schedule, monthDays[endIndex + 1].date) !== "OFF"
-  ) {
-    endIndex += 1;
-  }
-
-  return monthDays.slice(startIndex, endIndex + 1);
 }
 
 function getDefaultTimeCodeId(timeCodes: TimeCode[], shiftKind: ShiftKind) {
@@ -359,6 +331,7 @@ export function MonthlyScheduler({
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
+  const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
@@ -367,9 +340,23 @@ export function MonthlyScheduler({
   const monthDays = useMemo(() => getMonthDays(currentMonth), [currentMonth]);
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
   const selectedSetDays = useMemo(
-    () => getSetDays(activeSchedule, monthDays, selectedSetAnchorDate),
+    () => getWorkedSetDays(activeSchedule, monthDays, selectedSetAnchorDate),
     [activeSchedule, monthDays, selectedSetAnchorDate],
   );
+  const completedSetKeys = useMemo(
+    () => new Set(snapshot.completedSets.map(createCompletedSetKeyFromEntry)),
+    [snapshot.completedSets],
+  );
+  const selectedSetKey =
+    activeSchedule && selectedSetDays.length > 0
+      ? createCompletedSetKey(
+          activeSchedule.id,
+          currentMonth,
+          selectedSetDays[0].date,
+          selectedSetDays[selectedSetDays.length - 1].date,
+        )
+      : null;
+  const isSelectedSetComplete = selectedSetKey ? completedSetKeys.has(selectedSetKey) : false;
   const competencyCoverage = useMemo(() => {
     return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
@@ -440,27 +427,33 @@ export function MonthlyScheduler({
       competencyIds: employee.competencyIds,
     }));
 
-    const overtimeRows = snapshot.overtimeClaims
-      .filter((claim) => claim.scheduleId === activeSchedule.id)
-      .map((claim) => employeeMap[claim.employeeId])
-      .filter((employee): employee is Employee => Boolean(employee) && employee.scheduleId !== activeSchedule.id)
-      .reduce<DisplayEmployee[]>((rows, employee) => {
-        if (rows.some((row) => row.sourceEmployeeId === employee.id)) {
+    const overtimeRows = Object.values(
+      snapshot.overtimeClaims
+        .filter((claim) => claim.scheduleId === activeSchedule.id)
+        .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
+          const employee = employeeMap[claim.employeeId];
+
+          if (!employee || employee.scheduleId === activeSchedule.id) {
+            return rows;
+          }
+
+          const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+          const existingDates = rows[employee.id]?.overtimeDates ?? [];
+
+          rows[employee.id] = {
+            rowId: `ot:${activeSchedule.id}:${employee.id}`,
+            sourceEmployeeId: employee.id,
+            name: employee.name,
+            role: `${employee.role} · OT from ${homeSchedule.name}`,
+            competencyIds: employee.competencyIds,
+            overtimeDates: existingDates.includes(claim.date)
+              ? existingDates
+              : [...existingDates, claim.date].sort(),
+          };
+
           return rows;
-        }
-
-        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
-
-        rows.push({
-          rowId: `ot:${activeSchedule.id}:${employee.id}`,
-          sourceEmployeeId: employee.id,
-          name: employee.name,
-          role: `${employee.role} · OT from ${homeSchedule.name}`,
-          competencyIds: employee.competencyIds,
-        });
-
-        return rows;
-      }, []);
+        }, {}),
+    ).sort((left, right) => left.name.localeCompare(right.name));
 
     return [...baseRows, ...overtimeRows];
   }, [activeSchedule, employeeMap, snapshot, snapshot.overtimeClaims]);
@@ -547,7 +540,7 @@ export function MonthlyScheduler({
     ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
     : new Set<string>();
 
-  const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.45rem, 1fr))`;
+  const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.7rem, 1fr))`;
 
   useEffect(() => {
     if (!selectedCell) {
@@ -825,6 +818,85 @@ export function MonthlyScheduler({
     });
   }
 
+  function handleSetCompletion() {
+    if (selectedSetDays.length === 0) {
+      return;
+    }
+
+    const startDate = selectedSetDays[0].date;
+    const endDate = selectedSetDays[selectedSetDays.length - 1].date;
+    const nextIsComplete = !isSelectedSetComplete;
+
+    startSetCompletionTransition(async () => {
+      const result = await setScheduleSetCompletion({
+        scheduleId: activeSchedule.id,
+        month: currentMonth,
+        startDate,
+        endDate,
+        isComplete: nextIsComplete,
+      });
+
+      setStatusMessage(result.message);
+
+      if (!result.ok) {
+        return;
+      }
+
+      const selectedKey = createCompletedSetKey(activeSchedule.id, currentMonth, startDate, endDate);
+      const removedClaims = snapshot.overtimeClaims.filter(
+        (claim) =>
+          claim.scheduleId === activeSchedule.id &&
+          claim.date >= startDate &&
+          claim.date <= endDate,
+      );
+      const removedClaimKeys = new Set(
+        removedClaims.map((claim) => createAssignmentKey(claim.employeeId, claim.date)),
+      );
+
+      startTransition(() => {
+        setSnapshot((current) => ({
+          ...current,
+          completedSets: nextIsComplete
+            ? [
+                ...current.completedSets.filter(
+                  (entry) => createCompletedSetKeyFromEntry(entry) !== selectedKey,
+                ),
+                {
+                  scheduleId: activeSchedule.id,
+                  month: currentMonth,
+                  startDate,
+                  endDate,
+                },
+              ]
+            : current.completedSets.filter(
+                (entry) => createCompletedSetKeyFromEntry(entry) !== selectedKey,
+              ),
+          overtimeClaims: nextIsComplete
+            ? current.overtimeClaims
+            : current.overtimeClaims.filter(
+                (claim) =>
+                  claim.scheduleId !== activeSchedule.id ||
+                  claim.date < startDate ||
+                  claim.date > endDate,
+              ),
+        }));
+
+        if (!nextIsComplete && removedClaimKeys.size > 0) {
+          setBaselineAssignments((current) => {
+            const next = { ...current };
+            removedClaimKeys.forEach((key) => delete next[key]);
+            return next;
+          });
+          setDraftAssignments((current) => {
+            const next = { ...current };
+            removedClaimKeys.forEach((key) => delete next[key]);
+            return next;
+          });
+        }
+      });
+    });
+  }
+
   return (
     <section
       className="panel-frame"
@@ -897,10 +969,26 @@ export function MonthlyScheduler({
                 : "Click a worked day in the top row to inspect this set"}
             </p>
           </div>
-          <div className="set-builder-legend">
-            <span className="set-builder-legend__item">Filled</span>
-            <span className="set-builder-legend__item set-builder-legend__item--under">Understaffed</span>
-            <span className="set-builder-legend__item set-builder-legend__item--ot">Overtime</span>
+          <div className="set-builder-actions">
+            <button
+              type="button"
+              className={`ghost-button ${isSelectedSetComplete ? "ghost-button--active" : ""}`}
+              onClick={handleSetCompletion}
+              disabled={selectedSetDays.length === 0 || isUpdatingSetCompletion}
+            >
+              {isUpdatingSetCompletion
+                ? isSelectedSetComplete
+                  ? "Reopening..."
+                  : "Completing..."
+                : isSelectedSetComplete
+                ? "Set Complete"
+                : "Mark Set Complete"}
+            </button>
+            <div className="set-builder-legend">
+              <span className="set-builder-legend__item">Filled</span>
+              <span className="set-builder-legend__item set-builder-legend__item--under">Understaffed</span>
+              <span className="set-builder-legend__item set-builder-legend__item--ot">Overtime</span>
+            </div>
           </div>
         </div>
 
@@ -1060,6 +1148,7 @@ function EmployeeRow({
   onCellClick: (cell: SelectedCell) => void;
 }) {
   const setDates = new Set(selectedSetDays.map((day) => day.date));
+  const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
 
   return (
     <>
@@ -1069,7 +1158,8 @@ function EmployeeRow({
       </div>
 
       {monthDays.map((day, dayIndex) => {
-        const shiftKind = shiftForDate(schedule, day.date);
+        const shiftKind =
+          overtimeDateSet && !overtimeDateSet.has(day.date) ? "OFF" : shiftForDate(schedule, day.date);
         const selection = getSelectionForCell(
           employee.sourceEmployeeId,
           day.date,

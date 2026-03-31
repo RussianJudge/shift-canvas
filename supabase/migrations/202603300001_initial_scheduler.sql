@@ -75,12 +75,24 @@ create table if not exists overtime_claims (
   unique (schedule_id, employee_id, assignment_date)
 );
 
+create table if not exists completed_sets (
+  id bigint generated always as identity primary key,
+  schedule_id text not null references schedules (id) on delete cascade,
+  month_key text not null,
+  start_date date not null,
+  end_date date not null,
+  created_at timestamptz not null default now(),
+  check (start_date <= end_date),
+  unique (schedule_id, month_key, start_date, end_date)
+);
+
 create index if not exists competencies_code_idx on competencies (code);
 create index if not exists time_codes_code_idx on time_codes (code);
 create index if not exists employees_schedule_active_idx on employees (schedule_id) where is_active = true;
 create index if not exists employees_unit_id_idx on employees (unit_id);
 create index if not exists assignments_date_employee_idx on schedule_assignments (assignment_date, employee_id);
 create index if not exists overtime_claims_schedule_date_idx on overtime_claims (schedule_id, assignment_date);
+create index if not exists completed_sets_schedule_month_idx on completed_sets (schedule_id, month_key, start_date);
 
 create or replace function update_schedule_assignment_timestamp()
 returns trigger
@@ -107,6 +119,7 @@ alter table employees enable row level security;
 alter table employee_competencies enable row level security;
 alter table schedule_assignments enable row level security;
 alter table overtime_claims enable row level security;
+alter table completed_sets enable row level security;
 
 create policy "authenticated read production units"
 on production_units
@@ -153,6 +166,13 @@ with check (true);
 
 create policy "authenticated manage overtime claims"
 on overtime_claims
+for all
+to authenticated
+using (true)
+with check (true);
+
+create policy "authenticated manage completed sets"
+on completed_sets
 for all
 to authenticated
 using (true)

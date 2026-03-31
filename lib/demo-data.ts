@@ -108,4 +108,5 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
   ],
   assignments: [],
   overtimeClaims: [],
+  completedSets: [],
 };

@@ -1,8 +1,10 @@
 import "server-only";
 
 import { demoSchedulerSnapshot } from "@/lib/demo-data";
+import { buildAssignmentIndex, createCompletedSetKey, getEmployeeMap, getMonthDays, getWorkedSetDays, shiftForDate } from "@/lib/scheduling";
 import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
 import type {
+  CompletedSet,
   Competency,
   Employee,
   OvertimeClaim,
@@ -73,6 +75,13 @@ type OvertimeClaimRow = {
   employee_id: string;
   competency_id: string;
   assignment_date: string;
+};
+
+type CompletedSetRow = {
+  schedule_id: string;
+  month_key: string;
+  start_date: string;
+  end_date: string;
 };
 
 function getDataClient() {
@@ -189,6 +198,83 @@ function mapOvertimeClaims(rows: OvertimeClaimRow[]) {
   }));
 }
 
+function mapCompletedSets(rows: CompletedSetRow[]) {
+  return rows.map<CompletedSet>((row) => ({
+    scheduleId: row.schedule_id,
+    month: row.month_key,
+    startDate: row.start_date,
+    endDate: row.end_date,
+  }));
+}
+
+function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
+  const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const monthDays = getMonthDays(snapshot.month);
+  const completedSetKeys = new Set(snapshot.completedSets.map((entry) => createCompletedSetKey(entry.scheduleId, entry.month, entry.startDate, entry.endDate)));
+  const processedKeys = new Set<string>();
+
+  for (const schedule of snapshot.schedules) {
+    for (const day of monthDays) {
+      if (shiftForDate(schedule, day.date) === "OFF") {
+        continue;
+      }
+
+      const setDays = getWorkedSetDays(schedule, monthDays, day.date);
+
+      if (setDays.length === 0) {
+        continue;
+      }
+
+      const setKey = createCompletedSetKey(
+        schedule.id,
+        snapshot.month,
+        setDays[0].date,
+        setDays[setDays.length - 1].date,
+      );
+
+      if (processedKeys.has(setKey) || !completedSetKeys.has(setKey)) {
+        continue;
+      }
+
+      processedKeys.add(setKey);
+
+      for (const competency of snapshot.competencies) {
+        for (const setDay of setDays) {
+          let filledCount = 0;
+
+          for (const employee of schedule.employees) {
+            const selection = assignmentIndex[`${employee.id}:${setDay.date}`];
+
+            if (selection?.competencyId === competency.id) {
+              filledCount += 1;
+            }
+          }
+
+          for (const claim of snapshot.overtimeClaims) {
+            const claimEmployee = employeeMap[claim.employeeId];
+
+            if (
+              claim.scheduleId === schedule.id &&
+              claim.competencyId === competency.id &&
+              claim.date === setDay.date &&
+              claimEmployee?.scheduleId !== schedule.id
+            ) {
+              filledCount += 1;
+            }
+          }
+
+          if (filledCount < competency.requiredStaff) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 export async function getSchedulerSnapshot(month: string) {
   const supabase = getDataClient();
 
@@ -207,6 +293,7 @@ export async function getSchedulerSnapshot(month: string) {
     employeeCompetenciesResult,
     assignmentsResult,
     overtimeClaimsResult,
+    completedSetsResult,
   ] = await Promise.all([
     supabase.from("production_units").select("id, name, description").order("name"),
     supabase.from("competencies").select("id, code, label, color_token, required_staff").order("code"),
@@ -228,6 +315,10 @@ export async function getSchedulerSnapshot(month: string) {
       .select("id, schedule_id, employee_id, competency_id, assignment_date")
       .gte("assignment_date", monthStart)
       .lte("assignment_date", monthEnd),
+    supabase
+      .from("completed_sets")
+      .select("schedule_id, month_key, start_date, end_date")
+      .eq("month_key", month),
   ]);
 
   const results = [
@@ -239,6 +330,7 @@ export async function getSchedulerSnapshot(month: string) {
     employeeCompetenciesResult,
     assignmentsResult,
     overtimeClaimsResult,
+    completedSetsResult,
   ];
 
   if (results.some((result) => result.error)) {
@@ -258,6 +350,7 @@ export async function getSchedulerSnapshot(month: string) {
     schedules: mapSchedules(schedulesResult.data as ScheduleRow[], employeesBySchedule),
     assignments: mapAssignments(assignmentsResult.data as AssignmentRow[]),
     overtimeClaims: mapOvertimeClaims(overtimeClaimsResult.data as OvertimeClaimRow[]),
+    completedSets: mapCompletedSets(completedSetsResult.data as CompletedSetRow[]),
   };
 }
 
@@ -269,6 +362,7 @@ export async function getPersonnelSnapshot(month: string) {
       timeCodes: [],
       assignments: [],
       overtimeClaims: [],
+      completedSets: [],
     });
   }
 
@@ -292,6 +386,7 @@ export async function getPersonnelSnapshot(month: string) {
       timeCodes: [],
       assignments: [],
       overtimeClaims: [],
+      completedSets: [],
     });
   }
 
@@ -308,6 +403,7 @@ export async function getPersonnelSnapshot(month: string) {
     schedules: mapSchedules(schedulesResult.data as ScheduleRow[], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
+    completedSets: [],
   };
 }
 
@@ -320,6 +416,7 @@ export async function getSchedulesSnapshot(month: string) {
       timeCodes: [],
       assignments: [],
       overtimeClaims: [],
+      completedSets: [],
     });
   }
 
@@ -334,6 +431,7 @@ export async function getSchedulesSnapshot(month: string) {
       timeCodes: [],
       assignments: [],
       overtimeClaims: [],
+      completedSets: [],
     });
   }
 
@@ -350,6 +448,7 @@ export async function getSchedulesSnapshot(month: string) {
     schedules: mapSchedules(schedulesResult.data as ScheduleRow[], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
+    completedSets: [],
   };
 }
 
@@ -361,6 +460,7 @@ export async function getCompetenciesSnapshot(month: string) {
       timeCodes: [],
       assignments: [],
       overtimeClaims: [],
+      completedSets: [],
     });
   }
 
@@ -382,6 +482,7 @@ export async function getCompetenciesSnapshot(month: string) {
       timeCodes: [],
       assignments: [],
       overtimeClaims: [],
+      completedSets: [],
     });
   }
 
@@ -398,6 +499,7 @@ export async function getCompetenciesSnapshot(month: string) {
     schedules: mapSchedules(schedulesResult.data as ScheduleRow[], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
+    completedSets: [],
   };
 }
 
@@ -410,6 +512,7 @@ export async function getTimeCodesSnapshot(month: string) {
       schedules: [],
       assignments: [],
       overtimeClaims: [],
+      completedSets: [],
     });
   }
 
@@ -424,6 +527,7 @@ export async function getTimeCodesSnapshot(month: string) {
       schedules: [],
       assignments: [],
       overtimeClaims: [],
+      completedSets: [],
     });
   }
 
@@ -435,5 +539,36 @@ export async function getTimeCodesSnapshot(month: string) {
     schedules: [],
     assignments: [],
     overtimeClaims: [],
+    completedSets: [],
   };
+}
+
+export async function getOvertimeMonths(currentMonth: string) {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    return [currentMonth];
+  }
+
+  const completedSetsResult = await supabase
+    .from("completed_sets")
+    .select("month_key")
+    .order("month_key");
+
+  if (completedSetsResult.error) {
+    return [currentMonth];
+  }
+
+  const candidateMonths = Array.from(
+    new Set(
+      [currentMonth, ...(completedSetsResult.data ?? []).map((row) => (row as { month_key: string }).month_key)].filter(Boolean),
+    ),
+  ).sort();
+
+  const snapshots = await Promise.all(candidateMonths.map((month) => getSchedulerSnapshot(month)));
+  const monthsWithPostings = candidateMonths.filter((month, index) => monthHasOvertimePostings(snapshots[index]));
+
+  return monthsWithPostings.length > 0
+    ? monthsWithPostings
+    : [currentMonth];
 }

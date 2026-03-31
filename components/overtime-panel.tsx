@@ -6,9 +6,12 @@ import { useRouter } from "next/navigation";
 import { claimOvertimePosting, releaseOvertimePosting } from "@/app/actions";
 import {
   buildAssignmentIndex,
+  createCompletedSetKey,
+  createCompletedSetKeyFromEntry,
   getEmployeeMap,
   getMonthDays,
   getScheduleById,
+  getWorkedSetDays,
   shiftForDate,
 } from "@/lib/scheduling";
 import type { Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
@@ -45,42 +48,57 @@ function getShiftLabel(shiftKind: Exclude<ShiftKind, "OFF">, count: number) {
   return `${count} ${shiftKind === "DAY" ? "day" : "night"} shift${count === 1 ? "" : "s"}`;
 }
 
-function getWorkedSegments(schedule: SchedulerSnapshot["schedules"][number], monthDays: Array<{ date: string }>) {
-  const segments: Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }> = [];
-  let currentSegment: { shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] } | null = null;
+function getWorkedSets(schedule: SchedulerSnapshot["schedules"][number], monthDays: Array<{ date: string }>) {
+  const sets: Array<{
+    dates: string[];
+    segments: Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>;
+  }> = [];
+  const processedDates = new Set<string>();
 
   for (const day of monthDays) {
-    const shiftKind = shiftForDate(schedule, day.date);
-
-    if (shiftKind === "OFF") {
-      if (currentSegment) {
-        segments.push(currentSegment);
-        currentSegment = null;
-      }
-
+    if (processedDates.has(day.date) || shiftForDate(schedule, day.date) === "OFF") {
       continue;
     }
 
-    if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
-      if (currentSegment) {
-        segments.push(currentSegment);
-      }
+    const setDays = getWorkedSetDays(schedule, monthDays, day.date);
 
-      currentSegment = {
-        shiftKind,
-        dates: [day.date],
-      };
+    if (setDays.length === 0) {
       continue;
     }
 
-    currentSegment.dates.push(day.date);
+    setDays.forEach((setDay) => processedDates.add(setDay.date));
+
+    const segments = setDays.reduce<Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>>(
+      (currentSegments, setDay) => {
+        const shiftKind = shiftForDate(schedule, setDay.date);
+
+        if (shiftKind === "OFF") {
+          return currentSegments;
+        }
+
+        const currentSegment = currentSegments[currentSegments.length - 1];
+
+        if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
+          currentSegments.push({
+            shiftKind,
+            dates: [setDay.date],
+          });
+          return currentSegments;
+        }
+
+        currentSegment.dates.push(setDay.date);
+        return currentSegments;
+      },
+      [],
+    );
+
+    sets.push({
+      dates: setDays.map((setDay) => setDay.date),
+      segments,
+    });
   }
 
-  if (currentSegment) {
-    segments.push(currentSegment);
-  }
-
-  return segments;
+  return sets;
 }
 
 function getCellSelection(
@@ -127,8 +145,10 @@ function getClaimStatus(
 
 export function OvertimePanel({
   snapshot,
+  availableMonths,
 }: {
   snapshot: SchedulerSnapshot;
+  availableMonths: string[];
 }) {
   const router = useRouter();
   const [claimingEmployeeId, setClaimingEmployeeId] = useState(
@@ -142,6 +162,10 @@ export function OvertimePanel({
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
+  const completedSetKeys = useMemo(
+    () => new Set(snapshot.completedSets.map(createCompletedSetKeyFromEntry)),
+    [snapshot.completedSets],
+  );
   const allEmployees = useMemo(
     () =>
       snapshot.schedules
@@ -155,92 +179,107 @@ export function OvertimePanel({
     const selectedEmployeeClaims = snapshot.overtimeClaims.filter((claim) => claim.employeeId === claimingEmployeeId);
 
     for (const schedule of snapshot.schedules) {
-      const workedSegments = getWorkedSegments(schedule, monthDays);
+      const workedSets = getWorkedSets(schedule, monthDays);
 
-      for (const segment of workedSegments) {
-        const setDates = segment.dates;
+      for (const workedSet of workedSets) {
+        const setKey = createCompletedSetKey(
+          schedule.id,
+          snapshot.month,
+          workedSet.dates[0],
+          workedSet.dates[workedSet.dates.length - 1],
+        );
 
-        for (const competency of snapshot.competencies) {
-          const missingSlotsByDate = setDates.map((date) => {
-            let filledCount = 0;
+        if (!completedSetKeys.has(setKey)) {
+          continue;
+        }
 
-            for (const employee of schedule.employees) {
-              const selection = getCellSelection(employee, date, assignmentIndex);
+        for (const segment of workedSet.segments) {
+          const setDates = segment.dates;
 
-              if (selection.competencyId === competency.id) {
-                filledCount += 1;
+          for (const competency of snapshot.competencies) {
+            const missingSlotsByDate = setDates.map((date) => {
+              let filledCount = 0;
+
+              for (const employee of schedule.employees) {
+                const selection = getCellSelection(employee, date, assignmentIndex);
+
+                if (selection.competencyId === competency.id) {
+                  filledCount += 1;
+                }
               }
-            }
 
-            for (const claim of snapshot.overtimeClaims) {
-              const claimEmployee = employeeMap[claim.employeeId];
+              for (const claim of snapshot.overtimeClaims) {
+                const claimEmployee = employeeMap[claim.employeeId];
 
-              if (
-                claim.scheduleId === schedule.id &&
-                claim.competencyId === competency.id &&
-                claim.date === date &&
-                claimEmployee?.scheduleId !== schedule.id
-              ) {
-                filledCount += 1;
+                if (
+                  claim.scheduleId === schedule.id &&
+                  claim.competencyId === competency.id &&
+                  claim.date === date &&
+                  claimEmployee?.scheduleId !== schedule.id
+                ) {
+                  filledCount += 1;
+                }
               }
+
+              return Math.max(0, competency.requiredStaff - filledCount);
+            });
+
+            const maxMissing = Math.max(0, ...missingSlotsByDate);
+            const filledCells =
+              setDates.length * competency.requiredStaff -
+              missingSlotsByDate.reduce((sum, value) => sum + value, 0);
+            const staffedPeople = setDates.length > 0 ? filledCells / setDates.length : 0;
+            const claimedDates = selectedEmployeeClaims
+              .filter(
+                (claim) =>
+                  claim.scheduleId === schedule.id &&
+                  claim.competencyId === competency.id &&
+                  setDates.includes(claim.date),
+              )
+              .map((claim) => claim.date)
+              .sort();
+
+            if (claimedDates.length > 0) {
+              nextPostings.push({
+                id: `claimed:${schedule.id}:${competency.id}:${claimedDates[0]}`,
+                scheduleId: schedule.id,
+                scheduleName: schedule.name,
+                shiftKind: segment.shiftKind,
+                competencyId: competency.id,
+                competencyCode: competency.code,
+                competencyLabel: competency.label,
+                colorToken: competency.colorToken,
+                dates: claimedDates,
+                staffedPeople,
+                requiredStaff: competency.requiredStaff,
+                openShifts: claimedDates.length,
+                claimedBySelectedEmployee: true,
+              });
             }
 
-            return Math.max(0, competency.requiredStaff - filledCount);
-          });
+            for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
+              const postingDates = setDates.filter((_, index) => missingSlotsByDate[index] > slotIndex);
 
-          const maxMissing = Math.max(0, ...missingSlotsByDate);
-          const filledCells = setDates.length * competency.requiredStaff - missingSlotsByDate.reduce((sum, value) => sum + value, 0);
-          const staffedPeople = setDates.length > 0 ? filledCells / setDates.length : 0;
-          const claimedDates = selectedEmployeeClaims
-            .filter(
-              (claim) =>
-                claim.scheduleId === schedule.id &&
-                claim.competencyId === competency.id &&
-                setDates.includes(claim.date),
-            )
-            .map((claim) => claim.date)
-            .sort();
+              if (postingDates.length === 0) {
+                continue;
+              }
 
-          if (claimedDates.length > 0) {
-            nextPostings.push({
-              id: `claimed:${schedule.id}:${competency.id}:${claimedDates[0]}`,
-              scheduleId: schedule.id,
-              scheduleName: schedule.name,
-              shiftKind: segment.shiftKind,
-              competencyId: competency.id,
-              competencyCode: competency.code,
-              competencyLabel: competency.label,
-              colorToken: competency.colorToken,
-              dates: claimedDates,
-              staffedPeople,
-              requiredStaff: competency.requiredStaff,
-              openShifts: claimedDates.length,
-              claimedBySelectedEmployee: true,
-            });
-          }
-
-          for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
-            const postingDates = setDates.filter((_, index) => missingSlotsByDate[index] > slotIndex);
-
-            if (postingDates.length === 0) {
-              continue;
+              nextPostings.push({
+                id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
+                scheduleId: schedule.id,
+                scheduleName: schedule.name,
+                shiftKind: segment.shiftKind,
+                competencyId: competency.id,
+                competencyCode: competency.code,
+                competencyLabel: competency.label,
+                colorToken: competency.colorToken,
+                dates: postingDates,
+                staffedPeople,
+                requiredStaff: competency.requiredStaff,
+                openShifts: postingDates.length,
+                claimedBySelectedEmployee: false,
+              });
             }
-
-            nextPostings.push({
-              id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
-              scheduleId: schedule.id,
-              scheduleName: schedule.name,
-              shiftKind: segment.shiftKind,
-              competencyId: competency.id,
-              competencyCode: competency.code,
-              competencyLabel: competency.label,
-              colorToken: competency.colorToken,
-              dates: postingDates,
-              staffedPeople,
-              requiredStaff: competency.requiredStaff,
-              openShifts: postingDates.length,
-              claimedBySelectedEmployee: false,
-            });
           }
         }
       }
@@ -253,7 +292,18 @@ export function OvertimePanel({
       left.shiftKind.localeCompare(right.shiftKind) ||
       left.competencyCode.localeCompare(right.competencyCode),
     );
-  }, [assignmentIndex, claimingEmployeeId, employeeMap, monthDays, snapshot, snapshot.competencies, snapshot.overtimeClaims, snapshot.schedules]);
+  }, [
+    assignmentIndex,
+    claimingEmployeeId,
+    completedSetKeys,
+    employeeMap,
+    monthDays,
+    snapshot,
+    snapshot.competencies,
+    snapshot.month,
+    snapshot.overtimeClaims,
+    snapshot.schedules,
+  ]);
   const filteredPostings = useMemo(
     () =>
       postings.filter((posting) => {
@@ -343,6 +393,24 @@ export function OvertimePanel({
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--overtime">
+        <label className="field">
+          <span>Month</span>
+          <select
+            value={snapshot.month}
+            onChange={(event) => router.push(`/overtime?month=${event.target.value}`)}
+          >
+            {availableMonths.map((month) => (
+              <option key={month} value={month}>
+                {new Intl.DateTimeFormat("en-US", {
+                  month: "long",
+                  year: "numeric",
+                  timeZone: "UTC",
+                }).format(new Date(`${month}-01T00:00:00Z`))}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="field">
           <span>Claim As</span>
           <select
@@ -467,7 +535,7 @@ export function OvertimePanel({
         {groupedPostings.length === 0 ? (
           <div className="empty-state">
             <strong>No overtime postings.</strong>
-            <span>Try a different team or competency filter, or all current sets are fully staffed.</span>
+            <span>Complete a set on the Schedule page, or all completed sets are fully staffed.</span>
           </div>
         ) : null}
       </div>
