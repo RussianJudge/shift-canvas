@@ -482,9 +482,7 @@ select {
   justify-items: center;
   min-width: 4.7rem;
   border: 1px solid transparent;
-  cursor: pointer;
   transition:
-    transform 160ms ease,
     border-color 160ms ease,
     opacity 160ms ease,
     filter 160ms ease;
@@ -498,10 +496,6 @@ select {
 .set-builder-pill span {
   font-size: 0.68rem;
   opacity: 0.78;
-}
-
-.set-builder-pill:hover:not(:disabled) {
-  transform: translateY(-1px);
 }
 
 .set-builder-pill--active {
@@ -525,11 +519,6 @@ select {
 
 .set-builder-pill--disabled {
   opacity: 0.58;
-}
-
-.set-builder-pill:disabled {
-  cursor: not-allowed;
-  transform: none;
 }
 
 .schedule-wrap {

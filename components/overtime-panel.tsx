@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import { claimOvertimePosting } from "@/app/actions";
+import { claimOvertimePosting, releaseOvertimePosting } from "@/app/actions";
 import {
   buildAssignmentIndex,
   getCompetencyMap,
@@ -27,6 +27,7 @@ type OvertimePosting = {
   requiredStaff: number;
   openShifts: number;
   eligibleEmployeeIds: string[];
+  claimedBySelectedEmployee: boolean;
 };
 
 function formatShortDate(isoDate: string) {
@@ -116,6 +117,7 @@ export function OvertimePanel({
 
   const postings = useMemo<OvertimePosting[]>(() => {
     const nextPostings: OvertimePosting[] = [];
+    const selectedEmployeeClaims = snapshot.overtimeClaims.filter((claim) => claim.employeeId === claimingEmployeeId);
 
     for (const schedule of snapshot.schedules) {
       const setGroups = getSetGroups(schedule, monthDays);
@@ -152,6 +154,33 @@ export function OvertimePanel({
           const maxMissing = Math.max(0, ...missingSlotsByDate);
           const filledCells = setDates.length * competency.requiredStaff - missingSlotsByDate.reduce((sum, value) => sum + value, 0);
           const staffedPeople = setDates.length > 0 ? filledCells / setDates.length : 0;
+          const claimedDates = selectedEmployeeClaims
+            .filter(
+              (claim) =>
+                claim.scheduleId === schedule.id &&
+                claim.competencyId === competency.id &&
+                setDates.includes(claim.date),
+            )
+            .map((claim) => claim.date)
+            .sort();
+
+          if (claimedDates.length > 0) {
+            nextPostings.push({
+              id: `claimed:${schedule.id}:${competency.id}:${claimedDates[0]}`,
+              scheduleId: schedule.id,
+              scheduleName: schedule.name,
+              competencyId: competency.id,
+              competencyCode: competency.code,
+              competencyLabel: competency.label,
+              colorToken: competency.colorToken,
+              dates: claimedDates,
+              staffedPeople,
+              requiredStaff: competency.requiredStaff,
+              openShifts: claimedDates.length,
+              eligibleEmployeeIds: claimingEmployeeId ? [claimingEmployeeId] : [],
+              claimedBySelectedEmployee: true,
+            });
+          }
 
           for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
             const postingDates = setDates.filter((_, index) => missingSlotsByDate[index] > slotIndex);
@@ -184,6 +213,7 @@ export function OvertimePanel({
               requiredStaff: competency.requiredStaff,
               openShifts: postingDates.length,
               eligibleEmployeeIds,
+              claimedBySelectedEmployee: false,
             });
           }
         }
@@ -191,11 +221,12 @@ export function OvertimePanel({
     }
 
     return nextPostings.sort((left, right) =>
+      Number(right.claimedBySelectedEmployee) - Number(left.claimedBySelectedEmployee) ||
       left.scheduleName.localeCompare(right.scheduleName) ||
       left.dates[0].localeCompare(right.dates[0]) ||
       left.competencyCode.localeCompare(right.competencyCode),
     );
-  }, [allEmployees, assignmentIndex, employeeMap, monthDays, snapshot, snapshot.competencies, snapshot.overtimeClaims, snapshot.schedules]);
+  }, [allEmployees, assignmentIndex, claimingEmployeeId, employeeMap, monthDays, snapshot, snapshot.competencies, snapshot.overtimeClaims, snapshot.schedules]);
 
   const claimingEmployee = claimingEmployeeId ? employeeMap[claimingEmployeeId] ?? null : null;
 
@@ -207,6 +238,28 @@ export function OvertimePanel({
 
     startClaimTransition(async () => {
       const result = await claimOvertimePosting({
+        scheduleId: posting.scheduleId,
+        employeeId: claimingEmployeeId,
+        competencyId: posting.competencyId,
+        dates: posting.dates,
+      });
+
+      setStatusMessage(result.message);
+
+      if (result.ok) {
+        router.refresh();
+      }
+    });
+  }
+
+  function handleRelease(posting: OvertimePosting) {
+    if (!claimingEmployeeId) {
+      setStatusMessage("Select an employee first.");
+      return;
+    }
+
+    startClaimTransition(async () => {
+      const result = await releaseOvertimePosting({
         scheduleId: posting.scheduleId,
         employeeId: claimingEmployeeId,
         competencyId: posting.competencyId,
@@ -261,7 +314,10 @@ export function OvertimePanel({
           const canClaim = claimingEmployeeId ? posting.eligibleEmployeeIds.includes(claimingEmployeeId) : false;
 
           return (
-            <article key={posting.id} className="overtime-card">
+            <article
+              key={posting.id}
+              className={`overtime-card ${posting.claimedBySelectedEmployee ? "overtime-card--claimed" : ""}`}
+            >
               <div className="overtime-card-top">
                 <div>
                   <p className="overtime-card-team">Shift {posting.scheduleName}</p>
@@ -280,17 +336,25 @@ export function OvertimePanel({
 
               <div className="overtime-card-actions">
                 <span className="overtime-card-hint">
-                  {posting.eligibleEmployeeIds.length > 0
+                  {posting.claimedBySelectedEmployee
+                    ? "Claimed by selected employee"
+                    : posting.eligibleEmployeeIds.length > 0
                     ? `${posting.eligibleEmployeeIds.length} employee${posting.eligibleEmployeeIds.length === 1 ? "" : "s"} can claim`
                     : "No eligible employees available"}
                 </span>
                 <button
                   type="button"
                   className="primary-button"
-                  onClick={() => handleClaim(posting)}
-                  disabled={isClaiming || !canClaim}
+                  onClick={() => (posting.claimedBySelectedEmployee ? handleRelease(posting) : handleClaim(posting))}
+                  disabled={isClaiming || (!posting.claimedBySelectedEmployee && !canClaim)}
                 >
-                  {isClaiming ? "Claiming..." : "Claim Posting"}
+                  {isClaiming
+                    ? posting.claimedBySelectedEmployee
+                      ? "Releasing..."
+                      : "Claiming..."
+                    : posting.claimedBySelectedEmployee
+                    ? "Release Posting"
+                    : "Claim Posting"}
                 </button>
               </div>
             </article>

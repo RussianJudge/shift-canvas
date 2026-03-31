@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import type {
   ClaimOvertimePostingInput,
+  ReleaseOvertimePostingInput,
   SaveAssignmentsInput,
   SaveCompetenciesInput,
   SavePersonnelInput,
@@ -185,6 +186,68 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   return {
     ok: true,
     message: `${employee.name} was added to the overtime posting.`,
+  };
+}
+
+export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Overtime postings are unavailable.",
+    };
+  }
+
+  if (input.dates.length === 0) {
+    return {
+      ok: false,
+      message: "No overtime dates were provided.",
+    };
+  }
+
+  const { error: claimDeleteError } = await supabase
+    .from("overtime_claims")
+    .delete()
+    .eq("schedule_id", input.scheduleId)
+    .eq("employee_id", input.employeeId)
+    .eq("competency_id", input.competencyId)
+    .in("assignment_date", input.dates);
+
+  if (claimDeleteError) {
+    return {
+      ok: false,
+      message: `Could not release overtime claim: ${claimDeleteError.message}`,
+    };
+  }
+
+  const deleteResults = await Promise.all(
+    input.dates.map((date) =>
+      supabase
+        .from("schedule_assignments")
+        .delete()
+        .eq("employee_id", input.employeeId)
+        .eq("assignment_date", date)
+        .eq("competency_id", input.competencyId)
+        .eq("notes", "Overtime"),
+    ),
+  );
+
+  const firstDeleteError = deleteResults.find((result) => result.error)?.error;
+
+  if (firstDeleteError) {
+    return {
+      ok: false,
+      message: `Could not clear overtime assignments: ${firstDeleteError.message}`,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: "Overtime claim released.",
   };
 }
 

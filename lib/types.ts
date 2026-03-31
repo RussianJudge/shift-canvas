@@ -82,6 +82,13 @@ export interface ClaimOvertimePostingInput {
   dates: string[];
 }
 
+export interface ReleaseOvertimePostingInput {
+  scheduleId: string;
+  employeeId: string;
+  competencyId: string;
+  dates: string[];
+}
+
 export interface PersonnelUpdate {
   employeeId: string;
   name: string;

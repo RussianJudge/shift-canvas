@@ -28,6 +28,14 @@ type DragRange = {
   selection: AssignmentSelection;
 };
 
+type DisplayEmployee = {
+  rowId: string;
+  sourceEmployeeId: string;
+  name: string;
+  role: string;
+  competencyIds: string[];
+};
+
 type CoverageSummary = {
   filledCells: number;
   requiredCells: number;
@@ -75,7 +83,7 @@ function pickMonthEntries(assignments: Record<string, AssignmentSelection>, mont
 }
 
 function getCellCompetency(
-  employee: Employee,
+  employee: Pick<Employee, "id" | "competencyIds">,
   day: { date: string },
   shiftKind: ShiftKind,
   assignments: Record<string, AssignmentSelection>,
@@ -248,22 +256,6 @@ export function MonthlyScheduler({
     () => getSetDays(activeSchedule, monthDays, selectedSetAnchorDate),
     [activeSchedule, monthDays, selectedSetAnchorDate],
   );
-  const selectedBuilderEmployee =
-    selectedCell && selectedSetDays.some((day) => day.date === selectedCell.date)
-      ? employeeMap[selectedCell.employeeId] ?? null
-      : null;
-  const selectedBuilderSchedule = selectedBuilderEmployee
-    ? getScheduleById(snapshot, selectedBuilderEmployee.scheduleId)
-    : null;
-  const selectedBuilderAssignment =
-    selectedCell && selectedBuilderEmployee && selectedBuilderSchedule
-      ? getCellCompetency(
-          selectedBuilderEmployee,
-          { date: selectedCell.date },
-          shiftForDate(selectedBuilderSchedule, selectedCell.date),
-          draftAssignments,
-        )
-      : null;
   const competencyCoverage = useMemo(() => {
     return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
@@ -309,6 +301,39 @@ export function MonthlyScheduler({
       return map;
     }, {});
   }, [activeSchedule, draftAssignments, employeeMap, selectedSetDays, snapshot.competencies, snapshot.overtimeClaims]);
+  const displayEmployees = useMemo<DisplayEmployee[]>(() => {
+    const baseRows = activeSchedule.employees.map((employee) => ({
+      rowId: `base:${employee.id}`,
+      sourceEmployeeId: employee.id,
+      name: employee.name,
+      role: employee.role,
+      competencyIds: employee.competencyIds,
+    }));
+
+    const overtimeRows = snapshot.overtimeClaims
+      .filter((claim) => claim.scheduleId === activeSchedule.id)
+      .map((claim) => employeeMap[claim.employeeId])
+      .filter((employee): employee is Employee => Boolean(employee) && employee.scheduleId !== activeSchedule.id)
+      .reduce<DisplayEmployee[]>((rows, employee) => {
+        if (rows.some((row) => row.sourceEmployeeId === employee.id)) {
+          return rows;
+        }
+
+        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+
+        rows.push({
+          rowId: `ot:${activeSchedule.id}:${employee.id}`,
+          sourceEmployeeId: employee.id,
+          name: employee.name,
+          role: `${employee.role} · OT from ${homeSchedule.name}`,
+          competencyIds: employee.competencyIds,
+        });
+
+        return rows;
+      }, []);
+
+    return [...baseRows, ...overtimeRows];
+  }, [activeSchedule, employeeMap, snapshot, snapshot.overtimeClaims]);
 
   if (!activeSchedule) {
     return (
@@ -324,7 +349,7 @@ export function MonthlyScheduler({
     );
   }
 
-  const visibleEmployees = activeSchedule.employees.filter((employee) => {
+  const visibleEmployees = displayEmployees.filter((employee) => {
     if (!deferredSearch) {
       return true;
     }
@@ -370,13 +395,15 @@ export function MonthlyScheduler({
       return;
     }
 
-    const employeeStillVisible = activeSchedule.employees.some((employee) => employee.id === selectedCell.employeeId);
+    const employeeStillVisible = displayEmployees.some(
+      (employee) => employee.sourceEmployeeId === selectedCell.employeeId,
+    );
     const dateStillVisible = monthDays.some((day) => day.date === selectedCell.date);
 
     if (!employeeStillVisible || !dateStillVisible) {
       setSelectedCell(null);
     }
-  }, [activeSchedule.employees, monthDays, selectedCell]);
+  }, [displayEmployees, monthDays, selectedCell]);
 
   useEffect(() => {
     if (!selectedSetAnchorDate || monthDays.some((day) => day.date === selectedSetAnchorDate)) {
@@ -506,12 +533,8 @@ export function MonthlyScheduler({
     };
   }, [currentMonth, snapshot.month]);
 
-  function handleAssignmentChange(
-    employee: Employee,
-    date: string,
-    selection: AssignmentSelection,
-  ) {
-    const key = createAssignmentKey(employee.id, date);
+  function handleAssignmentChange(employeeId: string, date: string, selection: AssignmentSelection) {
+    const key = createAssignmentKey(employeeId, date);
 
     startTransition(() => {
       setDraftAssignments((current) => ({
@@ -534,41 +557,6 @@ export function MonthlyScheduler({
       startIndex: dayIndex,
       currentIndex: dayIndex,
       selection,
-    });
-  }
-
-  function handleBuilderAssign(competencyId: string) {
-    if (selectedSetDays.length === 0) {
-      setStatusMessage("Select a worked day in the top row first.");
-      return;
-    }
-
-    if (!selectedCell || !selectedBuilderEmployee) {
-      setStatusMessage("Select an employee cell inside the selected set.");
-      return;
-    }
-
-    if (!selectedBuilderEmployee.competencyIds.includes(competencyId)) {
-      setStatusMessage(`${selectedBuilderEmployee.name} is not qualified for that competency.`);
-      return;
-    }
-
-    startTransition(() => {
-      setDraftAssignments((current) => {
-        const nextAssignments = { ...current };
-
-        for (const day of selectedSetDays) {
-          nextAssignments[createAssignmentKey(selectedBuilderEmployee.id, day.date)] = {
-            competencyId,
-            timeCodeId: null,
-          };
-        }
-
-        return nextAssignments;
-      });
-      setStatusMessage(
-        `Applied ${getCompactCode(competencyMap[competencyId]?.code ?? "")} to ${selectedBuilderEmployee.name}'s set`,
-      );
     });
   }
 
@@ -677,9 +665,7 @@ export function MonthlyScheduler({
             <h2 className="set-builder-title">Set Builder</h2>
             <p className="set-builder-context">
               {selectedSetDays.length > 0
-                ? selectedBuilderEmployee
-                  ? `${activeSchedule.name} set · ${formatShortDate(selectedSetDays[0].date)} - ${formatShortDate(selectedSetDays[selectedSetDays.length - 1].date)} · ${selectedBuilderEmployee.name}`
-                  : `${activeSchedule.name} set · ${formatShortDate(selectedSetDays[0].date)} - ${formatShortDate(selectedSetDays[selectedSetDays.length - 1].date)} · Select an employee cell in this set`
+                ? `${activeSchedule.name} set · ${formatShortDate(selectedSetDays[0].date)} - ${formatShortDate(selectedSetDays[selectedSetDays.length - 1].date)}`
                 : "Click a worked day in the top row to inspect this set"}
             </p>
           </div>
@@ -688,29 +674,22 @@ export function MonthlyScheduler({
         <div className="set-builder-pills">
           {snapshot.competencies.map((competency) => {
             const coverage = competencyCoverage[competency.id];
-            const isAssignable = selectedBuilderEmployee
-              ? selectedBuilderEmployee.competencyIds.includes(competency.id)
-              : false;
-            const isActive = selectedBuilderAssignment?.competencyId === competency.id;
 
             return (
-              <button
+              <div
                 key={competency.id}
-                type="button"
                 className={`set-builder-pill legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
                   coverage?.isUnderstaffed ? "set-builder-pill--understaffed" : ""
                 } ${coverage?.hasOvertime ? "set-builder-pill--overtime" : ""} ${
                   !coverage?.isUnderstaffed && selectedSetDays.length > 0 ? "set-builder-pill--filled" : ""
-                } ${isActive ? "set-builder-pill--active" : ""} ${
-                  !isAssignable || selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
+                } ${
+                  selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
                 }`}
-                onClick={() => handleBuilderAssign(competency.id)}
-                disabled={selectedSetDays.length === 0}
-                title={`${competency.label} · ${formatStaffCount(coverage?.assignedPeople ?? 0)}/${coverage?.requiredStaff ?? competency.requiredStaff} people staffed in this set`}
+                title={`${competency.label} · ${coverage?.filledCells ?? 0}/${coverage?.requiredCells ?? 0} cells filled in this set`}
               >
                 <strong>{getCompactCode(competency.code)}</strong>
                 <span>{formatStaffCount(coverage?.assignedPeople ?? 0)}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -741,7 +720,7 @@ export function MonthlyScheduler({
 
           {visibleEmployees.map((employee) => (
             <EmployeeRow
-              key={employee.id}
+              key={employee.rowId}
               employee={employee}
               schedule={activeSchedule}
               monthDays={monthDays}
@@ -786,7 +765,7 @@ function EmployeeRow({
   onDragHover,
   onAssignmentChange,
 }: {
-  employee: Employee;
+  employee: DisplayEmployee;
   schedule: Schedule;
   monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
   assignments: Record<string, AssignmentSelection>;
@@ -803,7 +782,7 @@ function EmployeeRow({
   ) => void;
   onDragHover: (employeeId: string, dayIndex: number) => void;
   onAssignmentChange: (
-    employee: Employee,
+    employeeId: string,
     date: string,
     selection: AssignmentSelection,
   ) => void;
@@ -817,7 +796,12 @@ function EmployeeRow({
 
       {monthDays.map((day, dayIndex) => {
         const shiftKind = shiftForDate(schedule, day.date);
-        const selection = getCellCompetency(employee, day, shiftKind, assignments);
+        const selection = getCellCompetency(
+          { id: employee.sourceEmployeeId, competencyIds: employee.competencyIds },
+          day,
+          shiftKind,
+          assignments,
+        );
         const availableCompetencies = employee.competencyIds
           .map((competencyId) => competencyMap[competencyId])
           .filter(isCompetency);
@@ -825,15 +809,15 @@ function EmployeeRow({
         const activeTimeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
         const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
         const isSelected =
-          selectedCell?.employeeId === employee.id && selectedCell.date === day.date;
+          selectedCell?.employeeId === employee.sourceEmployeeId && selectedCell.date === day.date;
         const isInDragRange =
-          dragRange?.employeeId === employee.id &&
+          dragRange?.employeeId === employee.sourceEmployeeId &&
           dayIndex >= Math.min(dragRange.startIndex, dragRange.currentIndex) &&
           dayIndex <= Math.max(dragRange.startIndex, dragRange.currentIndex);
 
         return (
           <div
-            key={`${employee.id}-${day.date}`}
+            key={`${employee.rowId}-${day.date}`}
             className={`shift-cell shift-cell--${getShiftTone(shiftKind)} ${
               day.isWeekend ? "shift-cell--weekend" : ""
             } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
@@ -846,11 +830,11 @@ function EmployeeRow({
                 return;
               }
 
-              onCellPointerDown(employee.id, day.date, dayIndex, selection);
+              onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, selection);
             }}
             onPointerEnter={(event) => {
               if (dragRange && event.buttons === 1) {
-                onDragHover(employee.id, dayIndex);
+                onDragHover(employee.sourceEmployeeId, dayIndex);
               }
             }}
           >
@@ -860,7 +844,9 @@ function EmployeeRow({
               }`}
               value={encodeAssignmentValue(selection)}
               aria-label={`${employee.name} ${day.date} assignment`}
-              onChange={(event) => onAssignmentChange(employee, day.date, decodeAssignmentValue(event.target.value))}
+              onChange={(event) =>
+                onAssignmentChange(employee.sourceEmployeeId, day.date, decodeAssignmentValue(event.target.value))
+              }
             >
               <option value="">{shiftKind === "OFF" ? "Off" : ""}</option>
               <optgroup label="Time codes">

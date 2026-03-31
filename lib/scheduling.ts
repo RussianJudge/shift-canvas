@@ -85,7 +85,7 @@ export function getMonthDays(monthKey: string): MonthDay[] {
   });
 }
 
-export function getSuggestedCompetencyId(employee: Employee, isoDate: string) {
+export function getSuggestedCompetencyId(employee: Pick<Employee, "id" | "competencyIds">, isoDate: string) {
   if (employee.competencyIds.length === 0) {
     return null;
   }
