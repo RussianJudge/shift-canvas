@@ -9,6 +9,7 @@ import {
   createCompletedSetKey,
   createCompletedSetKeyFromEntry,
   getEmployeeMap,
+  getExtendedMonthDays,
   getMonthDays,
   getScheduleById,
   getWorkedSetDays,
@@ -48,25 +49,35 @@ function getShiftLabel(shiftKind: Exclude<ShiftKind, "OFF">, count: number) {
   return `${count} ${shiftKind === "DAY" ? "day" : "night"} shift${count === 1 ? "" : "s"}`;
 }
 
-function getWorkedSets(schedule: SchedulerSnapshot["schedules"][number], monthDays: Array<{ date: string }>) {
+function getWorkedSets(
+  schedule: SchedulerSnapshot["schedules"][number],
+  monthDays: Array<{ date: string }>,
+  extendedMonthDays: Array<{ date: string }>,
+) {
   const sets: Array<{
     dates: string[];
     segments: Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>;
   }> = [];
-  const processedDates = new Set<string>();
+  const processedKeys = new Set<string>();
 
   for (const day of monthDays) {
-    if (processedDates.has(day.date) || shiftForDate(schedule, day.date) === "OFF") {
+    if (shiftForDate(schedule, day.date) === "OFF") {
       continue;
     }
 
-    const setDays = getWorkedSetDays(schedule, monthDays, day.date);
+    const setDays = getWorkedSetDays(schedule, extendedMonthDays, day.date);
 
     if (setDays.length === 0) {
       continue;
     }
 
-    setDays.forEach((setDay) => processedDates.add(setDay.date));
+    const setKey = `${setDays[0].date}:${setDays[setDays.length - 1].date}`;
+
+    if (processedKeys.has(setKey)) {
+      continue;
+    }
+
+    processedKeys.add(setKey);
 
     const segments = setDays.reduce<Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>>(
       (currentSegments, setDay) => {
@@ -162,6 +173,7 @@ export function OvertimePanel({
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
+  const extendedMonthDays = useMemo(() => getExtendedMonthDays(snapshot.month), [snapshot.month]);
   const completedSetKeys = useMemo(
     () => new Set(snapshot.completedSets.map(createCompletedSetKeyFromEntry)),
     [snapshot.completedSets],
@@ -179,7 +191,7 @@ export function OvertimePanel({
     const selectedEmployeeClaims = snapshot.overtimeClaims.filter((claim) => claim.employeeId === claimingEmployeeId);
 
     for (const schedule of snapshot.schedules) {
-      const workedSets = getWorkedSets(schedule, monthDays);
+      const workedSets = getWorkedSets(schedule, monthDays, extendedMonthDays);
 
       for (const workedSet of workedSets) {
         const setKey = createCompletedSetKey(
@@ -194,7 +206,11 @@ export function OvertimePanel({
         }
 
         for (const segment of workedSet.segments) {
-          const setDates = segment.dates;
+          const setDates = segment.dates.filter((date) => date.startsWith(`${snapshot.month}-`));
+
+          if (setDates.length === 0) {
+            continue;
+          }
 
           for (const competency of snapshot.competencies) {
             const missingSlotsByDate = setDates.map((date) => {
@@ -297,6 +313,7 @@ export function OvertimePanel({
     claimingEmployeeId,
     completedSetKeys,
     employeeMap,
+    extendedMonthDays,
     monthDays,
     snapshot,
     snapshot.competencies,

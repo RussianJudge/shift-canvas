@@ -21,6 +21,13 @@ function toUtcDayNumber(isoDate: string) {
   return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
 }
 
+export function shiftMonthKey(monthKey: string, delta: number) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1 + delta, 1));
+
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 export function getCurrentMonthKey(timeZone: string) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -84,6 +91,24 @@ export function getMonthDays(monthKey: string): MonthDay[] {
       isWeekend: weekday === 0 || weekday === 6,
     };
   });
+}
+
+export function getExtendedMonthDays(monthKey: string, monthsBefore = 1, monthsAfter = 1) {
+  return Array.from({ length: monthsBefore + monthsAfter + 1 }, (_, index) =>
+    shiftMonthKey(monthKey, index - monthsBefore),
+  ).flatMap((key) => getMonthDays(key));
+}
+
+export function getMonthKeysForDateRange(startDate: string, endDate: string) {
+  const startMonth = startDate.slice(0, 7);
+  const endMonth = endDate.slice(0, 7);
+  const months = [startMonth];
+
+  while (months[months.length - 1] !== endMonth) {
+    months.push(shiftMonthKey(months[months.length - 1], 1));
+  }
+
+  return months;
 }
 
 export function getWorkedSetDays(

@@ -1,7 +1,16 @@
 import "server-only";
 
 import { demoSchedulerSnapshot } from "@/lib/demo-data";
-import { buildAssignmentIndex, createCompletedSetKey, getEmployeeMap, getMonthDays, getWorkedSetDays, shiftForDate } from "@/lib/scheduling";
+import {
+  buildAssignmentIndex,
+  createCompletedSetKey,
+  getEmployeeMap,
+  getExtendedMonthDays,
+  getMonthDays,
+  getWorkedSetDays,
+  shiftForDate,
+  shiftMonthKey,
+} from "@/lib/scheduling";
 import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
 import type {
   CompletedSet,
@@ -114,6 +123,19 @@ function getMonthBounds(month: string) {
   };
 }
 
+function getExtendedMonthBounds(month: string) {
+  const previousMonth = shiftMonthKey(month, -1);
+  const nextMonth = shiftMonthKey(month, 1);
+  const { monthStart } = getMonthBounds(previousMonth);
+  const { monthEnd } = getMonthBounds(nextMonth);
+
+  return {
+    monthStart,
+    monthEnd,
+    windowMonths: [previousMonth, month, nextMonth],
+  };
+}
+
 function mapProductionUnits(rows: ProductionUnitRow[]) {
   return rows.map<ProductionUnit>((row) => ({
     id: row.id,
@@ -211,6 +233,7 @@ function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
   const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const monthDays = getMonthDays(snapshot.month);
+  const extendedMonthDays = getExtendedMonthDays(snapshot.month);
   const completedSetKeys = new Set(snapshot.completedSets.map((entry) => createCompletedSetKey(entry.scheduleId, entry.month, entry.startDate, entry.endDate)));
   const processedKeys = new Set<string>();
 
@@ -220,7 +243,7 @@ function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
         continue;
       }
 
-      const setDays = getWorkedSetDays(schedule, monthDays, day.date);
+      const setDays = getWorkedSetDays(schedule, extendedMonthDays, day.date);
 
       if (setDays.length === 0) {
         continue;
@@ -240,7 +263,7 @@ function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
       processedKeys.add(setKey);
 
       for (const competency of snapshot.competencies) {
-        for (const setDay of setDays) {
+        for (const setDay of setDays.filter((entry) => entry.date.startsWith(`${snapshot.month}-`))) {
           let filledCount = 0;
 
           for (const employee of schedule.employees) {
@@ -282,7 +305,7 @@ export async function getSchedulerSnapshot(month: string) {
     return withMonth(demoSchedulerSnapshot, month);
   }
 
-  const { monthStart, monthEnd } = getMonthBounds(month);
+  const { monthStart, monthEnd, windowMonths } = getExtendedMonthBounds(month);
 
   const [
     unitsResult,
@@ -318,7 +341,7 @@ export async function getSchedulerSnapshot(month: string) {
     supabase
       .from("completed_sets")
       .select("schedule_id, month_key, start_date, end_date")
-      .eq("month_key", month),
+      .in("month_key", windowMonths),
   ]);
 
   const results = [

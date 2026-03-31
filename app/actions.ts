@@ -17,7 +17,9 @@ import {
   buildAssignmentIndex,
   createCompletedSetKey,
   getEmployeeMap,
+  getExtendedMonthDays,
   getMonthDays,
+  getMonthKeysForDateRange,
   getScheduleById,
   getWorkedSetDays,
   shiftForDate,
@@ -229,7 +231,6 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
 
   if (
     isBlank(input.scheduleId) ||
-    isBlank(input.month) ||
     isBlank(input.startDate) ||
     isBlank(input.endDate)
   ) {
@@ -239,18 +240,18 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
     };
   }
 
+  const touchedMonths = getMonthKeysForDateRange(input.startDate, input.endDate);
+
   if (input.isComplete) {
-    const { error } = await supabase.from("completed_sets").upsert(
-      {
-        schedule_id: input.scheduleId,
-        month_key: input.month,
-        start_date: input.startDate,
-        end_date: input.endDate,
-      },
-      {
-        onConflict: "schedule_id,month_key,start_date,end_date",
-      },
-    );
+    const rows = touchedMonths.map((monthKey) => ({
+      schedule_id: input.scheduleId,
+      month_key: monthKey,
+      start_date: input.startDate,
+      end_date: input.endDate,
+    }));
+    const { error } = await supabase.from("completed_sets").upsert(rows, {
+      onConflict: "schedule_id,month_key,start_date,end_date",
+    });
 
     if (error) {
       return {
@@ -315,7 +316,7 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
       .from("completed_sets")
       .delete()
       .eq("schedule_id", input.scheduleId)
-      .eq("month_key", input.month)
+      .in("month_key", touchedMonths)
       .eq("start_date", input.startDate)
       .eq("end_date", input.endDate);
 
@@ -376,7 +377,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     };
   }
 
-  const fullSetDays = getWorkedSetDays(targetSchedule, getMonthDays(month), input.dates[0] ?? null);
+  const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), input.dates[0] ?? null);
   const completedSetKeys = new Set(snapshot.completedSets.map((entry) => createCompletedSetKey(entry.scheduleId, entry.month, entry.startDate, entry.endDate)));
 
   if (

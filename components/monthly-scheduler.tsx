@@ -12,10 +12,13 @@ import {
   formatMonthLabel,
   getCompetencyMap,
   getEmployeeMap,
+  getExtendedMonthDays,
+  getMonthKeysForDateRange,
   getMonthDays,
   getScheduleById,
   getTimeCodeMap,
   getWorkedSetDays,
+  shiftMonthKey,
   shiftForDate,
 } from "@/lib/scheduling";
 import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
@@ -37,6 +40,7 @@ type DisplayEmployee = {
   role: string;
   competencyIds: string[];
   overtimeDates?: string[];
+  overtimeCompetencyByDate?: Record<string, string>;
 };
 
 type CoverageSummary = {
@@ -54,12 +58,23 @@ function isMonthKey(value: string) {
 }
 
 function addMonths(monthKey: string, delta: number) {
-  const [year, month] = monthKey.split("-").map(Number);
-  const next = new Date(Date.UTC(year, month - 1 + delta, 1));
-  const nextYear = next.getUTCFullYear();
-  const nextMonth = String(next.getUTCMonth() + 1).padStart(2, "0");
+  return shiftMonthKey(monthKey, delta);
+}
 
-  return `${nextYear}-${nextMonth}`;
+function stripMonthWindowEntries(assignments: Record<string, AssignmentSelection>, monthKey: string) {
+  const months = new Set([shiftMonthKey(monthKey, -1), monthKey, shiftMonthKey(monthKey, 1)]);
+
+  return Object.fromEntries(
+    Object.entries(assignments).filter((entry) => !months.has(entry[0].slice(-10, -3))),
+  );
+}
+
+function pickMonthWindowEntries(assignments: Record<string, AssignmentSelection>, monthKey: string) {
+  const months = new Set([shiftMonthKey(monthKey, -1), monthKey, shiftMonthKey(monthKey, 1)]);
+
+  return Object.fromEntries(
+    Object.entries(assignments).filter((entry) => months.has(entry[0].slice(-10, -3))),
+  );
 }
 
 function getShiftTone(shift: ShiftKind) {
@@ -311,10 +326,11 @@ export function MonthlyScheduler({
   const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const monthDays = useMemo(() => getMonthDays(currentMonth), [currentMonth]);
+  const extendedMonthDays = useMemo(() => getExtendedMonthDays(currentMonth), [currentMonth]);
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
   const selectedSetDays = useMemo(
-    () => getWorkedSetDays(activeSchedule, monthDays, selectedSetAnchorDate),
-    [activeSchedule, monthDays, selectedSetAnchorDate],
+    () => getWorkedSetDays(activeSchedule, extendedMonthDays, selectedSetAnchorDate),
+    [activeSchedule, extendedMonthDays, selectedSetAnchorDate],
   );
   const completedSetKeys = useMemo(
     () => new Set(snapshot.completedSets.map(createCompletedSetKeyFromEntry)),
@@ -458,6 +474,7 @@ export function MonthlyScheduler({
 
           const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
           const existingDates = rows[employee.id]?.overtimeDates ?? [];
+          const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
 
           rows[employee.id] = {
             rowId: `ot:${activeSchedule.id}:${employee.id}`,
@@ -468,6 +485,10 @@ export function MonthlyScheduler({
             overtimeDates: existingDates.includes(claim.date)
               ? existingDates
               : [...existingDates, claim.date].sort(),
+            overtimeCompetencyByDate: {
+              ...existingCompetencies,
+              [claim.date]: claim.competencyId,
+            },
           };
 
           return rows;
@@ -733,13 +754,13 @@ export function MonthlyScheduler({
               : nextSnapshot.schedules[0]?.id ?? "",
           );
           setBaselineAssignments((current) => ({
-            ...stripMonthEntries(current, currentMonth),
+            ...stripMonthWindowEntries(current, currentMonth),
             ...incomingMonthAssignments,
           }));
           setDraftAssignments((current) => ({
-            ...stripMonthEntries(current, currentMonth),
+            ...stripMonthWindowEntries(current, currentMonth),
             ...incomingMonthAssignments,
-            ...pickMonthEntries(current, currentMonth),
+            ...pickMonthWindowEntries(current, currentMonth),
           }));
           setStatusMessage(`Loaded ${formatMonthLabel(currentMonth)}`);
         });
@@ -887,6 +908,7 @@ export function MonthlyScheduler({
       }
 
       const selectedKey = createCompletedSetKey(activeSchedule.id, currentMonth, startDate, endDate);
+      const touchedMonths = getMonthKeysForDateRange(startDate, endDate);
       const removedClaims = snapshot.overtimeClaims.filter(
         (claim) =>
           claim.scheduleId === activeSchedule.id &&
@@ -903,17 +925,29 @@ export function MonthlyScheduler({
           completedSets: nextIsComplete
             ? [
                 ...current.completedSets.filter(
-                  (entry) => createCompletedSetKeyFromEntry(entry) !== selectedKey,
+                  (entry) =>
+                    !(
+                      entry.scheduleId === activeSchedule.id &&
+                      entry.startDate === startDate &&
+                      entry.endDate === endDate &&
+                      touchedMonths.includes(entry.month)
+                    ),
                 ),
-                {
+                ...touchedMonths.map((month) => ({
                   scheduleId: activeSchedule.id,
-                  month: currentMonth,
+                  month,
                   startDate,
                   endDate,
-                },
+                })),
               ]
             : current.completedSets.filter(
-                (entry) => createCompletedSetKeyFromEntry(entry) !== selectedKey,
+                (entry) =>
+                  !(
+                    entry.scheduleId === activeSchedule.id &&
+                    entry.startDate === startDate &&
+                    entry.endDate === endDate &&
+                    touchedMonths.includes(entry.month)
+                  ),
               ),
           overtimeClaims: nextIsComplete
             ? current.overtimeClaims
@@ -1223,8 +1257,19 @@ function EmployeeRow({
               competencyId: null,
               timeCodeId: null,
             };
-        const activeCompetency = selection.competencyId ? competencyMap[selection.competencyId] : null;
-        const activeTimeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
+        const overtimeClaimCompetencyId =
+          !selection.competencyId && !selection.timeCodeId
+            ? employee.overtimeCompetencyByDate?.[day.date] ?? null
+            : null;
+        const effectiveSelection =
+          overtimeClaimCompetencyId
+            ? {
+                competencyId: overtimeClaimCompetencyId,
+                timeCodeId: null,
+              }
+            : selection;
+        const activeCompetency = effectiveSelection.competencyId ? competencyMap[effectiveSelection.competencyId] : null;
+        const activeTimeCode = effectiveSelection.timeCodeId ? timeCodeMap[effectiveSelection.timeCodeId] : null;
         const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
         const isSelected =
           selectedCell?.employeeId === employee.sourceEmployeeId && selectedCell.date === day.date;
@@ -1257,7 +1302,7 @@ function EmployeeRow({
                 return;
               }
 
-              onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, selection);
+              onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, effectiveSelection);
             }}
             onPointerEnter={(event) => {
               if (isOvertimeCell && !isLockedCell && dragRange && event.buttons === 1) {
@@ -1280,7 +1325,7 @@ function EmployeeRow({
               disabled={!isOvertimeCell || isLockedCell}
               aria-label={`${employee.name} ${day.date} assignment`}
             >
-              {getSelectionCode(selection, competencyMap, timeCodeMap)}
+              {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
             </button>
           </div>
         );
