@@ -15,7 +15,7 @@ import type {
 import { getSchedulerSnapshot } from "@/lib/data";
 import {
   buildAssignmentIndex,
-  createCompletedSetKey,
+  createSetRangeKey,
   getEmployeeMap,
   getExtendedMonthDays,
   getMonthDays,
@@ -316,7 +316,6 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
       .from("completed_sets")
       .delete()
       .eq("schedule_id", input.scheduleId)
-      .in("month_key", touchedMonths)
       .eq("start_date", input.startDate)
       .eq("end_date", input.endDate);
 
@@ -378,14 +377,15 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   }
 
   const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), input.dates[0] ?? null);
-  const completedSetKeys = new Set(snapshot.completedSets.map((entry) => createCompletedSetKey(entry.scheduleId, entry.month, entry.startDate, entry.endDate)));
+  const completedSetRangeKeys = new Set(
+    snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
+  );
 
   if (
     fullSetDays.length === 0 ||
-    !completedSetKeys.has(
-      createCompletedSetKey(
+    !completedSetRangeKeys.has(
+      createSetRangeKey(
         input.scheduleId,
-        month,
         fullSetDays[0].date,
         fullSetDays[fullSetDays.length - 1].date,
       ),

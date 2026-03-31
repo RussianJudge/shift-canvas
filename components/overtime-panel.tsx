@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { claimOvertimePosting, releaseOvertimePosting } from "@/app/actions";
 import {
   buildAssignmentIndex,
-  createCompletedSetKey,
-  createCompletedSetKeyFromEntry,
+  createSetRangeKey,
+  createSetRangeKeyFromEntry,
   getEmployeeMap,
   getExtendedMonthDays,
   getMonthDays,
@@ -174,8 +174,8 @@ export function OvertimePanel({
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
   const extendedMonthDays = useMemo(() => getExtendedMonthDays(snapshot.month), [snapshot.month]);
-  const completedSetKeys = useMemo(
-    () => new Set(snapshot.completedSets.map(createCompletedSetKeyFromEntry)),
+  const completedSetRangeKeys = useMemo(
+    () => new Set(snapshot.completedSets.map(createSetRangeKeyFromEntry)),
     [snapshot.completedSets],
   );
   const allEmployees = useMemo(
@@ -194,23 +194,22 @@ export function OvertimePanel({
       const workedSets = getWorkedSets(schedule, monthDays, extendedMonthDays);
 
       for (const workedSet of workedSets) {
-        const setKey = createCompletedSetKey(
+        const setKey = createSetRangeKey(
           schedule.id,
-          snapshot.month,
           workedSet.dates[0],
           workedSet.dates[workedSet.dates.length - 1],
         );
 
-        if (!completedSetKeys.has(setKey)) {
+        if (!completedSetRangeKeys.has(setKey)) {
           continue;
         }
 
         for (const segment of workedSet.segments) {
-          const setDates = segment.dates.filter((date) => date.startsWith(`${snapshot.month}-`));
-
-          if (setDates.length === 0) {
+          if (segment.dates[0]?.slice(0, 7) !== snapshot.month) {
             continue;
           }
+
+          const setDates = segment.dates;
 
           for (const competency of snapshot.competencies) {
             const missingSlotsByDate = setDates.map((date) => {
@@ -311,7 +310,7 @@ export function OvertimePanel({
   }, [
     assignmentIndex,
     claimingEmployeeId,
-    completedSetKeys,
+    completedSetRangeKeys,
     employeeMap,
     extendedMonthDays,
     monthDays,

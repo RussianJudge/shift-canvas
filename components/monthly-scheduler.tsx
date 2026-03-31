@@ -7,9 +7,9 @@ import { useRouter } from "next/navigation";
 import { saveAssignments, setScheduleSetCompletion } from "@/app/actions";
 import {
   buildAssignmentIndex,
-  createCompletedSetKey,
-  createCompletedSetKeyFromEntry,
   createAssignmentKey,
+  createSetRangeKey,
+  createSetRangeKeyFromEntry,
   formatMonthLabel,
   getCompetencyMap,
   getEmployeeMap,
@@ -334,15 +334,15 @@ export function MonthlyScheduler({
     () => getWorkedSetDays(activeSchedule, extendedMonthDays, selectedSetAnchorDate),
     [activeSchedule, extendedMonthDays, selectedSetAnchorDate],
   );
-  const completedSetKeys = useMemo(
-    () => new Set(snapshot.completedSets.map(createCompletedSetKeyFromEntry)),
+  const completedSetRangeKeys = useMemo(
+    () => new Set(snapshot.completedSets.map(createSetRangeKeyFromEntry)),
     [snapshot.completedSets],
   );
   const completedSetDates = useMemo(() => {
     const dates = new Set<string>();
 
     for (const completedSet of snapshot.completedSets) {
-      if (completedSet.scheduleId !== activeSchedule.id || completedSet.month !== currentMonth) {
+      if (completedSet.scheduleId !== activeSchedule.id) {
         continue;
       }
 
@@ -355,16 +355,15 @@ export function MonthlyScheduler({
 
     return dates;
   }, [activeSchedule.id, currentMonth, monthDays, snapshot.completedSets]);
-  const selectedSetKey =
+  const selectedSetRangeKey =
     activeSchedule && selectedSetDays.length > 0
-      ? createCompletedSetKey(
+      ? createSetRangeKey(
           activeSchedule.id,
-          currentMonth,
           selectedSetDays[0].date,
           selectedSetDays[selectedSetDays.length - 1].date,
         )
       : null;
-  const isSelectedSetComplete = selectedSetKey ? completedSetKeys.has(selectedSetKey) : false;
+  const isSelectedSetComplete = selectedSetRangeKey ? completedSetRangeKeys.has(selectedSetRangeKey) : false;
   const competencyCoverage = useMemo(() => {
     return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
@@ -913,7 +912,6 @@ export function MonthlyScheduler({
         return;
       }
 
-      const selectedKey = createCompletedSetKey(activeSchedule.id, currentMonth, startDate, endDate);
       const touchedMonths = getMonthKeysForDateRange(startDate, endDate);
       const removedClaims = snapshot.overtimeClaims.filter(
         (claim) =>

@@ -3,7 +3,7 @@ import "server-only";
 import { demoSchedulerSnapshot } from "@/lib/demo-data";
 import {
   buildAssignmentIndex,
-  createCompletedSetKey,
+  createSetRangeKey,
   getEmployeeMap,
   getExtendedMonthDays,
   getMonthDays,
@@ -234,7 +234,9 @@ function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const monthDays = getMonthDays(snapshot.month);
   const extendedMonthDays = getExtendedMonthDays(snapshot.month);
-  const completedSetKeys = new Set(snapshot.completedSets.map((entry) => createCompletedSetKey(entry.scheduleId, entry.month, entry.startDate, entry.endDate)));
+  const completedSetRangeKeys = new Set(
+    snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
+  );
   const processedKeys = new Set<string>();
 
   for (const schedule of snapshot.schedules) {
@@ -249,46 +251,72 @@ function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
         continue;
       }
 
-      const setKey = createCompletedSetKey(
+      const setKey = createSetRangeKey(
         schedule.id,
-        snapshot.month,
         setDays[0].date,
         setDays[setDays.length - 1].date,
       );
 
-      if (processedKeys.has(setKey) || !completedSetKeys.has(setKey)) {
+      if (processedKeys.has(setKey) || !completedSetRangeKeys.has(setKey)) {
         continue;
       }
 
       processedKeys.add(setKey);
 
-      for (const competency of snapshot.competencies) {
-        for (const setDay of setDays.filter((entry) => entry.date.startsWith(`${snapshot.month}-`))) {
-          let filledCount = 0;
+      const segments = setDays.reduce<Array<{ dates: string[]; shiftKind: "DAY" | "NIGHT" }>>((allSegments, setDay) => {
+        const shiftKind = shiftForDate(schedule, setDay.date);
 
-          for (const employee of schedule.employees) {
-            const selection = assignmentIndex[`${employee.id}:${setDay.date}`];
+        if (shiftKind === "OFF") {
+          return allSegments;
+        }
 
-            if (selection?.competencyId === competency.id) {
-              filledCount += 1;
+        const currentSegment = allSegments[allSegments.length - 1];
+
+        if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
+          allSegments.push({
+            shiftKind,
+            dates: [setDay.date],
+          });
+          return allSegments;
+        }
+
+        currentSegment.dates.push(setDay.date);
+        return allSegments;
+      }, []);
+
+      for (const segment of segments) {
+        if (segment.dates[0]?.slice(0, 7) !== snapshot.month) {
+          continue;
+        }
+
+        for (const competency of snapshot.competencies) {
+          for (const date of segment.dates) {
+            let filledCount = 0;
+
+            for (const employee of schedule.employees) {
+              const selection = assignmentIndex[`${employee.id}:${date}`];
+
+              if (selection?.competencyId === competency.id) {
+                filledCount += 1;
+              }
             }
-          }
 
-          for (const claim of snapshot.overtimeClaims) {
-            const claimEmployee = employeeMap[claim.employeeId];
+            for (const claim of snapshot.overtimeClaims) {
+              const claimEmployee = employeeMap[claim.employeeId];
 
-            if (
-              claim.scheduleId === schedule.id &&
-              claim.competencyId === competency.id &&
-              claim.date === setDay.date &&
-              claimEmployee?.scheduleId !== schedule.id
-            ) {
-              filledCount += 1;
+              if (
+                claim.scheduleId === schedule.id &&
+                claim.competencyId === competency.id &&
+                claim.date === date &&
+                claimEmployee?.scheduleId !== schedule.id
+              ) {
+                filledCount += 1;
+              }
             }
-          }
 
-          if (filledCount < competency.requiredStaff) {
-            return true;
+            if (filledCount < competency.requiredStaff) {
+              return true;
+            }
           }
         }
       }

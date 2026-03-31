@@ -156,6 +156,14 @@ export function createCompletedSetKeyFromEntry(entry: CompletedSet) {
   return createCompletedSetKey(entry.scheduleId, entry.month, entry.startDate, entry.endDate);
 }
 
+export function createSetRangeKey(scheduleId: string, startDate: string, endDate: string) {
+  return `${scheduleId}:${startDate}:${endDate}`;
+}
+
+export function createSetRangeKeyFromEntry(entry: CompletedSet) {
+  return createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate);
+}
+
 export function getSuggestedCompetencyId(employee: Pick<Employee, "id" | "competencyIds">, isoDate: string) {
   if (employee.competencyIds.length === 0) {
     return null;
