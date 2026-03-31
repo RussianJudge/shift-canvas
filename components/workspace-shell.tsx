@@ -107,10 +107,10 @@ export function WorkspaceShell({
 
           <nav className="workspace-nav" aria-label="Primary">
             <NavLink href="/" label="Schedule" icon={<ScheduleIcon />} collapsed={isCollapsed} />
+            <NavLink href="/personnel" label="Personnel" icon={<PersonnelIcon />} collapsed={isCollapsed} />
             <NavLink href="/schedules" label="Shifts" icon={<PatternsIcon />} collapsed={isCollapsed} />
             <NavLink href="/competencies" label="Competencies" icon={<CompetenciesIcon />} collapsed={isCollapsed} />
             <NavLink href="/time-codes" label="Time Codes" icon={<TimeCodesIcon />} collapsed={isCollapsed} />
-            <NavLink href="/personnel" label="Personnel" icon={<PersonnelIcon />} collapsed={isCollapsed} />
           </nav>
         </aside>
 

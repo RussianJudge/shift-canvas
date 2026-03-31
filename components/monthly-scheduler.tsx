@@ -13,6 +13,7 @@ import {
   getMonthDays,
   getScheduleById,
   getSuggestedCompetencyId,
+  getTimeCodeMap,
   shiftForDate,
 } from "@/lib/scheduling";
 import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
@@ -185,6 +186,7 @@ export function MonthlyScheduler({
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
+  const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const monthDays = useMemo(() => getMonthDays(currentMonth), [currentMonth]);
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
@@ -520,6 +522,7 @@ export function MonthlyScheduler({
               monthDays={monthDays}
               assignments={draftAssignments}
               competencyMap={competencyMap}
+              timeCodeMap={timeCodeMap}
               timeCodes={snapshot.timeCodes}
               selectedCell={selectedCell}
               dragRange={dragRange}
@@ -550,6 +553,7 @@ function EmployeeRow({
   monthDays,
   assignments,
   competencyMap,
+  timeCodeMap,
   timeCodes,
   selectedCell,
   dragRange,
@@ -562,6 +566,7 @@ function EmployeeRow({
   monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
   assignments: Record<string, AssignmentSelection>;
   competencyMap: Record<string, Competency>;
+  timeCodeMap: Record<string, TimeCode>;
   timeCodes: TimeCode[];
   selectedCell: SelectedCell | null;
   dragRange: DragRange | null;
@@ -591,6 +596,7 @@ function EmployeeRow({
         const availableCompetencies = employee.competencyIds
           .map((competencyId) => competencyMap[competencyId])
           .filter(isCompetency);
+        const activeTimeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
         const isSelected =
           selectedCell?.employeeId === employee.id && selectedCell.date === day.date;
         const isInDragRange =
@@ -619,9 +625,10 @@ function EmployeeRow({
               }
             }}
           >
-            <span className="shift-label">{shiftKind === "OFF" ? "O" : shiftKind.slice(0, 1)}</span>
             <select
-              className="assignment-select"
+              className={`assignment-select ${
+                activeTimeCode ? `legend-pill--${activeTimeCode.colorToken.toLowerCase()}` : ""
+              }`}
               value={encodeAssignmentValue(selection)}
               aria-label={`${employee.name} ${day.date} assignment`}
               onChange={(event) => onAssignmentChange(employee, day.date, decodeAssignmentValue(event.target.value))}
