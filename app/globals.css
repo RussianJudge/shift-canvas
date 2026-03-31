@@ -626,6 +626,10 @@ select {
   z-index: 1;
 }
 
+.shift-cell--coded {
+  box-shadow: inset 0 0 0 1px rgba(23, 20, 17, 0.05);
+}
+
 .shift-cell--day {
   background: linear-gradient(180deg, rgba(255, 250, 236, 0.98), rgba(255, 244, 220, 0.96));
 }
@@ -640,6 +644,38 @@ select {
 
 .shift-cell--weekend {
   box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.08);
+}
+
+.shift-cell.legend-pill--amber {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.22), rgba(251, 191, 36, 0.15));
+}
+
+.shift-cell.legend-pill--teal {
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.21), rgba(20, 184, 166, 0.14));
+}
+
+.shift-cell.legend-pill--violet {
+  background: linear-gradient(180deg, rgba(139, 92, 246, 0.2), rgba(139, 92, 246, 0.13));
+}
+
+.shift-cell.legend-pill--rose {
+  background: linear-gradient(180deg, rgba(244, 63, 94, 0.19), rgba(244, 63, 94, 0.12));
+}
+
+.shift-cell.legend-pill--blue {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.19), rgba(37, 99, 235, 0.12));
+}
+
+.shift-cell.legend-pill--lime {
+  background: linear-gradient(180deg, rgba(132, 204, 22, 0.22), rgba(132, 204, 22, 0.14));
+}
+
+.shift-cell.legend-pill--orange {
+  background: linear-gradient(180deg, rgba(249, 115, 22, 0.21), rgba(249, 115, 22, 0.14));
+}
+
+.shift-cell.legend-pill--slate {
+  background: linear-gradient(180deg, rgba(100, 116, 139, 0.2), rgba(100, 116, 139, 0.13));
 }
 
 .assignment-select {
@@ -669,6 +705,7 @@ select {
 .assignment-select.legend-pill--orange,
 .assignment-select.legend-pill--slate {
   border-color: transparent;
+  background: transparent;
 }
 
 .assignment-select:focus {

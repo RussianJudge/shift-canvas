@@ -596,7 +596,9 @@ function EmployeeRow({
         const availableCompetencies = employee.competencyIds
           .map((competencyId) => competencyMap[competencyId])
           .filter(isCompetency);
+        const activeCompetency = selection.competencyId ? competencyMap[selection.competencyId] : null;
         const activeTimeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
+        const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
         const isSelected =
           selectedCell?.employeeId === employee.id && selectedCell.date === day.date;
         const isInDragRange =
@@ -609,6 +611,8 @@ function EmployeeRow({
             key={`${employee.id}-${day.date}`}
             className={`shift-cell shift-cell--${getShiftTone(shiftKind)} ${
               day.isWeekend ? "shift-cell--weekend" : ""
+            } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
+              activeColorToken ? "shift-cell--coded" : ""
             } ${isSelected ? "shift-cell--selected" : ""} ${
               isInDragRange ? "shift-cell--range" : ""
             }`}
@@ -627,7 +631,7 @@ function EmployeeRow({
           >
             <select
               className={`assignment-select ${
-                activeTimeCode ? `legend-pill--${activeTimeCode.colorToken.toLowerCase()}` : ""
+                activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
               }`}
               value={encodeAssignmentValue(selection)}
               aria-label={`${employee.name} ${day.date} assignment`}
