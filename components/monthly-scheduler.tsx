@@ -716,7 +716,10 @@ export function MonthlyScheduler({
 
     setStatusMessage(`Loading ${formatMonthLabel(currentMonth)}`);
 
-    fetch(`/api/scheduler?month=${currentMonth}`, { signal: controller.signal })
+    fetch(`/api/scheduler?month=${currentMonth}`, {
+      signal: controller.signal,
+      cache: "no-store",
+    })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error("Unable to load month data.");
