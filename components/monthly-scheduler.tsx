@@ -8,19 +8,19 @@ import { saveAssignments, setScheduleSetCompletion } from "@/app/actions";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
-  createSetRangeKey,
-  createSetRangeKeyFromEntry,
   formatMonthLabel,
   getCompetencyMap,
+  getCompletedSetDatesForMonth,
   getEmployeeMap,
   getExtendedMonthDays,
-  getMonthKeysForDateRange,
   getMonthDays,
   getScheduleById,
   getTimeCodeMap,
   getWorkedSetDays,
+  isCompletedSetRange,
   shiftMonthKey,
   shiftForDate,
+  toggleCompletedSetEntries,
 } from "@/lib/scheduling";
 import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
 
@@ -334,36 +334,19 @@ export function MonthlyScheduler({
     () => getWorkedSetDays(activeSchedule, extendedMonthDays, selectedSetAnchorDate),
     [activeSchedule, extendedMonthDays, selectedSetAnchorDate],
   );
-  const completedSetRangeKeys = useMemo(
-    () => new Set(snapshot.completedSets.map(createSetRangeKeyFromEntry)),
-    [snapshot.completedSets],
+  const completedSetDates = useMemo(
+    () => getCompletedSetDatesForMonth(snapshot.completedSets, activeSchedule.id, monthDays),
+    [activeSchedule.id, monthDays, snapshot.completedSets],
   );
-  const completedSetDates = useMemo(() => {
-    const dates = new Set<string>();
-
-    for (const completedSet of snapshot.completedSets) {
-      if (completedSet.scheduleId !== activeSchedule.id) {
-        continue;
-      }
-
-      for (const day of monthDays) {
-        if (day.date >= completedSet.startDate && day.date <= completedSet.endDate) {
-          dates.add(day.date);
-        }
-      }
-    }
-
-    return dates;
-  }, [activeSchedule.id, currentMonth, monthDays, snapshot.completedSets]);
-  const selectedSetRangeKey =
-    activeSchedule && selectedSetDays.length > 0
-      ? createSetRangeKey(
+  const isSelectedSetComplete =
+    selectedSetDays.length > 0
+      ? isCompletedSetRange(
+          snapshot.completedSets,
           activeSchedule.id,
           selectedSetDays[0].date,
           selectedSetDays[selectedSetDays.length - 1].date,
         )
-      : null;
-  const isSelectedSetComplete = selectedSetRangeKey ? completedSetRangeKeys.has(selectedSetRangeKey) : false;
+      : false;
   const competencyCoverage = useMemo(() => {
     return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
@@ -912,7 +895,6 @@ export function MonthlyScheduler({
         return;
       }
 
-      const touchedMonths = getMonthKeysForDateRange(startDate, endDate);
       const removedClaims = snapshot.overtimeClaims.filter(
         (claim) =>
           claim.scheduleId === activeSchedule.id &&
@@ -926,33 +908,13 @@ export function MonthlyScheduler({
       startTransition(() => {
         setSnapshot((current) => ({
           ...current,
-          completedSets: nextIsComplete
-            ? [
-                ...current.completedSets.filter(
-                  (entry) =>
-                    !(
-                      entry.scheduleId === activeSchedule.id &&
-                      entry.startDate === startDate &&
-                      entry.endDate === endDate &&
-                      touchedMonths.includes(entry.month)
-                    ),
-                ),
-                ...touchedMonths.map((month) => ({
-                  scheduleId: activeSchedule.id,
-                  month,
-                  startDate,
-                  endDate,
-                })),
-              ]
-            : current.completedSets.filter(
-                (entry) =>
-                  !(
-                    entry.scheduleId === activeSchedule.id &&
-                    entry.startDate === startDate &&
-                    entry.endDate === endDate &&
-                    touchedMonths.includes(entry.month)
-                  ),
-              ),
+          completedSets: toggleCompletedSetEntries(
+            current.completedSets,
+            activeSchedule.id,
+            startDate,
+            endDate,
+            nextIsComplete,
+          ),
           overtimeClaims: nextIsComplete
             ? current.overtimeClaims
             : current.overtimeClaims.filter(

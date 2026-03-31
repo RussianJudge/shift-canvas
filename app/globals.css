@@ -810,6 +810,11 @@ select {
   box-shadow: inset 0 -2px 0 rgba(21, 128, 61, 0.28);
 }
 
+.day-header--completed.day-header--set {
+  background: linear-gradient(180deg, rgba(220, 252, 231, 0.98), rgba(187, 247, 208, 0.95));
+  box-shadow: inset 0 -2px 0 rgba(21, 128, 61, 0.28);
+}
+
 .day-header--completed span,
 .day-header--completed strong {
   color: #166534;
@@ -819,10 +824,20 @@ select {
   background: linear-gradient(180deg, rgba(209, 250, 229, 0.98), rgba(167, 243, 208, 0.94));
 }
 
+.day-header--completed.day-header--set.day-header--weekend {
+  background: linear-gradient(180deg, rgba(209, 250, 229, 0.98), rgba(167, 243, 208, 0.94));
+}
+
 .day-header--set-anchor {
   box-shadow:
     inset 0 0 0 2px color-mix(in srgb, var(--team-accent) 75%, white),
     inset 0 -2px 0 color-mix(in srgb, var(--team-accent) 60%, transparent);
+}
+
+.day-header--completed.day-header--set-anchor {
+  box-shadow:
+    inset 0 0 0 2px rgba(21, 128, 61, 0.34),
+    inset 0 -2px 0 rgba(21, 128, 61, 0.28);
 }
 
 .day-header--missing {

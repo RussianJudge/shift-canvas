@@ -7,7 +7,7 @@ import type {
   ShiftKind,
   StoredAssignment,
   TimeCode,
-} from "@/lib/types";
+} from "./types";
 
 export interface MonthDay {
   date: string;
@@ -162,6 +162,70 @@ export function createSetRangeKey(scheduleId: string, startDate: string, endDate
 
 export function createSetRangeKeyFromEntry(entry: CompletedSet) {
   return createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate);
+}
+
+export function isCompletedSetRange(
+  completedSets: CompletedSet[],
+  scheduleId: string,
+  startDate: string,
+  endDate: string,
+) {
+  const rangeKey = createSetRangeKey(scheduleId, startDate, endDate);
+
+  return completedSets.some((entry) => createSetRangeKeyFromEntry(entry) === rangeKey);
+}
+
+export function getCompletedSetDatesForMonth(
+  completedSets: CompletedSet[],
+  scheduleId: string,
+  monthDays: Array<Pick<MonthDay, "date">>,
+) {
+  const dates = new Set<string>();
+
+  for (const completedSet of completedSets) {
+    if (completedSet.scheduleId !== scheduleId) {
+      continue;
+    }
+
+    for (const day of monthDays) {
+      if (day.date >= completedSet.startDate && day.date <= completedSet.endDate) {
+        dates.add(day.date);
+      }
+    }
+  }
+
+  return dates;
+}
+
+export function toggleCompletedSetEntries(
+  completedSets: CompletedSet[],
+  scheduleId: string,
+  startDate: string,
+  endDate: string,
+  isComplete: boolean,
+) {
+  const remainingEntries = completedSets.filter(
+    (entry) =>
+      !(
+        entry.scheduleId === scheduleId &&
+        entry.startDate === startDate &&
+        entry.endDate === endDate
+      ),
+  );
+
+  if (!isComplete) {
+    return remainingEntries;
+  }
+
+  return [
+    ...remainingEntries,
+    ...getMonthKeysForDateRange(startDate, endDate).map((month) => ({
+      scheduleId,
+      month,
+      startDate,
+      endDate,
+    })),
+  ];
 }
 
 export function getSuggestedCompetencyId(employee: Pick<Employee, "id" | "competencyIds">, isoDate: string) {
