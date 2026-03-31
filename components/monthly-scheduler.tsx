@@ -131,37 +131,10 @@ function formatStaffCount(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function getDefaultTimeCodeId(timeCodes: TimeCode[], shiftKind: ShiftKind) {
-  if (shiftKind === "DAY") {
-    return (
-      timeCodes.find((timeCode) => timeCode.code === "DAY")?.id ??
-      timeCodes.find((timeCode) => timeCode.code === "DAYS")?.id ??
-      null
-    );
-  }
-
-  if (shiftKind === "NIGHT") {
-    return (
-      timeCodes.find((timeCode) => timeCode.code === "NIGHT")?.id ??
-      timeCodes.find((timeCode) => timeCode.code === "NIGHTS")?.id ??
-      null
-    );
-  }
-
-  return null;
-}
-
-function getDefaultSelection(shiftKind: ShiftKind, timeCodes: TimeCode[]): AssignmentSelection {
-  if (shiftKind === "OFF") {
-    return {
-      competencyId: null,
-      timeCodeId: null,
-    };
-  }
-
+function getDefaultSelection(_shiftKind: ShiftKind, _timeCodes: TimeCode[]): AssignmentSelection {
   return {
     competencyId: null,
-    timeCodeId: getDefaultTimeCodeId(timeCodes, shiftKind),
+    timeCodeId: null,
   };
 }
 
@@ -297,7 +270,7 @@ function AssignmentModal({
               onApply(getDefaultSelection(shiftKind, timeCodes))
             }
           >
-            Reset to {shiftKind === "DAY" ? "DAY" : shiftKind === "NIGHT" ? "NIGHT" : "blank"}
+            Clear assignment
           </button>
         </div>
       </section>
