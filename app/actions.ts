@@ -242,7 +242,24 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
 
   const touchedMonths = getMonthKeysForDateRange(input.startDate, input.endDate);
 
+  const deleteCompletedSetRows = () =>
+    supabase
+      .from("completed_sets")
+      .delete()
+      .eq("schedule_id", input.scheduleId)
+      .lte("start_date", input.endDate)
+      .gte("end_date", input.startDate);
+
   if (input.isComplete) {
+    const { error: deleteError } = await deleteCompletedSetRows();
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not refresh set completion state: ${deleteError.message}`,
+      };
+    }
+
     const rows = touchedMonths.map((monthKey) => ({
       schedule_id: input.scheduleId,
       month_key: monthKey,
@@ -312,12 +329,7 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
       }
     }
 
-    const { error } = await supabase
-      .from("completed_sets")
-      .delete()
-      .eq("schedule_id", input.scheduleId)
-      .eq("start_date", input.startDate)
-      .eq("end_date", input.endDate);
+    const { error } = await deleteCompletedSetRows();
 
     if (error) {
       return {

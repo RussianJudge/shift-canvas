@@ -208,8 +208,8 @@ export function toggleCompletedSetEntries(
     (entry) =>
       !(
         entry.scheduleId === scheduleId &&
-        entry.startDate === startDate &&
-        entry.endDate === endDate
+        entry.startDate <= endDate &&
+        entry.endDate >= startDate
       ),
   );
 

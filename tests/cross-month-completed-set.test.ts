@@ -106,3 +106,37 @@ test("cross-month sets complete and reopen across both months", () => {
     0,
   );
 });
+
+test("reopening a cross-month set clears legacy month-truncated entries", () => {
+  const legacyCompletedSets = [
+    {
+      scheduleId: "schedule-601",
+      month: "2026-03",
+      startDate: "2026-03-28",
+      endDate: "2026-03-31",
+    },
+    {
+      scheduleId: "schedule-601",
+      month: "2026-04",
+      startDate: "2026-04-10",
+      endDate: "2026-04-15",
+    },
+  ];
+
+  const reopenedSets = toggleCompletedSetEntries(
+    legacyCompletedSets,
+    "schedule-601",
+    "2026-03-28",
+    "2026-04-02",
+    false,
+  );
+
+  assert.deepEqual(reopenedSets, [
+    {
+      scheduleId: "schedule-601",
+      month: "2026-04",
+      startDate: "2026-04-10",
+      endDate: "2026-04-15",
+    },
+  ]);
+});
