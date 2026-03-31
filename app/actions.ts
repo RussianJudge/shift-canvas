@@ -79,6 +79,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   }
 
   revalidatePath("/");
+  revalidatePath("/overtime");
 
   return {
     ok: true,
