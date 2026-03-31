@@ -724,6 +724,7 @@ select {
 }
 
 .schedule-grid {
+  --schedule-name-column-width: 10.5rem;
   display: grid;
   align-items: stretch;
   width: 100%;
@@ -848,6 +849,7 @@ select {
   position: sticky;
   left: 0;
   z-index: 3;
+  box-shadow: 1px 0 0 rgba(131, 110, 87, 0.08);
 }
 
 .employee-cell {
@@ -863,6 +865,10 @@ select {
 .employee-cell strong {
   font-size: 0.8rem;
   line-height: 1.1;
+}
+
+.employee-name-compact {
+  display: none;
 }
 
 .employee-cell span,
@@ -1321,6 +1327,35 @@ select {
 }
 
 @media (max-width: 720px) {
+  .schedule-grid {
+    --schedule-name-column-width: 6.7rem;
+  }
+
+  .employee-header {
+    padding-inline: 0.65rem;
+  }
+
+  .employee-cell {
+    padding: 0.4rem 0.35rem 0.4rem 0.55rem;
+  }
+
+  .employee-cell strong {
+    font-size: 0.74rem;
+  }
+
+  .employee-cell span,
+  .employee-cell small {
+    font-size: 0.58rem;
+  }
+
+  .employee-name-full {
+    display: none;
+  }
+
+  .employee-name-compact {
+    display: inline;
+  }
+
   .planner-topline {
     flex-direction: column;
     align-items: flex-start;

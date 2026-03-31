@@ -118,6 +118,16 @@ function getCompactCode(code: string) {
   return code.replace(/\s+/g, "");
 }
 
+function getCompactEmployeeName(name: string) {
+  const segments = name.trim().split(/\s+/).filter(Boolean);
+
+  if (segments.length <= 1) {
+    return name;
+  }
+
+  return `${segments[0]} ${segments[segments.length - 1][0]}.`;
+}
+
 function getScheduleAccent(scheduleId: string) {
   const accents = ["#f97316", "#0f766e", "#2563eb", "#be123c", "#7c3aed", "#4d7c0f"];
   let hash = 0;
@@ -564,7 +574,7 @@ export function MonthlyScheduler({
     ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
     : new Set<string>();
 
-  const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(3rem, 1fr))`;
+  const gridColumns = `var(--schedule-name-column-width, 10.5rem) repeat(${monthDays.length}, minmax(3rem, 1fr))`;
 
   useEffect(() => {
     if (!selectedCell) {
@@ -1206,7 +1216,10 @@ function EmployeeRow({
   return (
     <>
       <div className="employee-cell sticky-column">
-        <strong>{employee.name}</strong>
+        <strong title={employee.name}>
+          <span className="employee-name-full">{employee.name}</span>
+          <span className="employee-name-compact">{getCompactEmployeeName(employee.name)}</span>
+        </strong>
         <span>{employee.role}</span>
       </div>
 
