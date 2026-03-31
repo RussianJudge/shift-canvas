@@ -100,6 +100,8 @@ export function OvertimePanel({
   const [claimingEmployeeId, setClaimingEmployeeId] = useState(
     snapshot.schedules.flatMap((schedule) => schedule.employees).sort((left, right) => left.name.localeCompare(right.name))[0]?.id ?? "",
   );
+  const [selectedScheduleFilter, setSelectedScheduleFilter] = useState("all");
+  const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
 
@@ -227,6 +229,21 @@ export function OvertimePanel({
       left.competencyCode.localeCompare(right.competencyCode),
     );
   }, [allEmployees, assignmentIndex, claimingEmployeeId, employeeMap, monthDays, snapshot, snapshot.competencies, snapshot.overtimeClaims, snapshot.schedules]);
+  const filteredPostings = useMemo(
+    () =>
+      postings.filter((posting) => {
+        if (selectedScheduleFilter !== "all" && posting.scheduleId !== selectedScheduleFilter) {
+          return false;
+        }
+
+        if (selectedCompetencyFilter !== "all" && posting.competencyId !== selectedCompetencyFilter) {
+          return false;
+        }
+
+        return true;
+      }),
+    [postings, selectedCompetencyFilter, selectedScheduleFilter],
+  );
 
   const claimingEmployee = claimingEmployeeId ? employeeMap[claimingEmployeeId] ?? null : null;
 
@@ -280,7 +297,7 @@ export function OvertimePanel({
         <h1 className="panel-title">Overtime</h1>
       </div>
 
-      <div className="workspace-toolbar">
+      <div className="workspace-toolbar workspace-toolbar--overtime">
         <label className="field">
           <span>Claim As</span>
           <select
@@ -290,6 +307,36 @@ export function OvertimePanel({
             {allEmployees.map((employee) => (
               <option key={employee.id} value={employee.id}>
                 {employee.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Team</span>
+          <select
+            value={selectedScheduleFilter}
+            onChange={(event) => setSelectedScheduleFilter(event.target.value)}
+          >
+            <option value="all">All teams</option>
+            {snapshot.schedules.map((schedule) => (
+              <option key={schedule.id} value={schedule.id}>
+                {schedule.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Competency</span>
+          <select
+            value={selectedCompetencyFilter}
+            onChange={(event) => setSelectedCompetencyFilter(event.target.value)}
+          >
+            <option value="all">All competencies</option>
+            {snapshot.competencies.map((competency) => (
+              <option key={competency.id} value={competency.id}>
+                {competency.code}
               </option>
             ))}
           </select>
@@ -310,7 +357,7 @@ export function OvertimePanel({
       </div>
 
       <div className="overtime-list">
-        {postings.map((posting) => {
+        {filteredPostings.map((posting) => {
           const canClaim = claimingEmployeeId ? posting.eligibleEmployeeIds.includes(claimingEmployeeId) : false;
 
           return (
@@ -361,10 +408,10 @@ export function OvertimePanel({
           );
         })}
 
-        {postings.length === 0 ? (
+        {filteredPostings.length === 0 ? (
           <div className="empty-state">
             <strong>No overtime postings.</strong>
-            <span>All current shift sets are fully staffed.</span>
+            <span>Try a different team or competency filter, or all current sets are fully staffed.</span>
           </div>
         ) : null}
       </div>

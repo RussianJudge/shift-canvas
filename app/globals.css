@@ -369,6 +369,10 @@ select {
   align-items: center;
 }
 
+.workspace-toolbar--overtime {
+  grid-template-columns: repeat(3, minmax(12rem, 16rem)) minmax(0, 1fr);
+}
+
 .workspace-copy--full {
   border-left: 0;
   padding-left: 0;
