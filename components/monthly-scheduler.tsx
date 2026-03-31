@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useState, useTransition, startTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { saveAssignments, setScheduleSetCompletion } from "@/app/actions";
 import {
@@ -298,6 +299,7 @@ export function MonthlyScheduler({
 }: {
   initialSnapshot: SchedulerSnapshot;
 }) {
+  const router = useRouter();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [currentMonth, setCurrentMonth] = useState(initialSnapshot.month);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
@@ -840,7 +842,11 @@ export function MonthlyScheduler({
 
   function handleMonthChange(delta: number) {
     startMonthTransition(() => {
-      setCurrentMonth((current) => addMonths(current, delta));
+      setCurrentMonth((current) => {
+        const nextMonth = addMonths(current, delta);
+        router.push(`/?month=${nextMonth}`, { scroll: false });
+        return nextMonth;
+      });
       setStatusMessage("Changing month");
     });
   }
