@@ -23,6 +23,15 @@ import { getSupabaseAdminClient } from "@/lib/supabase";
 
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
 
+function isBlank(value: string) {
+  return value.trim().length === 0;
+}
+
+function hasValidShiftPattern(dayShiftDays: number, nightShiftDays: number, offDays: number) {
+  return [dayShiftDays, nightShiftDays, offDays].every((value) => Number.isInteger(value) && value >= 0) &&
+    dayShiftDays + nightShiftDays + offDays > 0;
+}
+
 async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: string[]) {
   const uniqueMonths = Array.from(new Set(months.filter(Boolean)));
   let removedClaims = 0;
@@ -368,10 +377,21 @@ export async function savePersonnel(input: SavePersonnelInput) {
     };
   }
 
+  const invalidEmployee = input.updates.find(
+    (update) => isBlank(update.name) || isBlank(update.role) || isBlank(update.scheduleId),
+  );
+
+  if (invalidEmployee) {
+    return {
+      ok: false,
+      message: "Each employee needs a name, role, and shift before saving.",
+    };
+  }
+
   const employeeRows = input.updates.map((update) => ({
     id: update.employeeId,
-    full_name: update.name,
-    role_title: update.role,
+    full_name: update.name.trim(),
+    role_title: update.role.trim(),
     schedule_id: update.scheduleId,
     unit_id: update.unitId,
     is_active: true,
@@ -460,9 +480,23 @@ export async function saveSchedules(input: SaveSchedulesInput) {
     };
   }
 
+  const invalidSchedule = input.updates.find(
+    (update) =>
+      isBlank(update.name) ||
+      !update.startDate ||
+      !hasValidShiftPattern(update.dayShiftDays, update.nightShiftDays, update.offDays),
+  );
+
+  if (invalidSchedule) {
+    return {
+      ok: false,
+      message: "Each shift needs a name, a start date, and at least one total worked/off day in the cycle.",
+    };
+  }
+
   const rows = input.updates.map((update) => ({
     id: update.scheduleId,
-    name: update.name,
+    name: update.name.trim(),
     start_date: update.startDate,
     day_shift_days: update.dayShiftDays,
     night_shift_days: update.nightShiftDays,
@@ -502,12 +536,12 @@ export async function saveSchedules(input: SaveSchedulesInput) {
   revalidatePath("/");
   revalidatePath("/personnel");
   revalidatePath("/schedules");
-  revalidatePath("/teams");
   revalidatePath("/competencies");
+  revalidatePath("/overtime");
 
   return {
     ok: true,
-    message: "Schedule changes saved to Supabase.",
+    message: "Shift changes saved to Supabase.",
   };
 }
 
@@ -522,10 +556,25 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
     };
   }
 
+  const invalidCompetency = input.updates.find(
+    (update) =>
+      isBlank(update.code) ||
+      isBlank(update.label) ||
+      !Number.isInteger(update.requiredStaff) ||
+      update.requiredStaff < 1,
+  );
+
+  if (invalidCompetency) {
+    return {
+      ok: false,
+      message: "Each competency needs a code, label, and at least 1 required staff.",
+    };
+  }
+
   const rows = input.updates.map((update) => ({
     id: update.competencyId,
-    code: update.code,
-    label: update.label,
+    code: update.code.trim(),
+    label: update.label.trim(),
     color_token: update.colorToken,
     required_staff: update.requiredStaff,
   }));
@@ -563,7 +612,7 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
   revalidatePath("/");
   revalidatePath("/personnel");
   revalidatePath("/competencies");
-  revalidatePath("/time-codes");
+  revalidatePath("/overtime");
 
   return {
     ok: true,
@@ -582,11 +631,26 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
     };
   }
 
+  const invalidTimeCode = input.updates.find(
+    (update) =>
+      isBlank(update.code) ||
+      isBlank(update.label) ||
+      isBlank(update.category),
+  );
+
+  if (invalidTimeCode) {
+    return {
+      ok: false,
+      message: "Each time code needs a code, label, and category.",
+    };
+  }
+
   const rows = input.updates.map((update) => ({
     id: update.timeCodeId,
-    code: update.code,
-    label: update.label,
+    code: update.code.trim(),
+    label: update.label.trim(),
     color_token: update.colorToken,
+    category: update.category.trim(),
   }));
 
   const error =
@@ -621,6 +685,7 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
 
   revalidatePath("/");
   revalidatePath("/time-codes");
+  revalidatePath("/overtime");
 
   return {
     ok: true,

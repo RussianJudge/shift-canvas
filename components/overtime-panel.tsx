@@ -6,13 +6,12 @@ import { useRouter } from "next/navigation";
 import { claimOvertimePosting, releaseOvertimePosting } from "@/app/actions";
 import {
   buildAssignmentIndex,
-  getCompetencyMap,
   getEmployeeMap,
   getMonthDays,
   getScheduleById,
   shiftForDate,
 } from "@/lib/scheduling";
-import type { Competency, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
+import type { Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
 
 type OvertimePosting = {
   id: string;
@@ -27,7 +26,6 @@ type OvertimePosting = {
   staffedPeople: number;
   requiredStaff: number;
   openShifts: number;
-  eligibleEmployeeIds: string[];
   claimedBySelectedEmployee: boolean;
 };
 
@@ -96,18 +94,35 @@ function getCellSelection(
   };
 }
 
-function isEmployeeAvailableForDates(
-  employee: Employee,
-  schedule: SchedulerSnapshot["schedules"][number],
-  dates: string[],
+function getClaimStatus(
+  employee: Employee | null,
+  posting: OvertimePosting,
+  snapshot: SchedulerSnapshot,
   assignments: Record<string, { competencyId: string | null; timeCodeId: string | null }>,
 ) {
-  return dates.every((date) => {
-    const shiftKind = shiftForDate(schedule, date);
+  if (!employee) {
+    return { canClaim: false, reason: "Select an employee first." };
+  }
+
+  if (!employee.competencyIds.includes(posting.competencyId)) {
+    return { canClaim: false, reason: "Employee is not qualified for this post." };
+  }
+
+  const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
+
+  for (const date of posting.dates) {
+    if (shiftForDate(employeeSchedule, date) !== "OFF") {
+      return { canClaim: false, reason: "Posting falls on this employee's regular shift." };
+    }
+
     const selection = getCellSelection(employee, date, assignments);
 
-    return shiftKind === "OFF" && !selection.competencyId && !selection.timeCodeId;
-  });
+    if (selection.competencyId || selection.timeCodeId) {
+      return { canClaim: false, reason: "Employee already has an assignment on one or more posting dates." };
+    }
+  }
+
+  return { canClaim: true, reason: "Available to claim." };
 }
 
 export function OvertimePanel({
@@ -124,7 +139,6 @@ export function OvertimePanel({
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
 
-  const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
@@ -201,7 +215,6 @@ export function OvertimePanel({
               staffedPeople,
               requiredStaff: competency.requiredStaff,
               openShifts: claimedDates.length,
-              eligibleEmployeeIds: claimingEmployeeId ? [claimingEmployeeId] : [],
               claimedBySelectedEmployee: true,
             });
           }
@@ -212,17 +225,6 @@ export function OvertimePanel({
             if (postingDates.length === 0) {
               continue;
             }
-
-            const eligibleEmployeeIds = allEmployees
-              .filter((employee) => {
-                if (!employee.competencyIds.includes(competency.id)) {
-                  return false;
-                }
-
-                const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
-                return isEmployeeAvailableForDates(employee, employeeSchedule, postingDates, assignmentIndex);
-              })
-              .map((employee) => employee.id);
 
             nextPostings.push({
               id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
@@ -237,7 +239,6 @@ export function OvertimePanel({
               staffedPeople,
               requiredStaff: competency.requiredStaff,
               openShifts: postingDates.length,
-              eligibleEmployeeIds,
               claimedBySelectedEmployee: false,
             });
           }
@@ -252,7 +253,7 @@ export function OvertimePanel({
       left.shiftKind.localeCompare(right.shiftKind) ||
       left.competencyCode.localeCompare(right.competencyCode),
     );
-  }, [allEmployees, assignmentIndex, claimingEmployeeId, employeeMap, monthDays, snapshot, snapshot.competencies, snapshot.overtimeClaims, snapshot.schedules]);
+  }, [assignmentIndex, claimingEmployeeId, employeeMap, monthDays, snapshot, snapshot.competencies, snapshot.overtimeClaims, snapshot.schedules]);
   const filteredPostings = useMemo(
     () =>
       postings.filter((posting) => {
@@ -267,6 +268,26 @@ export function OvertimePanel({
         return true;
       }),
     [postings, selectedCompetencyFilter, selectedScheduleFilter],
+  );
+  const groupedPostings = useMemo(
+    () =>
+      Object.values(
+        filteredPostings.reduce<
+          Record<string, { key: string; scheduleName: string; shiftKind: Exclude<ShiftKind, "OFF">; dates: string[]; postings: OvertimePosting[] }>
+        >((groups, posting) => {
+          const key = `${posting.scheduleId}:${posting.shiftKind}:${posting.dates[0]}:${posting.dates[posting.dates.length - 1]}`;
+          groups[key] ??= {
+            key,
+            scheduleName: posting.scheduleName,
+            shiftKind: posting.shiftKind,
+            dates: posting.dates,
+            postings: [],
+          };
+          groups[key].postings.push(posting);
+          return groups;
+        }, {}),
+      ),
+    [filteredPostings],
   );
 
   const claimingEmployee = claimingEmployeeId ? employeeMap[claimingEmployeeId] ?? null : null;
@@ -370,7 +391,7 @@ export function OvertimePanel({
           <strong>{new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${snapshot.month}-01T00:00:00Z`))}</strong>
           <p>
             {claimingEmployee
-              ? `${claimingEmployee.name} can claim any posting they are qualified for and free to cover.`
+              ? `${claimingEmployee.name} can claim only qualified postings that fall on days off.`
               : "Select an employee to claim a posting."}
           </p>
         </div>
@@ -381,59 +402,69 @@ export function OvertimePanel({
       </div>
 
       <div className="overtime-list">
-        {filteredPostings.map((posting) => {
-          const canClaim = claimingEmployeeId ? posting.eligibleEmployeeIds.includes(claimingEmployeeId) : false;
-
-          return (
-            <article
-              key={posting.id}
-              className={`overtime-card ${posting.claimedBySelectedEmployee ? "overtime-card--claimed" : ""}`}
-            >
-              <div className="overtime-card-top">
-                <div>
-                  <p className="overtime-card-team">Shift {posting.scheduleName}</p>
-                  <h2 className="overtime-card-title">{posting.competencyLabel}</h2>
-                </div>
-                <span className={`legend-pill legend-pill--${posting.colorToken.toLowerCase()}`}>
-                  {posting.competencyCode.replace("Post ", "")}
-                </span>
+        {groupedPostings.map((group) => (
+          <section key={group.key} className="overtime-group">
+            <div className="overtime-group__header">
+              <div>
+                <p className="overtime-card-team">Shift {group.scheduleName}</p>
+                <h2 className="overtime-card-title">
+                  {formatShortDate(group.dates[0])} - {formatShortDate(group.dates[group.dates.length - 1])}
+                </h2>
               </div>
+              <span className="overtime-group__meta">{getShiftLabel(group.shiftKind, group.dates.length)}</span>
+            </div>
 
-              <div className="overtime-card-meta">
-                <span>{formatShortDate(posting.dates[0])} - {formatShortDate(posting.dates[posting.dates.length - 1])}</span>
-                <span>{getShiftLabel(posting.shiftKind, posting.dates.length)}</span>
-                <span>{posting.openShifts} open shift{posting.openShifts === 1 ? "" : "s"}</span>
-                <span>{formatStaffCount(posting.staffedPeople)}/{posting.requiredStaff} staffed</span>
-              </div>
+            <div className="overtime-group__cards">
+              {group.postings.map((posting) => {
+                const claimStatus = getClaimStatus(claimingEmployee, posting, snapshot, assignmentIndex);
 
-              <div className="overtime-card-actions">
-                <span className="overtime-card-hint">
-                  {posting.claimedBySelectedEmployee
-                    ? "Claimed by selected employee"
-                    : posting.eligibleEmployeeIds.length > 0
-                    ? `${posting.eligibleEmployeeIds.length} employee${posting.eligibleEmployeeIds.length === 1 ? "" : "s"} can claim`
-                    : "No eligible employees available"}
-                </span>
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => (posting.claimedBySelectedEmployee ? handleRelease(posting) : handleClaim(posting))}
-                  disabled={isClaiming || (!posting.claimedBySelectedEmployee && !canClaim)}
-                >
-                  {isClaiming
-                    ? posting.claimedBySelectedEmployee
-                      ? "Releasing..."
-                      : "Claiming..."
-                    : posting.claimedBySelectedEmployee
-                    ? "Release Posting"
-                    : "Claim Posting"}
-                </button>
-              </div>
-            </article>
-          );
-        })}
+                return (
+                  <article
+                    key={posting.id}
+                    className={`overtime-card ${posting.claimedBySelectedEmployee ? "overtime-card--claimed" : ""}`}
+                  >
+                    <div className="overtime-card-top">
+                      <div>
+                        <p className="overtime-card-team">{posting.competencyCode}</p>
+                        <h3 className="overtime-card-title">{posting.competencyLabel}</h3>
+                      </div>
+                      <span className={`legend-pill legend-pill--${posting.colorToken.toLowerCase()}`}>
+                        {posting.competencyCode.replace("Post ", "")}
+                      </span>
+                    </div>
 
-        {filteredPostings.length === 0 ? (
+                    <div className="overtime-card-meta">
+                      <span>{posting.openShifts} open shift{posting.openShifts === 1 ? "" : "s"}</span>
+                      <span>{formatStaffCount(posting.staffedPeople)}/{posting.requiredStaff} staffed</span>
+                    </div>
+
+                    <div className="overtime-card-actions">
+                      <span className="overtime-card-hint">
+                        {posting.claimedBySelectedEmployee ? "Claimed by selected employee" : claimStatus.reason}
+                      </span>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => (posting.claimedBySelectedEmployee ? handleRelease(posting) : handleClaim(posting))}
+                        disabled={isClaiming || (!posting.claimedBySelectedEmployee && !claimStatus.canClaim)}
+                      >
+                        {isClaiming
+                          ? posting.claimedBySelectedEmployee
+                            ? "Releasing..."
+                            : "Claiming..."
+                          : posting.claimedBySelectedEmployee
+                          ? "Release Posting"
+                          : "Claim Posting"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+
+        {groupedPostings.length === 0 ? (
           <div className="empty-state">
             <strong>No overtime postings.</strong>
             <span>Try a different team or competency filter, or all current sets are fully staffed.</span>

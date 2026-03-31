@@ -17,6 +17,22 @@ type EditableEmployee = {
 
 type CsvImportRow = Record<string, string>;
 
+type CsvPreviewRow = {
+  key: string;
+  name: string;
+  role: string;
+  shiftName: string;
+  action: "Add" | "Update" | "Skip";
+  notes: string[];
+};
+
+type PendingCsvImport = {
+  employees: EditableEmployee[];
+  deletedEmployeeIds: string[];
+  rows: CsvPreviewRow[];
+  summary: string;
+};
+
 function normalizeCsvHeader(value: string) {
   return value
     .trim()
@@ -142,6 +158,24 @@ function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   };
 }
 
+function getEmployeeIssues(employee: EditableEmployee) {
+  const issues: string[] = [];
+
+  if (!employee.name.trim()) {
+    issues.push("Name required");
+  }
+
+  if (!employee.role.trim()) {
+    issues.push("Role required");
+  }
+
+  if (!employee.scheduleId) {
+    issues.push("Shift required");
+  }
+
+  return issues;
+}
+
 export function PersonnelPanel({
   snapshot,
 }: {
@@ -167,6 +201,9 @@ export function PersonnelPanel({
   const [baselineEmployees, setBaselineEmployees] = useState(initialEmployees);
   const [deletedEmployeeIds, setDeletedEmployeeIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
+  const [search, setSearch] = useState("");
+  const [selectedScheduleFilter, setSelectedScheduleFilter] = useState("all");
+  const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
   const [isSaving, startSaveTransition] = useTransition();
   const defaultSchedule =
     [...snapshot.schedules]
@@ -174,9 +211,32 @@ export function PersonnelPanel({
     snapshot.schedules[0];
   const defaultUnit = snapshot.productionUnits[0];
 
+  const scheduleNameById = useMemo(
+    () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
+    [snapshot.schedules],
+  );
   const baselineMap = useMemo(
     () => new Map(baselineEmployees.map((employee) => [employee.id, normalizeEmployee(employee)])),
     [baselineEmployees],
+  );
+  const dirtyEmployeeIds = useMemo(
+    () =>
+      new Set(
+        employees
+          .map((employee) => normalizeEmployee(employee))
+          .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee))
+          .map((employee) => employee.employeeId),
+      ),
+    [baselineMap, employees],
+  );
+  const invalidEmployeeIds = useMemo(
+    () =>
+      new Set(
+        employees
+          .filter((employee) => getEmployeeIssues(employee).length > 0)
+          .map((employee) => employee.id),
+      ),
+    [employees],
   );
   const scheduleIdByLookup = useMemo(() => {
     const entries = snapshot.schedules.flatMap((schedule) => [
@@ -200,6 +260,49 @@ export function PersonnelPanel({
     .map((employee) => normalizeEmployee(employee))
     .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee));
   const hasChanges = dirtyUpdates.length > 0 || deletedEmployeeIds.length > 0;
+  const hasValidationErrors = invalidEmployeeIds.size > 0;
+
+  const visibleEmployees = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return [...employees]
+      .filter((employee) => {
+        if (selectedScheduleFilter !== "all" && employee.scheduleId !== selectedScheduleFilter) {
+          return false;
+        }
+
+        if (!query) {
+          return true;
+        }
+
+        return `${employee.name} ${employee.role} ${scheduleNameById[employee.scheduleId] ?? ""}`
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort(
+        (left, right) =>
+          (scheduleNameById[left.scheduleId] ?? "").localeCompare(scheduleNameById[right.scheduleId] ?? "") ||
+          left.name.localeCompare(right.name),
+      );
+  }, [employees, scheduleNameById, search, selectedScheduleFilter]);
+
+  const groupedEmployees = useMemo(() => {
+    return visibleEmployees.reduce<Array<{ type: "group"; label: string } | { type: "employee"; value: EditableEmployee }>>(
+      (rows, employee, index) => {
+        const currentScheduleName = scheduleNameById[employee.scheduleId] ?? "Unassigned";
+        const previousScheduleName =
+          index > 0 ? scheduleNameById[visibleEmployees[index - 1].scheduleId] ?? "Unassigned" : null;
+
+        if (currentScheduleName !== previousScheduleName) {
+          rows.push({ type: "group", label: currentScheduleName });
+        }
+
+        rows.push({ type: "employee", value: employee });
+        return rows;
+      },
+      [],
+    );
+  }, [scheduleNameById, visibleEmployees]);
 
   function updateEmployee(employeeId: string, updater: (employee: EditableEmployee) => EditableEmployee) {
     setEmployees((current) =>
@@ -221,6 +324,11 @@ export function PersonnelPanel({
   }
 
   function handleSave() {
+    if (hasValidationErrors) {
+      setStatusMessage("Fix the highlighted personnel rows before saving.");
+      return;
+    }
+
     startSaveTransition(async () => {
       const result = await savePersonnel({
         updates: dirtyUpdates,
@@ -238,6 +346,7 @@ export function PersonnelPanel({
   function handleRevert() {
     setEmployees(cloneEmployees(baselineEmployees));
     setDeletedEmployeeIds([]);
+    setPendingCsvImport(null);
     setStatusMessage("Changes reverted.");
   }
 
@@ -286,6 +395,7 @@ export function PersonnelPanel({
       nextEmployees.map((employee, index) => [normalizeLookupValue(employee.name), index]),
     );
     const restoredIds = new Set<string>();
+    const previewRows: CsvPreviewRow[] = [];
     const unknownSchedules = new Set<string>();
     const unknownCompetencies = new Set<string>();
     let importedCount = 0;
@@ -307,6 +417,14 @@ export function PersonnelPanel({
 
       if (!csvName && !csvId) {
         skippedCount += 1;
+        previewRows.push({
+          key: `skip-${previewRows.length}`,
+          name: "(blank row)",
+          role: "",
+          shiftName: "",
+          action: "Skip",
+          notes: ["Missing employee name or id"],
+        });
         continue;
       }
 
@@ -318,8 +436,11 @@ export function PersonnelPanel({
         ? scheduleIdByLookup.get(normalizeLookupValue(csvShift)) ?? ""
         : "";
 
+      const notes: string[] = [];
+
       if (csvShift && !resolvedScheduleId) {
         unknownSchedules.add(csvShift);
+        notes.push(`Unknown shift "${csvShift}"`);
       }
 
       const resolvedCompetencyIds = splitCompetencyValues(csvCompetencies).flatMap((value) => {
@@ -332,6 +453,10 @@ export function PersonnelPanel({
 
         return competencyId;
       });
+
+      if (csvCompetencies && resolvedCompetencyIds.length === 0) {
+        notes.push("No valid competencies matched");
+      }
 
       const nextEmployee: EditableEmployee = {
         id: existing?.id ?? (csvId || `emp-${crypto.randomUUID().slice(0, 8)}`),
@@ -358,23 +483,46 @@ export function PersonnelPanel({
 
       restoredIds.add(nextEmployee.id);
       importedCount += 1;
+
+      previewRows.push({
+        key: nextEmployee.id,
+        name: nextEmployee.name,
+        role: nextEmployee.role,
+        shiftName: scheduleNameById[nextEmployee.scheduleId] ?? nextEmployee.scheduleId,
+        action: existing ? "Update" : "Add",
+        notes,
+      });
     }
 
-    setEmployees(nextEmployees);
-    setDeletedEmployeeIds((current) => current.filter((employeeId) => !restoredIds.has(employeeId)));
-
     const details = [
-      importedCount > 0 ? `Imported ${importedCount} employee${importedCount === 1 ? "" : "s"}.` : "",
-      skippedCount > 0 ? `Skipped ${skippedCount} blank row${skippedCount === 1 ? "" : "s"}.` : "",
-      unknownSchedules.size > 0 ? `Unknown shifts: ${[...unknownSchedules].slice(0, 3).join(", ")}.` : "",
+      importedCount > 0 ? `${importedCount} row${importedCount === 1 ? "" : "s"} ready` : "",
+      skippedCount > 0 ? `${skippedCount} skipped` : "",
+      unknownSchedules.size > 0 ? `Unknown shifts: ${[...unknownSchedules].slice(0, 3).join(", ")}` : "",
       unknownCompetencies.size > 0
-        ? `Unknown competencies: ${[...unknownCompetencies].slice(0, 3).join(", ")}.`
+        ? `Unknown competencies: ${[...unknownCompetencies].slice(0, 3).join(", ")}`
         : "",
     ]
       .filter(Boolean)
-      .join(" ");
+      .join(" · ");
 
-    setStatusMessage(details || "CSV import completed.");
+    setPendingCsvImport({
+      employees: nextEmployees,
+      deletedEmployeeIds: deletedEmployeeIds.filter((employeeId) => !restoredIds.has(employeeId)),
+      rows: previewRows,
+      summary: details || "CSV import ready to apply.",
+    });
+    setStatusMessage("Review the CSV preview, then apply it.");
+  }
+
+  function applyPendingImport() {
+    if (!pendingCsvImport) {
+      return;
+    }
+
+    setEmployees(pendingCsvImport.employees);
+    setDeletedEmployeeIds(pendingCsvImport.deletedEmployeeIds);
+    setStatusMessage(pendingCsvImport.summary);
+    setPendingCsvImport(null);
   }
 
   function handleRemoveEmployee(employeeId: string) {
@@ -393,7 +541,32 @@ export function PersonnelPanel({
         <h1 className="panel-title">Personnel</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--actions">
+      <div className="workspace-toolbar workspace-toolbar--personnel-page">
+        <label className="field">
+          <span>Search</span>
+          <input
+            type="search"
+            placeholder="Enter employee name"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+
+        <label className="field">
+          <span>Shift</span>
+          <select
+            value={selectedScheduleFilter}
+            onChange={(event) => setSelectedScheduleFilter(event.target.value)}
+          >
+            <option value="all">All shifts</option>
+            {snapshot.schedules.map((schedule) => (
+              <option key={schedule.id} value={schedule.id}>
+                {schedule.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div className="planner-actions">
           <button type="button" className="ghost-button" onClick={handleAddEmployee}>
             Add employee
@@ -408,11 +581,12 @@ export function PersonnelPanel({
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || !hasChanges}
+            disabled={isSaving || !hasChanges || hasValidationErrors}
           >
             {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
+
         <input
           ref={csvInputRef}
           className="sr-only"
@@ -420,8 +594,47 @@ export function PersonnelPanel({
           accept=".csv,text/csv"
           onChange={handleCsvImport}
         />
-        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+
+        <div className="toolbar-status-wrap">
+          {hasValidationErrors ? (
+            <p className="toolbar-status">Fix highlighted rows before saving.</p>
+          ) : statusMessage ? (
+            <p className="toolbar-status">{statusMessage}</p>
+          ) : null}
+        </div>
       </div>
+
+      {pendingCsvImport ? (
+        <section className="import-preview">
+          <div className="import-preview__header">
+            <div>
+              <strong>CSV Preview</strong>
+              <p>{pendingCsvImport.summary}</p>
+            </div>
+            <div className="planner-actions">
+              <button type="button" className="ghost-button" onClick={() => setPendingCsvImport(null)}>
+                Cancel import
+              </button>
+              <button type="button" className="primary-button" onClick={applyPendingImport}>
+                Apply import
+              </button>
+            </div>
+          </div>
+          <div className="import-preview__rows">
+            {pendingCsvImport.rows.slice(0, 10).map((row) => (
+              <div key={row.key} className="import-preview__row">
+                <strong>{row.name}</strong>
+                <span>{row.action}</span>
+                <span>{row.shiftName || "No shift"}</span>
+                <span>{row.notes.join(" · ") || row.role}</span>
+              </div>
+            ))}
+            {pendingCsvImport.rows.length > 10 ? (
+              <p className="toolbar-status">Showing 10 of {pendingCsvImport.rows.length} preview rows.</p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <div className="personnel-table-wrap">
         <table className="personnel-table">
@@ -435,88 +648,102 @@ export function PersonnelPanel({
             </tr>
           </thead>
           <tbody>
-            {employees.map((employee) => (
-              <tr key={employee.id}>
-                <td>
-                  <input
-                    className="table-input"
-                    value={employee.name}
-                    onChange={(event) =>
-                      updateEmployee(employee.id, (current) => ({
-                        ...current,
-                        name: event.target.value,
-                      }))
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    className="table-input"
-                    value={employee.role}
-                    onChange={(event) =>
-                      updateEmployee(employee.id, (current) => ({
-                        ...current,
-                        role: event.target.value,
-                      }))
-                    }
-                  />
-                </td>
-                <td className="column-shift">
-                  <select
-                    className="table-select"
-                    value={employee.scheduleId}
-                    onChange={(event) =>
-                      updateEmployee(employee.id, (current) => ({
-                        ...current,
-                        scheduleId: event.target.value,
-                      }))
-                    }
-                  >
-                    {snapshot.schedules.map((schedule) => (
-                      <option key={schedule.id} value={schedule.id}>
-                        {schedule.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <div className="table-pills table-pills--editable">
-                    {snapshot.competencies.map((competency) => {
-                      const isSelected = employee.competencyIds.includes(competency.id);
+            {groupedEmployees.map((entry) =>
+              entry.type === "group" ? (
+                <tr key={`group-${entry.label}`} className="table-group-row">
+                  <td colSpan={5}>{entry.label}</td>
+                </tr>
+              ) : (
+                <tr
+                  key={entry.value.id}
+                  className={`${dirtyEmployeeIds.has(entry.value.id) ? "table-row--dirty" : ""} ${
+                    invalidEmployeeIds.has(entry.value.id) ? "table-row--invalid" : ""
+                  }`}
+                >
+                  <td>
+                    <input
+                      className="table-input"
+                      value={entry.value.name}
+                      onChange={(event) =>
+                        updateEmployee(entry.value.id, (current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="table-input"
+                      value={entry.value.role}
+                      onChange={(event) =>
+                        updateEmployee(entry.value.id, (current) => ({
+                          ...current,
+                          role: event.target.value,
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="column-shift">
+                    <select
+                      className="table-select"
+                      value={entry.value.scheduleId}
+                      onChange={(event) =>
+                        updateEmployee(entry.value.id, (current) => ({
+                          ...current,
+                          scheduleId: event.target.value,
+                        }))
+                      }
+                    >
+                      {snapshot.schedules.map((schedule) => (
+                        <option key={schedule.id} value={schedule.id}>
+                          {schedule.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <div className="table-pills table-pills--editable">
+                      {snapshot.competencies.map((competency) => {
+                        const isSelected = entry.value.competencyIds.includes(competency.id);
 
-                      return (
-                        <button
-                          type="button"
-                          key={competency.id}
-                          onClick={() => toggleCompetency(employee.id, competency.id)}
-                          className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
-                            isSelected ? "legend-pill--selected" : "legend-pill--muted"
-                          }`}
-                          title={competency.label}
-                        >
-                          {competency.code}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </td>
-                <td className="table-actions-cell">
-                  <button
-                    type="button"
-                    className="table-action table-action--danger"
-                    onClick={() => handleRemoveEmployee(employee.id)}
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {employees.length === 0 ? (
+                        return (
+                          <button
+                            type="button"
+                            key={competency.id}
+                            onClick={() => toggleCompetency(entry.value.id, competency.id)}
+                            className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
+                              isSelected ? "legend-pill--selected" : "legend-pill--muted"
+                            }`}
+                            title={competency.label}
+                          >
+                            {competency.code}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </td>
+                  <td className="table-actions-cell">
+                    {invalidEmployeeIds.has(entry.value.id) ? (
+                      <p className="row-issue">{getEmployeeIssues(entry.value).join(" · ")}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="table-action table-action--danger"
+                      onClick={() => handleRemoveEmployee(entry.value.id)}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ),
+            )}
+            {groupedEmployees.length === 0 ? (
               <tr>
                 <td colSpan={5}>
                   <div className="empty-state">
-                    <strong>No employees yet.</strong>
-                    <span>Add an employee to start staffing the shifts.</span>
+                    <strong>No employees matched that filter.</strong>
+                    <span>Try a different search term or shift filter.</span>
                   </div>
                 </td>
               </tr>

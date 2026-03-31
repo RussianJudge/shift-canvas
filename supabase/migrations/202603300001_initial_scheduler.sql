@@ -30,6 +30,7 @@ create table if not exists time_codes (
   code text not null,
   label text not null,
   color_token text not null default 'slate',
+  category text not null default 'General',
   created_at timestamptz not null default now(),
   unique (code)
 );

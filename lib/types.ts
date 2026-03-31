@@ -23,6 +23,7 @@ export interface TimeCode {
   code: string;
   label: string;
   colorToken: string;
+  category: string;
 }
 
 export interface Employee {
@@ -135,6 +136,7 @@ export interface TimeCodeUpdate {
   code: string;
   label: string;
   colorToken: string;
+  category: string;
 }
 
 export interface SaveTimeCodesInput {

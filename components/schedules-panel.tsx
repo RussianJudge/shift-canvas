@@ -30,6 +30,28 @@ function normalizeSchedule(schedule: EditableSchedule): ScheduleUpdate {
   };
 }
 
+function getScheduleIssues(schedule: EditableSchedule) {
+  const issues: string[] = [];
+
+  if (!schedule.name.trim()) {
+    issues.push("Name required");
+  }
+
+  if (!schedule.startDate) {
+    issues.push("Start date required");
+  }
+
+  if (schedule.dayShiftDays + schedule.nightShiftDays + schedule.offDays <= 0) {
+    issues.push("Cycle must be at least 1 day");
+  }
+
+  return issues;
+}
+
+function formatCycleSummary(schedule: EditableSchedule) {
+  return `${schedule.dayShiftDays}D / ${schedule.nightShiftDays}N / ${schedule.offDays}O`;
+}
+
 export function SchedulesPanel({
   snapshot,
 }: {
@@ -60,12 +82,31 @@ export function SchedulesPanel({
     [baselineSchedules],
   );
 
+  const dirtyScheduleIds = useMemo(
+    () =>
+      new Set(
+        schedules
+          .map((schedule) => normalizeSchedule(schedule))
+          .filter(
+            (schedule) => JSON.stringify(baselineMap.get(schedule.scheduleId)) !== JSON.stringify(schedule),
+          )
+          .map((schedule) => schedule.scheduleId),
+      ),
+    [baselineMap, schedules],
+  );
+  const invalidScheduleIds = useMemo(
+    () =>
+      new Set(schedules.filter((schedule) => getScheduleIssues(schedule).length > 0).map((schedule) => schedule.id)),
+    [schedules],
+  );
+
   const dirtyUpdates = schedules
     .map((schedule) => normalizeSchedule(schedule))
     .filter(
       (schedule) => JSON.stringify(baselineMap.get(schedule.scheduleId)) !== JSON.stringify(schedule),
     );
   const hasChanges = dirtyUpdates.length > 0 || deletedScheduleIds.length > 0;
+  const hasValidationErrors = invalidScheduleIds.size > 0;
 
   function updateSchedule(
     scheduleId: string,
@@ -79,7 +120,7 @@ export function SchedulesPanel({
   function handleAddSchedule() {
     const nextSchedule: EditableSchedule = {
       id: `schedule-${crypto.randomUUID().slice(0, 8)}`,
-      name: "New Pattern",
+      name: "New Shift",
       startDate: new Date().toISOString().slice(0, 10),
       dayShiftDays: 3,
       nightShiftDays: 3,
@@ -98,12 +139,12 @@ export function SchedulesPanel({
       return;
     }
 
-    const confirmation =
-      schedule.employeeCount > 0
-        ? `Remove ${schedule.name}? Employees linked to this pattern will also be removed.`
-        : `Remove ${schedule.name}?`;
+    if (schedule.employeeCount > 0) {
+      setStatusMessage(`Move ${schedule.employeeCount} employee${schedule.employeeCount === 1 ? "" : "s"} off ${schedule.name} before deleting it.`);
+      return;
+    }
 
-    if (!window.confirm(confirmation)) {
+    if (!window.confirm(`Remove ${schedule.name}?`)) {
       return;
     }
 
@@ -117,6 +158,11 @@ export function SchedulesPanel({
   }
 
   function handleSave() {
+    if (hasValidationErrors) {
+      setStatusMessage("Fix the highlighted shifts before saving.");
+      return;
+    }
+
     startSaveTransition(async () => {
       const result = await saveSchedules({
         updates: dirtyUpdates,
@@ -146,7 +192,7 @@ export function SchedulesPanel({
       <div className="workspace-toolbar workspace-toolbar--actions">
         <div className="planner-actions">
           <button type="button" className="ghost-button" onClick={handleAddSchedule}>
-            Add schedule
+            Add shift
           </button>
           <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
             Revert
@@ -155,12 +201,18 @@ export function SchedulesPanel({
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || !hasChanges}
+            disabled={isSaving || !hasChanges || hasValidationErrors}
           >
             {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
-        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+        <div className="toolbar-status-wrap">
+          {hasValidationErrors ? (
+            <p className="toolbar-status">Fix highlighted shifts before saving.</p>
+          ) : statusMessage ? (
+            <p className="toolbar-status">{statusMessage}</p>
+          ) : null}
+        </div>
       </div>
 
       <div className="personnel-table-wrap">
@@ -172,13 +224,19 @@ export function SchedulesPanel({
               <th>Day on</th>
               <th>Night on</th>
               <th>Off days</th>
+              <th>Cycle</th>
               <th>Employees</th>
               <th />
             </tr>
           </thead>
           <tbody>
             {schedules.map((schedule) => (
-              <tr key={schedule.id}>
+              <tr
+                key={schedule.id}
+                className={`${dirtyScheduleIds.has(schedule.id) ? "table-row--dirty" : ""} ${
+                  invalidScheduleIds.has(schedule.id) ? "table-row--invalid" : ""
+                }`}
+              >
                 <td>
                   <input
                     className="table-input"
@@ -246,12 +304,27 @@ export function SchedulesPanel({
                     }
                   />
                 </td>
+                <td>
+                  <div className="table-meta">
+                    <strong>{formatCycleSummary(schedule)}</strong>
+                    <span>{schedule.dayShiftDays + schedule.nightShiftDays + schedule.offDays} day cycle</span>
+                  </div>
+                </td>
                 <td>{schedule.employeeCount}</td>
                 <td className="table-actions-cell">
+                  {invalidScheduleIds.has(schedule.id) ? (
+                    <p className="row-issue">{getScheduleIssues(schedule).join(" · ")}</p>
+                  ) : null}
                   <button
                     type="button"
                     className="table-action table-action--danger"
                     onClick={() => handleRemoveSchedule(schedule.id)}
+                    disabled={schedule.employeeCount > 0}
+                    title={
+                      schedule.employeeCount > 0
+                        ? "Move employees off this shift before deleting it."
+                        : "Remove shift"
+                    }
                   >
                     Remove
                   </button>
@@ -260,10 +333,10 @@ export function SchedulesPanel({
             ))}
             {schedules.length === 0 ? (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={8}>
                   <div className="empty-state">
-                    <strong>No schedules yet.</strong>
-                    <span>Add a schedule to start building patterns.</span>
+                    <strong>No shifts yet.</strong>
+                    <span>Add a shift to start building rotations.</span>
                   </div>
                 </td>
               </tr>

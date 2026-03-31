@@ -65,12 +65,10 @@ function NavLink({
   href,
   label,
   icon,
-  collapsed,
 }: {
   href: string;
   label: string;
   icon: React.ReactNode;
-  collapsed: boolean;
 }) {
   const pathname = usePathname();
   const isActive = pathname === href;
@@ -80,6 +78,7 @@ function NavLink({
       href={href}
       className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
       title={label}
+      aria-current={isActive ? "page" : undefined}
     >
       <span className="workspace-nav-icon">{icon}</span>
       <strong>{label}</strong>
@@ -114,12 +113,12 @@ export function WorkspaceShell({
           </div>
 
           <nav className="workspace-nav" aria-label="Primary">
-            <NavLink href="/" label="Schedule" icon={<ScheduleIcon />} collapsed={isCollapsed} />
-            <NavLink href="/personnel" label="Personnel" icon={<PersonnelIcon />} collapsed={isCollapsed} />
-            <NavLink href="/schedules" label="Shifts" icon={<PatternsIcon />} collapsed={isCollapsed} />
-            <NavLink href="/competencies" label="Competencies" icon={<CompetenciesIcon />} collapsed={isCollapsed} />
-            <NavLink href="/overtime" label="Overtime" icon={<OvertimeIcon />} collapsed={isCollapsed} />
-            <NavLink href="/time-codes" label="Time Codes" icon={<TimeCodesIcon />} collapsed={isCollapsed} />
+            <NavLink href="/" label="Schedule" icon={<ScheduleIcon />} />
+            <NavLink href="/personnel" label="Personnel" icon={<PersonnelIcon />} />
+            <NavLink href="/schedules" label="Shifts" icon={<PatternsIcon />} />
+            <NavLink href="/competencies" label="Competencies" icon={<CompetenciesIcon />} />
+            <NavLink href="/overtime" label="Overtime" icon={<OvertimeIcon />} />
+            <NavLink href="/time-codes" label="Time Codes" icon={<TimeCodesIcon />} />
           </nav>
         </aside>
 

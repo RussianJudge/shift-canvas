@@ -6,12 +6,14 @@ import { saveTimeCodes } from "@/app/actions";
 import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate } from "@/lib/types";
 
 const COLOR_TOKENS = ["amber", "teal", "violet", "rose", "blue", "lime", "orange", "slate"];
+const TIME_CODE_CATEGORIES = ["Absence", "Coverage", "Leave", "Training", "General"];
 
 type EditableTimeCode = {
   id: string;
   code: string;
   label: string;
   colorToken: string;
+  category: string;
 };
 
 function cloneTimeCodes(timeCodes: EditableTimeCode[]) {
@@ -24,7 +26,26 @@ function normalizeTimeCode(timeCode: EditableTimeCode): TimeCodeUpdate {
     code: timeCode.code.trim(),
     label: timeCode.label.trim(),
     colorToken: timeCode.colorToken,
+    category: timeCode.category.trim(),
   };
+}
+
+function getTimeCodeIssues(timeCode: EditableTimeCode) {
+  const issues: string[] = [];
+
+  if (!timeCode.code.trim()) {
+    issues.push("Code required");
+  }
+
+  if (!timeCode.label.trim()) {
+    issues.push("Label required");
+  }
+
+  if (!timeCode.category.trim()) {
+    issues.push("Category required");
+  }
+
+  return issues;
 }
 
 export function TimeCodesPanel({
@@ -39,6 +60,7 @@ export function TimeCodesPanel({
         code: timeCode.code,
         label: timeCode.label,
         colorToken: timeCode.colorToken,
+        category: timeCode.category,
       })),
     [snapshot.timeCodes],
   );
@@ -53,6 +75,23 @@ export function TimeCodesPanel({
     () => new Map(baselineTimeCodes.map((timeCode) => [timeCode.id, normalizeTimeCode(timeCode)])),
     [baselineTimeCodes],
   );
+  const dirtyTimeCodeIds = useMemo(
+    () =>
+      new Set(
+        timeCodes
+          .map((timeCode) => normalizeTimeCode(timeCode))
+          .filter(
+            (timeCode) => JSON.stringify(baselineMap.get(timeCode.timeCodeId)) !== JSON.stringify(timeCode),
+          )
+          .map((timeCode) => timeCode.timeCodeId),
+      ),
+    [baselineMap, timeCodes],
+  );
+  const invalidTimeCodeIds = useMemo(
+    () =>
+      new Set(timeCodes.filter((timeCode) => getTimeCodeIssues(timeCode).length > 0).map((timeCode) => timeCode.id)),
+    [timeCodes],
+  );
 
   const dirtyUpdates = timeCodes
     .map((timeCode) => normalizeTimeCode(timeCode))
@@ -60,6 +99,7 @@ export function TimeCodesPanel({
       (timeCode) => JSON.stringify(baselineMap.get(timeCode.timeCodeId)) !== JSON.stringify(timeCode),
     );
   const hasChanges = dirtyUpdates.length > 0 || deletedTimeCodeIds.length > 0;
+  const hasValidationErrors = invalidTimeCodeIds.size > 0;
 
   function updateTimeCode(
     timeCodeId: string,
@@ -76,6 +116,7 @@ export function TimeCodesPanel({
       code: "NEW",
       label: "New time code",
       colorToken: "slate",
+      category: "General",
     };
 
     setTimeCodes((current) => [nextTimeCode, ...current]);
@@ -93,6 +134,11 @@ export function TimeCodesPanel({
   }
 
   function handleSave() {
+    if (hasValidationErrors) {
+      setStatusMessage("Fix the highlighted time codes before saving.");
+      return;
+    }
+
     startSaveTransition(async () => {
       const result = await saveTimeCodes({
         updates: dirtyUpdates,
@@ -131,12 +177,18 @@ export function TimeCodesPanel({
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || !hasChanges}
+            disabled={isSaving || !hasChanges || hasValidationErrors}
           >
             {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
-        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+        <div className="toolbar-status-wrap">
+          {hasValidationErrors ? (
+            <p className="toolbar-status">Fix the highlighted time codes before saving.</p>
+          ) : statusMessage ? (
+            <p className="toolbar-status">{statusMessage}</p>
+          ) : null}
+        </div>
       </div>
 
       <div className="personnel-table-wrap">
@@ -145,6 +197,7 @@ export function TimeCodesPanel({
             <tr>
               <th>Code</th>
               <th>Label</th>
+              <th>Category</th>
               <th>Color</th>
               <th>Preview</th>
               <th />
@@ -152,7 +205,12 @@ export function TimeCodesPanel({
           </thead>
           <tbody>
             {timeCodes.map((timeCode) => (
-              <tr key={timeCode.id}>
+              <tr
+                key={timeCode.id}
+                className={`${dirtyTimeCodeIds.has(timeCode.id) ? "table-row--dirty" : ""} ${
+                  invalidTimeCodeIds.has(timeCode.id) ? "table-row--invalid" : ""
+                }`}
+              >
                 <td>
                   <input
                     className="table-input"
@@ -180,6 +238,24 @@ export function TimeCodesPanel({
                 <td>
                   <select
                     className="table-select"
+                    value={timeCode.category}
+                    onChange={(event) =>
+                      updateTimeCode(timeCode.id, (current) => ({
+                        ...current,
+                        category: event.target.value,
+                      }))
+                    }
+                  >
+                    {TIME_CODE_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <select
+                    className="table-select"
                     value={timeCode.colorToken}
                     onChange={(event) =>
                       updateTimeCode(timeCode.id, (current) => ({
@@ -201,6 +277,9 @@ export function TimeCodesPanel({
                   </span>
                 </td>
                 <td className="table-actions-cell">
+                  {invalidTimeCodeIds.has(timeCode.id) ? (
+                    <p className="row-issue">{getTimeCodeIssues(timeCode).join(" · ")}</p>
+                  ) : null}
                   <button
                     type="button"
                     className="table-action table-action--danger"
@@ -213,10 +292,10 @@ export function TimeCodesPanel({
             ))}
             {timeCodes.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="empty-state">
                     <strong>No time codes yet.</strong>
-                    <span>Add a code to use it in the schedule grid.</span>
+                    <span>Add a code to use it in the shift grid.</span>
                   </div>
                 </td>
               </tr>

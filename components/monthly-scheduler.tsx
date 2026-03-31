@@ -43,6 +43,7 @@ type CoverageSummary = {
   requiredStaff: number;
   hasOvertime: boolean;
   isUnderstaffed: boolean;
+  missingDates: string[];
 };
 
 function isMonthKey(value: string) {
@@ -82,7 +83,7 @@ function pickMonthEntries(assignments: Record<string, AssignmentSelection>, mont
   );
 }
 
-function getCellCompetency(
+function getCellSelection(
   employee: Pick<Employee, "id" | "competencyIds">,
   day: { date: string },
   shiftKind: ShiftKind,
@@ -138,39 +139,6 @@ function getScheduleAccent(scheduleId: string) {
   return accents[hash];
 }
 
-function encodeAssignmentValue(selection: AssignmentSelection) {
-  if (selection.timeCodeId) {
-    return `time:${selection.timeCodeId}`;
-  }
-
-  if (selection.competencyId) {
-    return `competency:${selection.competencyId}`;
-  }
-
-  return "";
-}
-
-function decodeAssignmentValue(value: string) {
-  if (value.startsWith("time:")) {
-    return {
-      competencyId: null,
-      timeCodeId: value.replace("time:", ""),
-    };
-  }
-
-  if (value.startsWith("competency:")) {
-    return {
-      competencyId: value.replace("competency:", ""),
-      timeCodeId: null,
-    };
-  }
-
-  return {
-    competencyId: null,
-    timeCodeId: null,
-  };
-}
-
 function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
   return Object.fromEntries(
     Object.entries(assignments).map(([key, selection]) => [key, { ...selection }]),
@@ -221,6 +189,133 @@ function getSetDays(
   return monthDays.slice(startIndex, endIndex + 1);
 }
 
+function getSelectionCode(
+  selection: AssignmentSelection,
+  competencyMap: Record<string, Competency>,
+  timeCodeMap: Record<string, TimeCode>,
+) {
+  if (selection.timeCodeId) {
+    return timeCodeMap[selection.timeCodeId]?.code ?? "";
+  }
+
+  if (selection.competencyId) {
+    return getCompactCode(competencyMap[selection.competencyId]?.code ?? "");
+  }
+
+  return "";
+}
+
+function getGroupedTimeCodes(timeCodes: TimeCode[]) {
+  return Object.entries(
+    timeCodes.reduce<Record<string, TimeCode[]>>((groups, timeCode) => {
+      groups[timeCode.category] ??= [];
+      groups[timeCode.category].push(timeCode);
+      return groups;
+    }, {}),
+  ).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function AssignmentPalette({
+  selectedEmployee,
+  selectedDate,
+  shiftKind,
+  selection,
+  competencies,
+  timeCodes,
+  onApply,
+}: {
+  selectedEmployee: DisplayEmployee | null;
+  selectedDate: string | null;
+  shiftKind: ShiftKind;
+  selection: AssignmentSelection;
+  competencies: Competency[];
+  timeCodes: TimeCode[];
+  onApply: (selection: AssignmentSelection) => void;
+}) {
+  const groupedTimeCodes = useMemo(() => getGroupedTimeCodes(timeCodes), [timeCodes]);
+
+  return (
+    <section className="assignment-palette" aria-label="Assignment palette">
+      <div className="assignment-palette__header">
+        <div>
+          <h2 className="assignment-palette__title">Assignment</h2>
+          <p className="assignment-palette__context">
+            {selectedEmployee && selectedDate
+              ? `${selectedEmployee.name} · ${formatShortDate(selectedDate)} · ${shiftKind.toLowerCase()}`
+              : "Click a calendar cell to assign a competency or time code"}
+          </p>
+        </div>
+        {selectedEmployee && selectedDate ? (
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() =>
+              onApply({
+                competencyId: null,
+                timeCodeId: null,
+              })
+            }
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+
+      {selectedEmployee && selectedDate ? (
+        <div className="assignment-palette__groups">
+          <div className="assignment-palette__group">
+            <span className="assignment-palette__label">Competencies</span>
+            <div className="assignment-palette__options">
+              {competencies.map((competency) => (
+                <button
+                  key={competency.id}
+                  type="button"
+                  className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
+                    selection.competencyId === competency.id ? "legend-pill--selected" : ""
+                  }`}
+                  onClick={() =>
+                    onApply({
+                      competencyId: competency.id,
+                      timeCodeId: null,
+                    })
+                  }
+                >
+                  {getCompactCode(competency.code)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {groupedTimeCodes.map(([category, categoryTimeCodes]) => (
+            <div key={category} className="assignment-palette__group">
+              <span className="assignment-palette__label">{category}</span>
+              <div className="assignment-palette__options">
+                {categoryTimeCodes.map((timeCode) => (
+                  <button
+                    key={timeCode.id}
+                    type="button"
+                    className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
+                      selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
+                    }`}
+                    onClick={() =>
+                      onApply({
+                        competencyId: null,
+                        timeCodeId: timeCode.id,
+                      })
+                    }
+                  >
+                    {timeCode.code}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function MonthlyScheduler({
   initialSnapshot,
 }: {
@@ -241,6 +336,7 @@ export function MonthlyScheduler({
   const [statusMessage, setStatusMessage] = useState("");
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
   const [selectedSetAnchorDate, setSelectedSetAnchorDate] = useState<string | null>(null);
+  const [selectedCoverageCompetencyId, setSelectedCoverageCompetencyId] = useState<string | null>(null);
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
@@ -260,29 +356,38 @@ export function MonthlyScheduler({
     return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
       let hasOvertime = false;
+      const missingDates: string[] = [];
 
-      for (const employee of activeSchedule.employees) {
-        for (const day of selectedSetDays) {
+      for (const day of selectedSetDays) {
+        let filledOnDate = 0;
+
+        for (const employee of activeSchedule.employees) {
           const shiftKind = shiftForDate(activeSchedule, day.date);
-          const selection = getCellCompetency(employee, day, shiftKind, draftAssignments);
+          const selection = getCellSelection(employee, day, shiftKind, draftAssignments);
 
           if (selection.competencyId === competency.id) {
             filledCells += 1;
+            filledOnDate += 1;
           }
         }
-      }
 
-      for (const claim of snapshot.overtimeClaims) {
-        const claimEmployee = employeeMap[claim.employeeId];
+        for (const claim of snapshot.overtimeClaims) {
+          const claimEmployee = employeeMap[claim.employeeId];
 
-        if (
-          claim.scheduleId === activeSchedule.id &&
-          claim.competencyId === competency.id &&
-          selectedSetDays.some((day) => day.date === claim.date) &&
-          claimEmployee?.scheduleId !== activeSchedule.id
-        ) {
-          filledCells += 1;
-          hasOvertime = true;
+          if (
+            claim.scheduleId === activeSchedule.id &&
+            claim.competencyId === competency.id &&
+            claim.date === day.date &&
+            claimEmployee?.scheduleId !== activeSchedule.id
+          ) {
+            filledCells += 1;
+            filledOnDate += 1;
+            hasOvertime = true;
+          }
+        }
+
+        if (filledOnDate < competency.requiredStaff) {
+          missingDates.push(day.date);
         }
       }
 
@@ -296,6 +401,7 @@ export function MonthlyScheduler({
         requiredStaff: competency.requiredStaff,
         hasOvertime,
         isUnderstaffed: selectedSetDays.length === 0 || filledCells < requiredCells,
+        missingDates,
       };
 
       return map;
@@ -343,7 +449,7 @@ export function MonthlyScheduler({
         </div>
 
         <div className="workspace-toolbar workspace-toolbar--personnel">
-          <p className="toolbar-status">No schedules available.</p>
+          <p className="toolbar-status">No shifts available.</p>
         </div>
       </section>
     );
@@ -356,6 +462,10 @@ export function MonthlyScheduler({
 
     return `${employee.name} ${employee.role}`.toLowerCase().includes(deferredSearch);
   });
+  const displayEmployeeMap = useMemo(
+    () => Object.fromEntries(displayEmployees.map((employee) => [employee.sourceEmployeeId, employee])),
+    [displayEmployees],
+  );
 
   const dirtyUpdates = Object.entries(draftAssignments).flatMap(([key, selection]) => {
     const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null };
@@ -388,6 +498,25 @@ export function MonthlyScheduler({
   });
   const hasChanges = dirtyUpdates.length > 0;
 
+  const selectedEmployee = selectedCell ? displayEmployeeMap[selectedCell.employeeId] ?? null : null;
+  const selectedShiftKind =
+    selectedCell && activeSchedule ? shiftForDate(activeSchedule, selectedCell.date) : "OFF";
+  const selectedSelection =
+    selectedCell && selectedEmployee
+      ? getCellSelection(
+          { id: selectedEmployee.sourceEmployeeId, competencyIds: selectedEmployee.competencyIds },
+          { date: selectedCell.date },
+          selectedShiftKind,
+          draftAssignments,
+        )
+      : { competencyId: null, timeCodeId: null };
+  const selectedEmployeeCompetencies = selectedEmployee
+    ? selectedEmployee.competencyIds.map((competencyId) => competencyMap[competencyId]).filter(isCompetency)
+    : [];
+  const highlightedMissingDates = selectedCoverageCompetencyId
+    ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
+    : new Set<string>();
+
   const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.45rem, 1fr))`;
 
   useEffect(() => {
@@ -411,6 +540,7 @@ export function MonthlyScheduler({
     }
 
     setSelectedSetAnchorDate(null);
+    setSelectedCoverageCompetencyId(null);
   }, [monthDays, selectedSetAnchorDate]);
 
   useEffect(() => {
@@ -634,7 +764,10 @@ export function MonthlyScheduler({
           <span>Shift</span>
           <select
             value={selectedScheduleId}
-            onChange={(event) => setSelectedScheduleId(event.target.value)}
+            onChange={(event) => {
+              setSelectedScheduleId(event.target.value);
+              setSelectedCoverageCompetencyId(null);
+            }}
           >
             {snapshot.schedules.map((schedule) => (
               <option key={schedule.id} value={schedule.id}>
@@ -659,6 +792,22 @@ export function MonthlyScheduler({
         </div>
       </div>
 
+      <AssignmentPalette
+        selectedEmployee={selectedEmployee}
+        selectedDate={selectedCell?.date ?? null}
+        shiftKind={selectedShiftKind}
+        selection={selectedSelection}
+        competencies={selectedEmployeeCompetencies}
+        timeCodes={snapshot.timeCodes}
+        onApply={(selection) => {
+          if (!selectedCell) {
+            return;
+          }
+
+          handleAssignmentChange(selectedCell.employeeId, selectedCell.date, selection);
+        }}
+      />
+
       <section className="set-builder" aria-label="Set builder">
         <div className="set-builder-heading">
           <div>
@@ -669,6 +818,11 @@ export function MonthlyScheduler({
                 : "Click a worked day in the top row to inspect this set"}
             </p>
           </div>
+          <div className="set-builder-legend">
+            <span className="set-builder-legend__item">Filled</span>
+            <span className="set-builder-legend__item set-builder-legend__item--under">Understaffed</span>
+            <span className="set-builder-legend__item set-builder-legend__item--ot">Overtime</span>
+          </div>
         </div>
 
         <div className="set-builder-pills">
@@ -676,20 +830,27 @@ export function MonthlyScheduler({
             const coverage = competencyCoverage[competency.id];
 
             return (
-              <div
+              <button
                 key={competency.id}
+                type="button"
+                onClick={() =>
+                  setSelectedCoverageCompetencyId((current) =>
+                    current === competency.id ? null : competency.id,
+                  )
+                }
                 className={`set-builder-pill legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
                   coverage?.isUnderstaffed ? "set-builder-pill--understaffed" : ""
                 } ${coverage?.hasOvertime ? "set-builder-pill--overtime" : ""} ${
                   !coverage?.isUnderstaffed && selectedSetDays.length > 0 ? "set-builder-pill--filled" : ""
                 } ${
                   selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
-                }`}
+                } ${selectedCoverageCompetencyId === competency.id ? "set-builder-pill--active" : ""}`}
                 title={`${competency.label} · ${coverage?.filledCells ?? 0}/${coverage?.requiredCells ?? 0} cells filled in this set`}
+                disabled={selectedSetDays.length === 0}
               >
                 <strong>{getCompactCode(competency.code)}</strong>
                 <span>{formatStaffCount(coverage?.assignedPeople ?? 0)}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -702,21 +863,27 @@ export function MonthlyScheduler({
             <strong>Employees</strong>
           </div>
 
-          {monthDays.map((day) => (
-            <div
-              key={day.date}
-              className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
-                selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
-              } ${
-                selectedSetDays.some((setDay) => setDay.date === day.date) ? "day-header--set" : ""
-              }`}
-              title={`${day.dayName} ${day.date}`}
-              onClick={() => setSelectedSetAnchorDate(day.date)}
-            >
-              <span>{day.dayName.slice(0, 1)}</span>
-              <strong>{day.dayNumber}</strong>
-            </div>
-          ))}
+          {monthDays.map((day) => {
+            const isSetDay = selectedSetDays.some((setDay) => setDay.date === day.date);
+            const isMissingDay = highlightedMissingDates.has(day.date);
+
+            return (
+              <div
+                key={day.date}
+                className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
+                  selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
+                } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
+                title={`${day.dayName} ${day.date}`}
+                onClick={() => {
+                  setSelectedSetAnchorDate(day.date);
+                  setSelectedCoverageCompetencyId(null);
+                }}
+              >
+                <span>{day.dayName.slice(0, 1)}</span>
+                <strong>{day.dayNumber}</strong>
+              </div>
+            );
+          })}
 
           {visibleEmployees.map((employee) => (
             <EmployeeRow
@@ -727,12 +894,14 @@ export function MonthlyScheduler({
               assignments={draftAssignments}
               competencyMap={competencyMap}
               timeCodeMap={timeCodeMap}
-              timeCodes={snapshot.timeCodes}
               selectedCell={selectedCell}
               dragRange={dragRange}
+              highlightedMissingDates={highlightedMissingDates}
+              selectedCoverageCompetencyId={selectedCoverageCompetencyId}
+              selectedSetDays={selectedSetDays}
               onCellPointerDown={handleCellPointerDown}
               onDragHover={handleDragHover}
-              onAssignmentChange={handleAssignmentChange}
+              onCellSelect={setSelectedCell}
             />
           ))}
 
@@ -758,12 +927,14 @@ function EmployeeRow({
   assignments,
   competencyMap,
   timeCodeMap,
-  timeCodes,
   selectedCell,
   dragRange,
+  highlightedMissingDates,
+  selectedCoverageCompetencyId,
+  selectedSetDays,
   onCellPointerDown,
   onDragHover,
-  onAssignmentChange,
+  onCellSelect,
 }: {
   employee: DisplayEmployee;
   schedule: Schedule;
@@ -771,9 +942,11 @@ function EmployeeRow({
   assignments: Record<string, AssignmentSelection>;
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
-  timeCodes: TimeCode[];
   selectedCell: SelectedCell | null;
   dragRange: DragRange | null;
+  highlightedMissingDates: Set<string>;
+  selectedCoverageCompetencyId: string | null;
+  selectedSetDays: Array<{ date: string }>;
   onCellPointerDown: (
     employeeId: string,
     date: string,
@@ -781,12 +954,10 @@ function EmployeeRow({
     selection: AssignmentSelection,
   ) => void;
   onDragHover: (employeeId: string, dayIndex: number) => void;
-  onAssignmentChange: (
-    employeeId: string,
-    date: string,
-    selection: AssignmentSelection,
-  ) => void;
+  onCellSelect: (cell: SelectedCell) => void;
 }) {
+  const setDates = new Set(selectedSetDays.map((day) => day.date));
+
   return (
     <>
       <div className="employee-cell sticky-column">
@@ -796,15 +967,12 @@ function EmployeeRow({
 
       {monthDays.map((day, dayIndex) => {
         const shiftKind = shiftForDate(schedule, day.date);
-        const selection = getCellCompetency(
+        const selection = getCellSelection(
           { id: employee.sourceEmployeeId, competencyIds: employee.competencyIds },
           day,
           shiftKind,
           assignments,
         );
-        const availableCompetencies = employee.competencyIds
-          .map((competencyId) => competencyMap[competencyId])
-          .filter(isCompetency);
         const activeCompetency = selection.competencyId ? competencyMap[selection.competencyId] : null;
         const activeTimeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
         const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
@@ -814,6 +982,11 @@ function EmployeeRow({
           dragRange?.employeeId === employee.sourceEmployeeId &&
           dayIndex >= Math.min(dragRange.startIndex, dragRange.currentIndex) &&
           dayIndex <= Math.max(dragRange.startIndex, dragRange.currentIndex);
+        const isCoverageFocus =
+          Boolean(selectedCoverageCompetencyId) &&
+          setDates.has(day.date) &&
+          highlightedMissingDates.has(day.date) &&
+          activeCompetency?.id === selectedCoverageCompetencyId;
 
         return (
           <div
@@ -824,6 +997,8 @@ function EmployeeRow({
               activeColorToken ? "shift-cell--coded" : ""
             } ${isSelected ? "shift-cell--selected" : ""} ${
               isInDragRange ? "shift-cell--range" : ""
+            } ${highlightedMissingDates.has(day.date) && setDates.has(day.date) ? "shift-cell--missing-column" : ""} ${
+              isCoverageFocus ? "shift-cell--coverage-focus" : ""
             }`}
             onPointerDown={(event) => {
               if (event.button !== 0) {
@@ -838,34 +1013,14 @@ function EmployeeRow({
               }
             }}
           >
-            <select
-              className={`assignment-select ${
-                activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
-              }`}
-              value={encodeAssignmentValue(selection)}
+            <button
+              type="button"
+              className={`shift-cell-button ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""}`}
+              onClick={() => onCellSelect({ employeeId: employee.sourceEmployeeId, date: day.date })}
               aria-label={`${employee.name} ${day.date} assignment`}
-              onChange={(event) =>
-                onAssignmentChange(employee.sourceEmployeeId, day.date, decodeAssignmentValue(event.target.value))
-              }
             >
-              <option value="">{shiftKind === "OFF" ? "Off" : ""}</option>
-              <optgroup label="Time codes">
-                {timeCodes.map((timeCode) => (
-                  <option key={timeCode.id} value={`time:${timeCode.id}`}>
-                    {timeCode.code}
-                  </option>
-                ))}
-              </optgroup>
-              {availableCompetencies.length > 0 ? (
-                <optgroup label="Competencies">
-                  {availableCompetencies.map((competency) => (
-                    <option key={competency.id} value={`competency:${competency.id}`}>
-                      {getCompactCode(competency.code)}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
-            </select>
+              {getSelectionCode(selection, competencyMap, timeCodeMap)}
+            </button>
           </div>
         );
       })}

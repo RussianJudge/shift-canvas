@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Shift Canvas",
   description:
-    "Create monthly schedules, assign competencies, and extrapolate day, night, and off rotations from schedule rules.",
+    "Create monthly shift plans, assign competencies, and extrapolate day, night, and off rotations from shift rules.",
 };
 
 export default function RootLayout({

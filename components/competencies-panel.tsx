@@ -13,6 +13,7 @@ type EditableCompetency = {
   label: string;
   colorToken: string;
   requiredStaff: number;
+  qualifiedEmployeeCount: number;
 };
 
 function cloneCompetencies(competencies: EditableCompetency[]) {
@@ -29,6 +30,24 @@ function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
   };
 }
 
+function getCompetencyIssues(competency: EditableCompetency) {
+  const issues: string[] = [];
+
+  if (!competency.code.trim()) {
+    issues.push("Code required");
+  }
+
+  if (!competency.label.trim()) {
+    issues.push("Label required");
+  }
+
+  if (!Number.isInteger(competency.requiredStaff) || competency.requiredStaff < 1) {
+    issues.push("Min 1 staff required");
+  }
+
+  return issues;
+}
+
 export function CompetenciesPanel({
   snapshot,
 }: {
@@ -42,8 +61,11 @@ export function CompetenciesPanel({
         label: competency.label,
         colorToken: competency.colorToken,
         requiredStaff: competency.requiredStaff,
+        qualifiedEmployeeCount: snapshot.schedules.flatMap((schedule) => schedule.employees).filter((employee) =>
+          employee.competencyIds.includes(competency.id),
+        ).length,
       })),
-    [snapshot.competencies],
+    [snapshot.competencies, snapshot.schedules],
   );
 
   const [competencies, setCompetencies] = useState(initialCompetencies);
@@ -56,6 +78,26 @@ export function CompetenciesPanel({
     () => new Map(baselineCompetencies.map((competency) => [competency.id, normalizeCompetency(competency)])),
     [baselineCompetencies],
   );
+  const dirtyCompetencyIds = useMemo(
+    () =>
+      new Set(
+        competencies
+          .map((competency) => normalizeCompetency(competency))
+          .filter(
+            (competency) =>
+              JSON.stringify(baselineMap.get(competency.competencyId)) !== JSON.stringify(competency),
+          )
+          .map((competency) => competency.competencyId),
+      ),
+    [baselineMap, competencies],
+  );
+  const invalidCompetencyIds = useMemo(
+    () =>
+      new Set(
+        competencies.filter((competency) => getCompetencyIssues(competency).length > 0).map((competency) => competency.id),
+      ),
+    [competencies],
+  );
 
   const dirtyUpdates = competencies
     .map((competency) => normalizeCompetency(competency))
@@ -64,6 +106,7 @@ export function CompetenciesPanel({
         JSON.stringify(baselineMap.get(competency.competencyId)) !== JSON.stringify(competency),
     );
   const hasChanges = dirtyUpdates.length > 0 || deletedCompetencyIds.length > 0;
+  const hasValidationErrors = invalidCompetencyIds.size > 0;
 
   function updateCompetency(
     competencyId: string,
@@ -81,6 +124,7 @@ export function CompetenciesPanel({
       label: "New competency",
       colorToken: "slate",
       requiredStaff: 1,
+      qualifiedEmployeeCount: 0,
     };
 
     setCompetencies((current) => [nextCompetency, ...current]);
@@ -98,6 +142,11 @@ export function CompetenciesPanel({
   }
 
   function handleSave() {
+    if (hasValidationErrors) {
+      setStatusMessage("Fix the highlighted competencies before saving.");
+      return;
+    }
+
     startSaveTransition(async () => {
       const result = await saveCompetencies({
         updates: dirtyUpdates,
@@ -136,12 +185,18 @@ export function CompetenciesPanel({
             type="button"
             className="primary-button"
             onClick={handleSave}
-            disabled={isSaving || !hasChanges}
+            disabled={isSaving || !hasChanges || hasValidationErrors}
           >
             {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
-        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+        <div className="toolbar-status-wrap">
+          {hasValidationErrors ? (
+            <p className="toolbar-status">Fix the highlighted competencies before saving.</p>
+          ) : statusMessage ? (
+            <p className="toolbar-status">{statusMessage}</p>
+          ) : null}
+        </div>
       </div>
 
       <div className="personnel-table-wrap">
@@ -151,6 +206,7 @@ export function CompetenciesPanel({
               <th>Code</th>
               <th>Label</th>
               <th>Staff required</th>
+              <th>Qualified staff</th>
               <th>Color</th>
               <th>Preview</th>
               <th />
@@ -158,7 +214,12 @@ export function CompetenciesPanel({
           </thead>
           <tbody>
             {competencies.map((competency) => (
-              <tr key={competency.id}>
+              <tr
+                key={competency.id}
+                className={`${dirtyCompetencyIds.has(competency.id) ? "table-row--dirty" : ""} ${
+                  invalidCompetencyIds.has(competency.id) ? "table-row--invalid" : ""
+                }`}
+              >
                 <td>
                   <input
                     className="table-input"
@@ -187,16 +248,17 @@ export function CompetenciesPanel({
                   <input
                     className="table-input"
                     type="number"
-                    min="0"
+                    min="1"
                     value={competency.requiredStaff}
                     onChange={(event) =>
                       updateCompetency(competency.id, (current) => ({
                         ...current,
-                        requiredStaff: Number(event.target.value || 0),
+                        requiredStaff: Math.max(1, Number(event.target.value || 1)),
                       }))
                     }
                   />
                 </td>
+                <td>{competency.qualifiedEmployeeCount}</td>
                 <td>
                   <select
                     className="table-select"
@@ -221,6 +283,9 @@ export function CompetenciesPanel({
                   </span>
                 </td>
                 <td className="table-actions-cell">
+                  {invalidCompetencyIds.has(competency.id) ? (
+                    <p className="row-issue">{getCompetencyIssues(competency).join(" · ")}</p>
+                  ) : null}
                   <button
                     type="button"
                     className="table-action table-action--danger"
@@ -233,7 +298,7 @@ export function CompetenciesPanel({
             ))}
             {competencies.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <div className="empty-state">
                     <strong>No competencies yet.</strong>
                     <span>Add a competency to populate the schedule options.</span>
