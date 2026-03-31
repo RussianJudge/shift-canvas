@@ -803,6 +803,20 @@ select {
   background: linear-gradient(180deg, rgba(252, 246, 239, 0.98), rgba(248, 238, 224, 0.96));
 }
 
+.day-header--completed {
+  background: linear-gradient(180deg, rgba(220, 252, 231, 0.98), rgba(187, 247, 208, 0.95));
+  box-shadow: inset 0 -2px 0 rgba(21, 128, 61, 0.28);
+}
+
+.day-header--completed span,
+.day-header--completed strong {
+  color: #166534;
+}
+
+.day-header--completed.day-header--weekend {
+  background: linear-gradient(180deg, rgba(209, 250, 229, 0.98), rgba(167, 243, 208, 0.94));
+}
+
 .day-header--set-anchor {
   box-shadow:
     inset 0 0 0 2px color-mix(in srgb, var(--team-accent) 75%, white),

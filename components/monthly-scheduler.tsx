@@ -347,6 +347,23 @@ export function MonthlyScheduler({
     () => new Set(snapshot.completedSets.map(createCompletedSetKeyFromEntry)),
     [snapshot.completedSets],
   );
+  const completedSetDates = useMemo(() => {
+    const dates = new Set<string>();
+
+    for (const completedSet of snapshot.completedSets) {
+      if (completedSet.scheduleId !== activeSchedule.id || completedSet.month !== currentMonth) {
+        continue;
+      }
+
+      for (const day of monthDays) {
+        if (day.date >= completedSet.startDate && day.date <= completedSet.endDate) {
+          dates.add(day.date);
+        }
+      }
+    }
+
+    return dates;
+  }, [activeSchedule.id, currentMonth, monthDays, snapshot.completedSets]);
   const selectedSetKey =
     activeSchedule && selectedSetDays.length > 0
       ? createCompletedSetKey(
@@ -1033,11 +1050,14 @@ export function MonthlyScheduler({
           {monthDays.map((day) => {
             const isSetDay = selectedSetDays.some((setDay) => setDay.date === day.date);
             const isMissingDay = highlightedMissingDates.has(day.date);
+            const isCompletedDay = completedSetDates.has(day.date);
 
             return (
               <div
                 key={day.date}
                 className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
+                  isCompletedDay ? "day-header--completed" : ""
+                } ${
                   selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
                 } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
                 title={`${day.dayName} ${day.date}`}
