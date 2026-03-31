@@ -33,6 +33,17 @@ type PendingCsvImport = {
   summary: string;
 };
 
+function createDraftEmployee() {
+  return {
+    id: `emp-${crypto.randomUUID().slice(0, 8)}`,
+    name: "",
+    role: "",
+    scheduleId: "",
+    unitId: "",
+    competencyIds: [],
+  };
+}
+
 function normalizeCsvHeader(value: string) {
   return value
     .trim()
@@ -204,6 +215,7 @@ export function PersonnelPanel({
   const [search, setSearch] = useState("");
   const [selectedScheduleFilter, setSelectedScheduleFilter] = useState("all");
   const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
+  const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
   const [isSaving, startSaveTransition] = useTransition();
   const defaultSchedule =
     [...snapshot.schedules]
@@ -261,6 +273,7 @@ export function PersonnelPanel({
     .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee));
   const hasChanges = dirtyUpdates.length > 0 || deletedEmployeeIds.length > 0;
   const hasValidationErrors = invalidEmployeeIds.size > 0;
+  const draftEmployeeIssues = draftEmployee ? getEmployeeIssues(draftEmployee) : [];
 
   const visibleEmployees = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -347,6 +360,7 @@ export function PersonnelPanel({
     setEmployees(cloneEmployees(baselineEmployees));
     setDeletedEmployeeIds([]);
     setPendingCsvImport(null);
+    setDraftEmployee(null);
     setStatusMessage("Changes reverted.");
   }
 
@@ -356,17 +370,30 @@ export function PersonnelPanel({
       return;
     }
 
-    const nextEmployee: EditableEmployee = {
-      id: `emp-${crypto.randomUUID().slice(0, 8)}`,
-      name: "New Employee",
-      role: "Operator",
-      scheduleId: defaultSchedule.id,
-      unitId: defaultUnit.id,
-      competencyIds: [],
-    };
-
-    setEmployees((current) => [nextEmployee, ...current]);
+    setDraftEmployee((current) =>
+      current ?? {
+        ...createDraftEmployee(),
+        unitId: defaultUnit.id,
+      },
+    );
     setStatusMessage("");
+  }
+
+  function handleCreateEmployee() {
+    if (!draftEmployee || !defaultUnit) {
+      return;
+    }
+
+    const issues = getEmployeeIssues(draftEmployee);
+
+    if (issues.length > 0) {
+      setStatusMessage("Complete the new employee row before adding it.");
+      return;
+    }
+
+    setEmployees((current) => [{ ...draftEmployee, unitId: draftEmployee.unitId || defaultUnit.id }, ...current]);
+    setDraftEmployee(null);
+    setStatusMessage("Employee added to the table. Save when you're ready.");
   }
 
   async function handleCsvImport(event: ChangeEvent<HTMLInputElement>) {
@@ -648,6 +675,121 @@ export function PersonnelPanel({
             </tr>
           </thead>
           <tbody>
+            {draftEmployee ? (
+              <tr className="table-row--draft">
+                <td>
+                  <input
+                    className="table-input"
+                    placeholder="Enter name"
+                    value={draftEmployee.name}
+                    onChange={(event) =>
+                      setDraftEmployee((current) =>
+                        current
+                          ? {
+                              ...current,
+                              name: event.target.value,
+                            }
+                          : current,
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="table-input"
+                    placeholder="Enter role"
+                    value={draftEmployee.role}
+                    onChange={(event) =>
+                      setDraftEmployee((current) =>
+                        current
+                          ? {
+                              ...current,
+                              role: event.target.value,
+                            }
+                          : current,
+                      )
+                    }
+                  />
+                </td>
+                <td className="column-shift">
+                  <select
+                    className="table-select"
+                    value={draftEmployee.scheduleId}
+                    onChange={(event) =>
+                      setDraftEmployee((current) =>
+                        current
+                          ? {
+                              ...current,
+                              scheduleId: event.target.value,
+                            }
+                          : current,
+                      )
+                    }
+                  >
+                    <option value="">Select shift</option>
+                    {snapshot.schedules.map((schedule) => (
+                      <option key={schedule.id} value={schedule.id}>
+                        {schedule.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <div className="table-pills table-pills--editable">
+                    {snapshot.competencies.map((competency) => {
+                      const isSelected = draftEmployee.competencyIds.includes(competency.id);
+
+                      return (
+                        <button
+                          type="button"
+                          key={competency.id}
+                          onClick={() =>
+                            setDraftEmployee((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    competencyIds: isSelected
+                                      ? current.competencyIds.filter((id) => id !== competency.id)
+                                      : [...current.competencyIds, competency.id],
+                                  }
+                                : current,
+                            )
+                          }
+                          className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
+                            isSelected ? "legend-pill--selected" : "legend-pill--muted"
+                          }`}
+                          title={competency.label}
+                        >
+                          {competency.code}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </td>
+                <td className="table-actions-cell">
+                  {draftEmployeeIssues.length > 0 ? (
+                    <p className="row-issue">{draftEmployeeIssues.join(" · ")}</p>
+                  ) : null}
+                  <div className="table-actions-inline">
+                    <button
+                      type="button"
+                      className="table-action"
+                      onClick={() => setDraftEmployee(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="table-action table-action--confirm"
+                      onClick={handleCreateEmployee}
+                      disabled={draftEmployeeIssues.length > 0}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ) : null}
             {groupedEmployees.map((entry) =>
               entry.type === "group" ? (
                 <tr key={`group-${entry.label}`} className="table-group-row">
