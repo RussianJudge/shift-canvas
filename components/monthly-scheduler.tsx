@@ -962,24 +962,30 @@ export function MonthlyScheduler({
       <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Schedule</h1>
         <div className="planner-actions">
-          <span className="month-indicator">{formatMonthLabel(currentMonth)}</span>
-          <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
-            Previous month
-          </button>
-          <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
-            Next month
-          </button>
-          <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
-            Revert
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={handleSave}
-            disabled={isSaving || !hasChanges}
-          >
-            {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
-          </button>
+          <div className="planner-actions__row planner-actions__row--month">
+            <span className="month-indicator">{formatMonthLabel(currentMonth)}</span>
+          </div>
+          <div className="planner-actions__row planner-actions__row--nav">
+            <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
+              Previous month
+            </button>
+            <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
+              Next month
+            </button>
+          </div>
+          <div className="planner-actions__row planner-actions__row--save">
+            <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+              Revert
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleSave}
+              disabled={isSaving || !hasChanges}
+            >
+              {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
+            </button>
+          </div>
         </div>
       </div>
 
