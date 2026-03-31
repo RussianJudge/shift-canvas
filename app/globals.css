@@ -519,6 +519,11 @@ select {
   opacity: 0.58;
 }
 
+.set-builder-pill:disabled {
+  cursor: not-allowed;
+  transform: none;
+}
+
 .schedule-wrap {
   position: relative;
   padding: 0 0 0.5rem;
@@ -632,6 +637,11 @@ select {
   gap: 0.1rem;
   padding: 0.35rem 0.05rem;
   text-align: center;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease;
 }
 
 .day-header span {
@@ -648,6 +658,21 @@ select {
 
 .day-header--weekend {
   background: rgba(252, 246, 239, 0.94);
+}
+
+.day-header--set {
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--team-accent) 48%, transparent);
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.94), rgba(249, 242, 232, 0.98));
+}
+
+.day-header--set.day-header--weekend {
+  background: linear-gradient(180deg, rgba(252, 246, 239, 0.98), rgba(248, 238, 224, 0.96));
+}
+
+.day-header--set-anchor {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--team-accent) 75%, white),
+    inset 0 -2px 0 color-mix(in srgb, var(--team-accent) 60%, transparent);
 }
 
 .sticky-column {
