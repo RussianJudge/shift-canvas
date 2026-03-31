@@ -634,14 +634,13 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
   const invalidTimeCode = input.updates.find(
     (update) =>
       isBlank(update.code) ||
-      isBlank(update.label) ||
-      isBlank(update.category),
+      isBlank(update.label),
   );
 
   if (invalidTimeCode) {
     return {
       ok: false,
-      message: "Each time code needs a code, label, and category.",
+      message: "Each time code needs a code and label.",
     };
   }
 
@@ -650,7 +649,6 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
     code: update.code.trim(),
     label: update.label.trim(),
     color_token: update.colorToken,
-    category: update.category.trim(),
   }));
 
   const error =

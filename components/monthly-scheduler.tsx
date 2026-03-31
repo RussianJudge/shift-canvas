@@ -12,7 +12,6 @@ import {
   getEmployeeMap,
   getMonthDays,
   getScheduleById,
-  getSuggestedCompetencyId,
   getTimeCodeMap,
   shiftForDate,
 } from "@/lib/scheduling";
@@ -81,35 +80,6 @@ function pickMonthEntries(assignments: Record<string, AssignmentSelection>, mont
   return Object.fromEntries(
     Object.entries(assignments).filter((entry) => entry[0].includes(`:${monthKey}-`)),
   );
-}
-
-function getCellSelection(
-  employee: Pick<Employee, "id" | "competencyIds">,
-  day: { date: string },
-  shiftKind: ShiftKind,
-  assignments: Record<string, AssignmentSelection>,
-) {
-  const key = createAssignmentKey(employee.id, day.date);
-
-  if (key in assignments) {
-    return assignments[key];
-  }
-
-  if (shiftKind === "OFF") {
-    return {
-      competencyId: null,
-      timeCodeId: null,
-    };
-  }
-
-  return {
-    competencyId: getSuggestedCompetencyId(employee, day.date),
-    timeCodeId: null,
-  };
-}
-
-function isCompetency(competency: Competency | undefined): competency is Competency {
-  return Boolean(competency);
 }
 
 function getCompactCode(code: string) {
@@ -189,6 +159,60 @@ function getSetDays(
   return monthDays.slice(startIndex, endIndex + 1);
 }
 
+function getDefaultTimeCodeId(timeCodes: TimeCode[], shiftKind: ShiftKind) {
+  if (shiftKind === "DAY") {
+    return (
+      timeCodes.find((timeCode) => timeCode.code === "DAY")?.id ??
+      timeCodes.find((timeCode) => timeCode.code === "DAYS")?.id ??
+      null
+    );
+  }
+
+  if (shiftKind === "NIGHT") {
+    return (
+      timeCodes.find((timeCode) => timeCode.code === "NIGHT")?.id ??
+      timeCodes.find((timeCode) => timeCode.code === "NIGHTS")?.id ??
+      null
+    );
+  }
+
+  return null;
+}
+
+function getDefaultSelection(shiftKind: ShiftKind, timeCodes: TimeCode[]): AssignmentSelection {
+  if (shiftKind === "OFF") {
+    return {
+      competencyId: null,
+      timeCodeId: null,
+    };
+  }
+
+  return {
+    competencyId: null,
+    timeCodeId: getDefaultTimeCodeId(timeCodes, shiftKind),
+  };
+}
+
+function getSelectionForCell(
+  employeeId: string,
+  date: string,
+  shiftKind: ShiftKind,
+  assignments: Record<string, AssignmentSelection>,
+  timeCodes: TimeCode[],
+) {
+  const key = createAssignmentKey(employeeId, date);
+
+  if (key in assignments) {
+    return assignments[key];
+  }
+
+  return getDefaultSelection(shiftKind, timeCodes);
+}
+
+function isCompetency(competency: Competency | undefined): competency is Competency {
+  return Boolean(competency);
+}
+
 function getSelectionCode(
   selection: AssignmentSelection,
   competencyMap: Record<string, Competency>,
@@ -205,17 +229,7 @@ function getSelectionCode(
   return "";
 }
 
-function getGroupedTimeCodes(timeCodes: TimeCode[]) {
-  return Object.entries(
-    timeCodes.reduce<Record<string, TimeCode[]>>((groups, timeCode) => {
-      groups[timeCode.category] ??= [];
-      groups[timeCode.category].push(timeCode);
-      return groups;
-    }, {}),
-  ).sort(([left], [right]) => left.localeCompare(right));
-}
-
-function AssignmentPalette({
+function AssignmentModal({
   selectedEmployee,
   selectedDate,
   shiftKind,
@@ -223,6 +237,7 @@ function AssignmentPalette({
   competencies,
   timeCodes,
   onApply,
+  onClose,
 }: {
   selectedEmployee: DisplayEmployee | null;
   selectedDate: string | null;
@@ -231,88 +246,90 @@ function AssignmentPalette({
   competencies: Competency[];
   timeCodes: TimeCode[];
   onApply: (selection: AssignmentSelection) => void;
+  onClose: () => void;
 }) {
-  const groupedTimeCodes = useMemo(() => getGroupedTimeCodes(timeCodes), [timeCodes]);
+  if (!selectedEmployee || !selectedDate) {
+    return null;
+  }
 
   return (
-    <section className="assignment-palette" aria-label="Assignment palette">
-      <div className="assignment-palette__header">
-        <div>
-          <h2 className="assignment-palette__title">Assignment</h2>
-          <p className="assignment-palette__context">
-            {selectedEmployee && selectedDate
-              ? `${selectedEmployee.name} · ${formatShortDate(selectedDate)} · ${shiftKind.toLowerCase()}`
-              : "Click a calendar cell to assign a competency or time code"}
-          </p>
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section
+        className="assignment-modal"
+        aria-label="Assignment editor"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Assignment</h2>
+            <p className="assignment-modal__context">
+              {selectedEmployee.name} · {formatShortDate(selectedDate)} · {shiftKind.toLowerCase()}
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
         </div>
-        {selectedEmployee && selectedDate ? (
+
+        <div className="assignment-modal__group">
+          <span className="assignment-modal__label">Time Codes</span>
+          <div className="assignment-modal__options">
+            {timeCodes.map((timeCode) => (
+              <button
+                key={timeCode.id}
+                type="button"
+                className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
+                  selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
+                }`}
+                onClick={() =>
+                  onApply({
+                    competencyId: null,
+                    timeCodeId: timeCode.id,
+                  })
+                }
+              >
+                {timeCode.code}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="assignment-modal__group">
+          <span className="assignment-modal__label">Competencies</span>
+          <div className="assignment-modal__options">
+            {competencies.map((competency) => (
+              <button
+                key={competency.id}
+                type="button"
+                className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
+                  selection.competencyId === competency.id ? "legend-pill--selected" : ""
+                }`}
+                onClick={() =>
+                  onApply({
+                    competencyId: competency.id,
+                    timeCodeId: null,
+                  })
+                }
+              >
+                {getCompactCode(competency.code)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="assignment-modal__footer">
           <button
             type="button"
             className="ghost-button"
             onClick={() =>
-              onApply({
-                competencyId: null,
-                timeCodeId: null,
-              })
+              onApply(getDefaultSelection(shiftKind, timeCodes))
             }
           >
-            Clear
+            Reset to {shiftKind === "DAY" ? "DAY" : shiftKind === "NIGHT" ? "NIGHT" : "blank"}
           </button>
-        ) : null}
-      </div>
-
-      {selectedEmployee && selectedDate ? (
-        <div className="assignment-palette__groups">
-          <div className="assignment-palette__group">
-            <span className="assignment-palette__label">Competencies</span>
-            <div className="assignment-palette__options">
-              {competencies.map((competency) => (
-                <button
-                  key={competency.id}
-                  type="button"
-                  className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
-                    selection.competencyId === competency.id ? "legend-pill--selected" : ""
-                  }`}
-                  onClick={() =>
-                    onApply({
-                      competencyId: competency.id,
-                      timeCodeId: null,
-                    })
-                  }
-                >
-                  {getCompactCode(competency.code)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {groupedTimeCodes.map(([category, categoryTimeCodes]) => (
-            <div key={category} className="assignment-palette__group">
-              <span className="assignment-palette__label">{category}</span>
-              <div className="assignment-palette__options">
-                {categoryTimeCodes.map((timeCode) => (
-                  <button
-                    key={timeCode.id}
-                    type="button"
-                    className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
-                      selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
-                    }`}
-                    onClick={() =>
-                      onApply({
-                        competencyId: null,
-                        timeCodeId: timeCode.id,
-                      })
-                    }
-                  >
-                    {timeCode.code}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
         </div>
-      ) : null}
-    </section>
+      </section>
+    </div>
   );
 }
 
@@ -335,6 +352,7 @@ export function MonthlyScheduler({
   );
   const [statusMessage, setStatusMessage] = useState("");
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
+  const [editorCell, setEditorCell] = useState<SelectedCell | null>(null);
   const [selectedSetAnchorDate, setSelectedSetAnchorDate] = useState<string | null>(null);
   const [selectedCoverageCompetencyId, setSelectedCoverageCompetencyId] = useState<string | null>(null);
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
@@ -363,7 +381,13 @@ export function MonthlyScheduler({
 
         for (const employee of activeSchedule.employees) {
           const shiftKind = shiftForDate(activeSchedule, day.date);
-          const selection = getCellSelection(employee, day, shiftKind, draftAssignments);
+          const selection = getSelectionForCell(
+            employee.id,
+            day.date,
+            shiftKind,
+            draftAssignments,
+            snapshot.timeCodes,
+          );
 
           if (selection.competencyId === competency.id) {
             filledCells += 1;
@@ -406,7 +430,7 @@ export function MonthlyScheduler({
 
       return map;
     }, {});
-  }, [activeSchedule, draftAssignments, employeeMap, selectedSetDays, snapshot.competencies, snapshot.overtimeClaims]);
+  }, [activeSchedule, draftAssignments, employeeMap, selectedSetDays, snapshot.competencies, snapshot.overtimeClaims, snapshot.timeCodes]);
   const displayEmployees = useMemo<DisplayEmployee[]>(() => {
     const baseRows = activeSchedule.employees.map((employee) => ({
       rowId: `base:${employee.id}`,
@@ -467,16 +491,9 @@ export function MonthlyScheduler({
     [displayEmployees],
   );
 
-  const dirtyUpdates = Object.entries(draftAssignments).flatMap(([key, selection]) => {
-    const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null };
-
-    if (
-      baseline.competencyId === selection.competencyId &&
-      baseline.timeCodeId === selection.timeCodeId
-    ) {
-      return [];
-    }
-
+  const dirtyUpdates = Array.from(
+    new Set([...Object.keys(baselineAssignments), ...Object.keys(draftAssignments)]),
+  ).flatMap((key) => {
     const [employeeId, date] = key.split(":");
     const employee = employeeMap[employeeId];
     const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
@@ -485,33 +502,46 @@ export function MonthlyScheduler({
       return [];
     }
 
+    const shiftKind = shiftForDate(employeeSchedule, date);
+    const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null };
+    const draft = draftAssignments[key] ?? { competencyId: null, timeCodeId: null };
+
+    if (
+      baseline.competencyId === draft.competencyId &&
+      baseline.timeCodeId === draft.timeCodeId
+    ) {
+      return [];
+    }
+
     return [
       {
         employeeId,
         date,
-        competencyId: selection.competencyId,
-        timeCodeId: selection.timeCodeId,
+        competencyId: draft.competencyId,
+        timeCodeId: draft.timeCodeId,
         notes: null,
-        shiftKind: shiftForDate(employeeSchedule, date),
+        shiftKind,
       },
     ];
   });
   const hasChanges = dirtyUpdates.length > 0;
 
   const selectedEmployee = selectedCell ? displayEmployeeMap[selectedCell.employeeId] ?? null : null;
-  const selectedShiftKind =
-    selectedCell && activeSchedule ? shiftForDate(activeSchedule, selectedCell.date) : "OFF";
-  const selectedSelection =
-    selectedCell && selectedEmployee
-      ? getCellSelection(
-          { id: selectedEmployee.sourceEmployeeId, competencyIds: selectedEmployee.competencyIds },
-          { date: selectedCell.date },
-          selectedShiftKind,
+  const editorEmployee = editorCell ? displayEmployeeMap[editorCell.employeeId] ?? null : null;
+  const editorShiftKind =
+    editorCell && activeSchedule ? shiftForDate(activeSchedule, editorCell.date) : "OFF";
+  const editorSelection =
+    editorCell && editorEmployee
+      ? getSelectionForCell(
+          editorEmployee.sourceEmployeeId,
+          editorCell.date,
+          editorShiftKind,
           draftAssignments,
+          snapshot.timeCodes,
         )
       : { competencyId: null, timeCodeId: null };
-  const selectedEmployeeCompetencies = selectedEmployee
-    ? selectedEmployee.competencyIds.map((competencyId) => competencyMap[competencyId]).filter(isCompetency)
+  const editorEmployeeCompetencies = editorEmployee
+    ? editorEmployee.competencyIds.map((competencyId) => competencyMap[competencyId]).filter(isCompetency)
     : [];
   const highlightedMissingDates = selectedCoverageCompetencyId
     ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
@@ -533,6 +563,21 @@ export function MonthlyScheduler({
       setSelectedCell(null);
     }
   }, [displayEmployees, monthDays, selectedCell]);
+
+  useEffect(() => {
+    if (!editorCell) {
+      return;
+    }
+
+    const employeeStillVisible = displayEmployees.some(
+      (employee) => employee.sourceEmployeeId === editorCell.employeeId,
+    );
+    const dateStillVisible = monthDays.some((day) => day.date === editorCell.date);
+
+    if (!employeeStillVisible || !dateStillVisible) {
+      setEditorCell(null);
+    }
+  }, [displayEmployees, editorCell, monthDays]);
 
   useEffect(() => {
     if (!selectedSetAnchorDate || monthDays.some((day) => day.date === selectedSetAnchorDate)) {
@@ -587,7 +632,26 @@ export function MonthlyScheduler({
             const nextAssignments = { ...current };
 
             for (const date of rangeDates) {
-              nextAssignments[createAssignmentKey(dragRange.employeeId, date)] = {
+              const employee = employeeMap[dragRange.employeeId];
+              const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+
+              if (!employee || !employeeSchedule) {
+                continue;
+              }
+
+              const shiftKind = shiftForDate(employeeSchedule, date);
+              const defaultSelection = getDefaultSelection(shiftKind, snapshot.timeCodes);
+              const key = createAssignmentKey(dragRange.employeeId, date);
+
+              if (
+                defaultSelection.competencyId === dragRange.selection.competencyId &&
+                defaultSelection.timeCodeId === dragRange.selection.timeCodeId
+              ) {
+                delete nextAssignments[key];
+                continue;
+              }
+
+              nextAssignments[key] = {
                 ...dragRange.selection,
               };
             }
@@ -604,7 +668,18 @@ export function MonthlyScheduler({
     window.addEventListener("pointerup", handlePointerUp);
 
     return () => window.removeEventListener("pointerup", handlePointerUp);
-  }, [dragRange, monthDays]);
+  }, [dragRange, employeeMap, monthDays, snapshot, snapshot.timeCodes]);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setEditorCell(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, []);
 
   useEffect(() => {
     if (currentMonth === snapshot.month || !isMonthKey(currentMonth)) {
@@ -664,13 +739,32 @@ export function MonthlyScheduler({
   }, [currentMonth, snapshot.month]);
 
   function handleAssignmentChange(employeeId: string, date: string, selection: AssignmentSelection) {
+    const employee = employeeMap[employeeId];
+    const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+
+    if (!employee || !employeeSchedule) {
+      return;
+    }
+
+    const shiftKind = shiftForDate(employeeSchedule, date);
+    const defaultSelection = getDefaultSelection(shiftKind, snapshot.timeCodes);
     const key = createAssignmentKey(employeeId, date);
+    const shouldResetToDefault =
+      defaultSelection.competencyId === selection.competencyId &&
+      defaultSelection.timeCodeId === selection.timeCodeId;
 
     startTransition(() => {
-      setDraftAssignments((current) => ({
-        ...current,
-        [key]: selection,
-      }));
+      setDraftAssignments((current) => {
+        const nextAssignments = { ...current };
+
+        if (shouldResetToDefault) {
+          delete nextAssignments[key];
+          return nextAssignments;
+        }
+
+        nextAssignments[key] = selection;
+        return nextAssignments;
+      });
       setStatusMessage("Draft updated locally");
     });
   }
@@ -726,6 +820,7 @@ export function MonthlyScheduler({
     startTransition(() => {
       setDraftAssignments(cloneAssignments(baselineAssignments));
       setDragRange(null);
+      setEditorCell(null);
       setStatusMessage("Changes reverted.");
     });
   }
@@ -791,22 +886,6 @@ export function MonthlyScheduler({
           {!isMonthLoading && statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
         </div>
       </div>
-
-      <AssignmentPalette
-        selectedEmployee={selectedEmployee}
-        selectedDate={selectedCell?.date ?? null}
-        shiftKind={selectedShiftKind}
-        selection={selectedSelection}
-        competencies={selectedEmployeeCompetencies}
-        timeCodes={snapshot.timeCodes}
-        onApply={(selection) => {
-          if (!selectedCell) {
-            return;
-          }
-
-          handleAssignmentChange(selectedCell.employeeId, selectedCell.date, selection);
-        }}
-      />
 
       <section className="set-builder" aria-label="Set builder">
         <div className="set-builder-heading">
@@ -894,6 +973,7 @@ export function MonthlyScheduler({
               assignments={draftAssignments}
               competencyMap={competencyMap}
               timeCodeMap={timeCodeMap}
+              timeCodes={snapshot.timeCodes}
               selectedCell={selectedCell}
               dragRange={dragRange}
               highlightedMissingDates={highlightedMissingDates}
@@ -901,7 +981,10 @@ export function MonthlyScheduler({
               selectedSetDays={selectedSetDays}
               onCellPointerDown={handleCellPointerDown}
               onDragHover={handleDragHover}
-              onCellSelect={setSelectedCell}
+              onCellClick={(cell) => {
+                setSelectedCell(cell);
+                setEditorCell(cell);
+              }}
             />
           ))}
 
@@ -916,6 +999,24 @@ export function MonthlyScheduler({
           ) : null}
         </div>
       </section>
+
+      <AssignmentModal
+        selectedEmployee={editorEmployee}
+        selectedDate={editorCell?.date ?? null}
+        shiftKind={editorShiftKind}
+        selection={editorSelection}
+        competencies={editorEmployeeCompetencies}
+        timeCodes={snapshot.timeCodes}
+        onApply={(selection) => {
+          if (!editorCell) {
+            return;
+          }
+
+          handleAssignmentChange(editorCell.employeeId, editorCell.date, selection);
+          setEditorCell(null);
+        }}
+        onClose={() => setEditorCell(null)}
+      />
     </section>
   );
 }
@@ -927,6 +1028,7 @@ function EmployeeRow({
   assignments,
   competencyMap,
   timeCodeMap,
+  timeCodes,
   selectedCell,
   dragRange,
   highlightedMissingDates,
@@ -934,7 +1036,7 @@ function EmployeeRow({
   selectedSetDays,
   onCellPointerDown,
   onDragHover,
-  onCellSelect,
+  onCellClick,
 }: {
   employee: DisplayEmployee;
   schedule: Schedule;
@@ -942,6 +1044,7 @@ function EmployeeRow({
   assignments: Record<string, AssignmentSelection>;
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
+  timeCodes: TimeCode[];
   selectedCell: SelectedCell | null;
   dragRange: DragRange | null;
   highlightedMissingDates: Set<string>;
@@ -954,7 +1057,7 @@ function EmployeeRow({
     selection: AssignmentSelection,
   ) => void;
   onDragHover: (employeeId: string, dayIndex: number) => void;
-  onCellSelect: (cell: SelectedCell) => void;
+  onCellClick: (cell: SelectedCell) => void;
 }) {
   const setDates = new Set(selectedSetDays.map((day) => day.date));
 
@@ -967,11 +1070,12 @@ function EmployeeRow({
 
       {monthDays.map((day, dayIndex) => {
         const shiftKind = shiftForDate(schedule, day.date);
-        const selection = getCellSelection(
-          { id: employee.sourceEmployeeId, competencyIds: employee.competencyIds },
-          day,
+        const selection = getSelectionForCell(
+          employee.sourceEmployeeId,
+          day.date,
           shiftKind,
           assignments,
+          timeCodes,
         );
         const activeCompetency = selection.competencyId ? competencyMap[selection.competencyId] : null;
         const activeTimeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
@@ -1015,8 +1119,10 @@ function EmployeeRow({
           >
             <button
               type="button"
-              className={`shift-cell-button ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""}`}
-              onClick={() => onCellSelect({ employeeId: employee.sourceEmployeeId, date: day.date })}
+              className={`shift-cell-button ${
+                activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
+              }`}
+              onClick={() => onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date })}
               aria-label={`${employee.name} ${day.date} assignment`}
             >
               {getSelectionCode(selection, competencyMap, timeCodeMap)}

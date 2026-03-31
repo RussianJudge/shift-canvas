@@ -32,13 +32,13 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
     { id: "comp-pack-9", code: "Pack 9", label: "Final QA hold", colorToken: "rose", requiredStaff: 1 },
   ],
   timeCodes: [
-    { id: "time-ill", code: "ILL", label: "Illness", colorToken: "rose", category: "Absence" },
-    { id: "time-absa", code: "ABSA", label: "Absent", colorToken: "orange", category: "Absence" },
-    { id: "time-bot", code: "BOT", label: "Booked off", colorToken: "amber", category: "Leave" },
-    { id: "time-days", code: "DAYS", label: "Day assignment", colorToken: "blue", category: "Coverage" },
-    { id: "time-nights", code: "NIGHTS", label: "Night assignment", colorToken: "violet", category: "Coverage" },
-    { id: "time-sim", code: "SIM", label: "Simulation", colorToken: "teal", category: "Training" },
-    { id: "time-v", code: "V", label: "Vacation", colorToken: "lime", category: "Leave" },
+    { id: "time-ill", code: "ILL", label: "Illness", colorToken: "rose" },
+    { id: "time-absa", code: "ABSA", label: "Absent", colorToken: "orange" },
+    { id: "time-bot", code: "BOT", label: "Booked off", colorToken: "amber" },
+    { id: "time-days", code: "DAY", label: "Day shift", colorToken: "blue" },
+    { id: "time-nights", code: "NIGHT", label: "Night shift", colorToken: "violet" },
+    { id: "time-sim", code: "SIM", label: "Simulation", colorToken: "teal" },
+    { id: "time-v", code: "V", label: "Vacation", colorToken: "lime" },
   ],
   schedules: [
     {

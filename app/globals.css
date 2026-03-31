@@ -563,53 +563,71 @@ select {
   border-top: 1px solid var(--line);
 }
 
-.assignment-palette {
+.assignment-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
   display: grid;
-  gap: 0.85rem;
-  padding: 0 1.5rem 1rem;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgba(23, 20, 17, 0.34);
+  backdrop-filter: blur(8px);
 }
 
-.assignment-palette__header {
+.assignment-modal {
+  width: min(40rem, 100%);
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 1.2rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 249, 240, 0.92)),
+    var(--surface);
+  box-shadow: 0 24px 48px rgba(23, 20, 17, 0.2);
+}
+
+.assignment-modal__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
 }
 
-.assignment-palette__title {
+.assignment-modal__title {
   margin: 0;
   font-family: var(--font-display), sans-serif;
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   letter-spacing: -0.03em;
 }
 
-.assignment-palette__context {
-  margin: 0.18rem 0 0;
+.assignment-modal__context {
+  margin: 0.2rem 0 0;
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.88rem;
 }
 
-.assignment-palette__groups {
-  display: grid;
-  gap: 0.8rem;
-}
-
-.assignment-palette__group {
+.assignment-modal__group {
   display: grid;
   gap: 0.45rem;
 }
 
-.assignment-palette__label {
+.assignment-modal__label {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
 }
 
-.assignment-palette__options {
+.assignment-modal__options {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+.assignment-modal__footer {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .personnel-table-wrap {
@@ -1237,7 +1255,7 @@ select {
     min-height: 2.8rem;
   }
 
-  .assignment-palette__header,
+  .assignment-modal__header,
   .import-preview__header,
   .overtime-group__header {
     flex-direction: column;

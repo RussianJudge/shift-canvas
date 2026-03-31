@@ -6,14 +6,12 @@ import { saveTimeCodes } from "@/app/actions";
 import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate } from "@/lib/types";
 
 const COLOR_TOKENS = ["amber", "teal", "violet", "rose", "blue", "lime", "orange", "slate"];
-const TIME_CODE_CATEGORIES = ["Absence", "Coverage", "Leave", "Training", "General"];
 
 type EditableTimeCode = {
   id: string;
   code: string;
   label: string;
   colorToken: string;
-  category: string;
 };
 
 function cloneTimeCodes(timeCodes: EditableTimeCode[]) {
@@ -26,7 +24,6 @@ function normalizeTimeCode(timeCode: EditableTimeCode): TimeCodeUpdate {
     code: timeCode.code.trim(),
     label: timeCode.label.trim(),
     colorToken: timeCode.colorToken,
-    category: timeCode.category.trim(),
   };
 }
 
@@ -39,10 +36,6 @@ function getTimeCodeIssues(timeCode: EditableTimeCode) {
 
   if (!timeCode.label.trim()) {
     issues.push("Label required");
-  }
-
-  if (!timeCode.category.trim()) {
-    issues.push("Category required");
   }
 
   return issues;
@@ -60,7 +53,6 @@ export function TimeCodesPanel({
         code: timeCode.code,
         label: timeCode.label,
         colorToken: timeCode.colorToken,
-        category: timeCode.category,
       })),
     [snapshot.timeCodes],
   );
@@ -116,7 +108,6 @@ export function TimeCodesPanel({
       code: "NEW",
       label: "New time code",
       colorToken: "slate",
-      category: "General",
     };
 
     setTimeCodes((current) => [nextTimeCode, ...current]);
@@ -197,7 +188,6 @@ export function TimeCodesPanel({
             <tr>
               <th>Code</th>
               <th>Label</th>
-              <th>Category</th>
               <th>Color</th>
               <th>Preview</th>
               <th />
@@ -238,24 +228,6 @@ export function TimeCodesPanel({
                 <td>
                   <select
                     className="table-select"
-                    value={timeCode.category}
-                    onChange={(event) =>
-                      updateTimeCode(timeCode.id, (current) => ({
-                        ...current,
-                        category: event.target.value,
-                      }))
-                    }
-                  >
-                    {TIME_CODE_CATEGORIES.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    className="table-select"
                     value={timeCode.colorToken}
                     onChange={(event) =>
                       updateTimeCode(timeCode.id, (current) => ({
@@ -292,7 +264,7 @@ export function TimeCodesPanel({
             ))}
             {timeCodes.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={5}>
                   <div className="empty-state">
                     <strong>No time codes yet.</strong>
                     <span>Add a code to use it in the shift grid.</span>
