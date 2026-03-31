@@ -12,12 +12,13 @@ import {
   getScheduleById,
   shiftForDate,
 } from "@/lib/scheduling";
-import type { Competency, Employee, SchedulerSnapshot } from "@/lib/types";
+import type { Competency, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
 
 type OvertimePosting = {
   id: string;
   scheduleId: string;
   scheduleName: string;
+  shiftKind: Exclude<ShiftKind, "OFF">;
   competencyId: string;
   competencyCode: string;
   competencyLabel: string;
@@ -42,28 +43,46 @@ function formatStaffCount(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function getSetGroups(schedule: SchedulerSnapshot["schedules"][number], monthDays: Array<{ date: string }>) {
-  const groups: string[][] = [];
-  let currentGroup: string[] = [];
+function getShiftLabel(shiftKind: Exclude<ShiftKind, "OFF">, count: number) {
+  return `${count} ${shiftKind === "DAY" ? "day" : "night"} shift${count === 1 ? "" : "s"}`;
+}
+
+function getWorkedSegments(schedule: SchedulerSnapshot["schedules"][number], monthDays: Array<{ date: string }>) {
+  const segments: Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }> = [];
+  let currentSegment: { shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] } | null = null;
 
   for (const day of monthDays) {
-    if (shiftForDate(schedule, day.date) === "OFF") {
-      if (currentGroup.length > 0) {
-        groups.push(currentGroup);
-        currentGroup = [];
+    const shiftKind = shiftForDate(schedule, day.date);
+
+    if (shiftKind === "OFF") {
+      if (currentSegment) {
+        segments.push(currentSegment);
+        currentSegment = null;
       }
 
       continue;
     }
 
-    currentGroup.push(day.date);
+    if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
+      if (currentSegment) {
+        segments.push(currentSegment);
+      }
+
+      currentSegment = {
+        shiftKind,
+        dates: [day.date],
+      };
+      continue;
+    }
+
+    currentSegment.dates.push(day.date);
   }
 
-  if (currentGroup.length > 0) {
-    groups.push(currentGroup);
+  if (currentSegment) {
+    segments.push(currentSegment);
   }
 
-  return groups;
+  return segments;
 }
 
 function getCellSelection(
@@ -122,9 +141,11 @@ export function OvertimePanel({
     const selectedEmployeeClaims = snapshot.overtimeClaims.filter((claim) => claim.employeeId === claimingEmployeeId);
 
     for (const schedule of snapshot.schedules) {
-      const setGroups = getSetGroups(schedule, monthDays);
+      const workedSegments = getWorkedSegments(schedule, monthDays);
 
-      for (const setDates of setGroups) {
+      for (const segment of workedSegments) {
+        const setDates = segment.dates;
+
         for (const competency of snapshot.competencies) {
           const missingSlotsByDate = setDates.map((date) => {
             let filledCount = 0;
@@ -171,6 +192,7 @@ export function OvertimePanel({
               id: `claimed:${schedule.id}:${competency.id}:${claimedDates[0]}`,
               scheduleId: schedule.id,
               scheduleName: schedule.name,
+              shiftKind: segment.shiftKind,
               competencyId: competency.id,
               competencyCode: competency.code,
               competencyLabel: competency.label,
@@ -206,6 +228,7 @@ export function OvertimePanel({
               id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
               scheduleId: schedule.id,
               scheduleName: schedule.name,
+              shiftKind: segment.shiftKind,
               competencyId: competency.id,
               competencyCode: competency.code,
               competencyLabel: competency.label,
@@ -226,6 +249,7 @@ export function OvertimePanel({
       Number(right.claimedBySelectedEmployee) - Number(left.claimedBySelectedEmployee) ||
       left.scheduleName.localeCompare(right.scheduleName) ||
       left.dates[0].localeCompare(right.dates[0]) ||
+      left.shiftKind.localeCompare(right.shiftKind) ||
       left.competencyCode.localeCompare(right.competencyCode),
     );
   }, [allEmployees, assignmentIndex, claimingEmployeeId, employeeMap, monthDays, snapshot, snapshot.competencies, snapshot.overtimeClaims, snapshot.schedules]);
@@ -377,6 +401,7 @@ export function OvertimePanel({
 
               <div className="overtime-card-meta">
                 <span>{formatShortDate(posting.dates[0])} - {formatShortDate(posting.dates[posting.dates.length - 1])}</span>
+                <span>{getShiftLabel(posting.shiftKind, posting.dates.length)}</span>
                 <span>{posting.openShifts} open shift{posting.openShifts === 1 ? "" : "s"}</span>
                 <span>{formatStaffCount(posting.staffedPeople)}/{posting.requiredStaff} staffed</span>
               </div>
