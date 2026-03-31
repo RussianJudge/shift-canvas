@@ -15,6 +15,7 @@ export interface Competency {
   code: string;
   label: string;
   colorToken: string;
+  requiredStaff: number;
 }
 
 export interface TimeCode {
@@ -98,6 +99,7 @@ export interface CompetencyUpdate {
   code: string;
   label: string;
   colorToken: string;
+  requiredStaff: number;
 }
 
 export interface SaveCompetenciesInput {

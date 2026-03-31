@@ -20,6 +20,7 @@ create table if not exists competencies (
   code text not null,
   label text not null,
   color_token text not null default 'slate',
+  required_staff integer not null default 1,
   created_at timestamptz not null default now(),
   unique (code)
 );

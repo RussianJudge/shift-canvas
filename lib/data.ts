@@ -34,6 +34,7 @@ type CompetencyRow = {
   code: string;
   label: string;
   color_token: string | null;
+  required_staff: number | null;
 };
 
 type TimeCodeRow = {
@@ -92,7 +93,7 @@ export async function getSchedulerSnapshot(month: string) {
   ] =
     await Promise.all([
       supabase.from("production_units").select("id, name, description").order("name"),
-      supabase.from("competencies").select("id, code, label, color_token").order("code"),
+      supabase.from("competencies").select("id, code, label, color_token, required_staff").order("code"),
       supabase.from("time_codes").select("id, code, label, color_token").order("code"),
       supabase
         .from("schedules")
@@ -136,6 +137,7 @@ export async function getSchedulerSnapshot(month: string) {
     code: row.code,
     label: row.label,
     colorToken: row.color_token ?? "slate",
+    requiredStaff: row.required_staff ?? 1,
   }));
 
   const timeCodes: TimeCode[] = (timeCodesResult.data as TimeCodeRow[]).map((row) => ({

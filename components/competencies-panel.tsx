@@ -12,6 +12,7 @@ type EditableCompetency = {
   code: string;
   label: string;
   colorToken: string;
+  requiredStaff: number;
 };
 
 function cloneCompetencies(competencies: EditableCompetency[]) {
@@ -24,6 +25,7 @@ function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
     code: competency.code.trim(),
     label: competency.label.trim(),
     colorToken: competency.colorToken,
+    requiredStaff: competency.requiredStaff,
   };
 }
 
@@ -39,6 +41,7 @@ export function CompetenciesPanel({
         code: competency.code,
         label: competency.label,
         colorToken: competency.colorToken,
+        requiredStaff: competency.requiredStaff,
       })),
     [snapshot.competencies],
   );
@@ -77,6 +80,7 @@ export function CompetenciesPanel({
       code: "Post 99",
       label: "New competency",
       colorToken: "slate",
+      requiredStaff: 1,
     };
 
     setCompetencies((current) => [nextCompetency, ...current]);
@@ -146,6 +150,7 @@ export function CompetenciesPanel({
             <tr>
               <th>Code</th>
               <th>Label</th>
+              <th>Staff required</th>
               <th>Color</th>
               <th>Preview</th>
               <th />
@@ -174,6 +179,20 @@ export function CompetenciesPanel({
                       updateCompetency(competency.id, (current) => ({
                         ...current,
                         label: event.target.value,
+                      }))
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="table-input"
+                    type="number"
+                    min="0"
+                    value={competency.requiredStaff}
+                    onChange={(event) =>
+                      updateCompetency(competency.id, (current) => ({
+                        ...current,
+                        requiredStaff: Number(event.target.value || 0),
                       }))
                     }
                   />
@@ -214,7 +233,7 @@ export function CompetenciesPanel({
             ))}
             {competencies.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="empty-state">
                     <strong>No competencies yet.</strong>
                     <span>Add a competency to populate the schedule options.</span>

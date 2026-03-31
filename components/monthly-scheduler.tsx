@@ -28,6 +28,12 @@ type DragRange = {
   selection: AssignmentSelection;
 };
 
+type CoverageSummary = {
+  minimumScheduled: number;
+  requiredStaff: number;
+  isUnderstaffed: boolean;
+};
+
 function isMonthKey(value: string) {
   return /^\d{4}-\d{2}$/.test(value);
 }
@@ -160,6 +166,27 @@ function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
   );
 }
 
+function formatShortDate(isoDate: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${isoDate}T00:00:00Z`));
+}
+
+function getWeekDates(monthDays: Array<{ date: string }>, isoDate: string) {
+  const target = new Date(`${isoDate}T00:00:00Z`);
+  const weekdayOffset = (target.getUTCDay() + 6) % 7;
+  const weekStart = new Date(target);
+  weekStart.setUTCDate(target.getUTCDate() - weekdayOffset);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+  const weekStartKey = weekStart.toISOString().slice(0, 10);
+  const weekEndKey = weekEnd.toISOString().slice(0, 10);
+
+  return monthDays.filter((day) => day.date >= weekStartKey && day.date <= weekEndKey);
+}
+
 export function MonthlyScheduler({
   initialSnapshot,
 }: {
@@ -190,6 +217,64 @@ export function MonthlyScheduler({
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const monthDays = useMemo(() => getMonthDays(currentMonth), [currentMonth]);
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
+  const selectedDate = selectedCell?.date ?? monthDays[0]?.date ?? `${currentMonth}-01`;
+  const selectedBuilderEmployee = selectedCell ? employeeMap[selectedCell.employeeId] ?? null : null;
+  const selectedBuilderSchedule = selectedBuilderEmployee
+    ? getScheduleById(snapshot, selectedBuilderEmployee.scheduleId)
+    : null;
+  const selectedWeekDays = useMemo(() => getWeekDates(monthDays, selectedDate), [monthDays, selectedDate]);
+  const selectedBuilderAssignment =
+    selectedCell && selectedBuilderEmployee && selectedBuilderSchedule
+      ? getCellCompetency(
+          selectedBuilderEmployee,
+          { date: selectedCell.date },
+          shiftForDate(selectedBuilderSchedule, selectedCell.date),
+          draftAssignments,
+        )
+      : null;
+  const competencyCoverage = useMemo(() => {
+    const scheduleMap = new Map(snapshot.schedules.map((schedule) => [schedule.id, schedule]));
+    const allEmployees = snapshot.schedules.flatMap((schedule) => schedule.employees);
+    const countsByDate = monthDays.reduce<Record<string, Record<string, number>>>((map, day) => {
+      map[day.date] = {};
+      return map;
+    }, {});
+
+    for (const employee of allEmployees) {
+      const employeeSchedule = scheduleMap.get(employee.scheduleId);
+
+      if (!employeeSchedule) {
+        continue;
+      }
+
+      for (const day of monthDays) {
+        const shiftKind = shiftForDate(employeeSchedule, day.date);
+        const selection = getCellCompetency(employee, day, shiftKind, draftAssignments);
+
+        if (!selection.competencyId) {
+          continue;
+        }
+
+        countsByDate[day.date][selection.competencyId] =
+          (countsByDate[day.date][selection.competencyId] ?? 0) + 1;
+      }
+    }
+
+    return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
+      const minimumScheduled =
+        selectedWeekDays.length > 0
+          ? Math.min(...selectedWeekDays.map((day) => countsByDate[day.date]?.[competency.id] ?? 0))
+          : 0;
+
+      map[competency.id] = {
+        minimumScheduled,
+        requiredStaff: competency.requiredStaff,
+        isUnderstaffed: minimumScheduled < competency.requiredStaff,
+      };
+
+      return map;
+    }, {});
+  }, [draftAssignments, monthDays, selectedWeekDays, snapshot.competencies, snapshot.schedules]);
 
   if (!activeSchedule) {
     return (
@@ -245,6 +330,19 @@ export function MonthlyScheduler({
   const hasChanges = dirtyUpdates.length > 0;
 
   const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.45rem, 1fr))`;
+
+  useEffect(() => {
+    if (!selectedCell) {
+      return;
+    }
+
+    const employeeStillVisible = activeSchedule.employees.some((employee) => employee.id === selectedCell.employeeId);
+    const dateStillVisible = monthDays.some((day) => day.date === selectedCell.date);
+
+    if (!employeeStillVisible || !dateStillVisible) {
+      setSelectedCell(null);
+    }
+  }, [activeSchedule.employees, monthDays, selectedCell]);
 
   useEffect(() => {
     const savedDrafts = window.localStorage.getItem(STORAGE_KEY);
@@ -397,6 +495,23 @@ export function MonthlyScheduler({
     });
   }
 
+  function handleBuilderAssign(competencyId: string) {
+    if (!selectedCell || !selectedBuilderEmployee) {
+      setStatusMessage("Select a calendar cell first.");
+      return;
+    }
+
+    if (!selectedBuilderEmployee.competencyIds.includes(competencyId)) {
+      setStatusMessage(`${selectedBuilderEmployee.name} is not qualified for that competency.`);
+      return;
+    }
+
+    handleAssignmentChange(selectedBuilderEmployee, selectedCell.date, {
+      competencyId,
+      timeCodeId: null,
+    });
+  }
+
   function handleDragHover(employeeId: string, dayIndex: number) {
     setDragRange((current) => {
       if (!current || current.employeeId !== employeeId || current.currentIndex === dayIndex) {
@@ -495,6 +610,47 @@ export function MonthlyScheduler({
           {!isMonthLoading && statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
         </div>
       </div>
+
+      <section className="set-builder" aria-label="Set builder">
+        <div className="set-builder-heading">
+          <div>
+            <h2 className="set-builder-title">Set Builder</h2>
+            <p className="set-builder-context">
+              {selectedBuilderEmployee
+                ? `${selectedBuilderEmployee.name} · ${formatShortDate(selectedDate)} · ${selectedWeekDays.length > 0 ? `${formatShortDate(selectedWeekDays[0].date)} - ${formatShortDate(selectedWeekDays[selectedWeekDays.length - 1].date)}` : "Current week"}`
+                : `Select a calendar cell to assign a competency · ${selectedWeekDays.length > 0 ? `${formatShortDate(selectedWeekDays[0].date)} - ${formatShortDate(selectedWeekDays[selectedWeekDays.length - 1].date)}` : "Current week"}`}
+            </p>
+          </div>
+        </div>
+
+        <div className="set-builder-pills">
+          {snapshot.competencies.map((competency) => {
+            const coverage = competencyCoverage[competency.id];
+            const isAssignable = selectedBuilderEmployee
+              ? selectedBuilderEmployee.competencyIds.includes(competency.id)
+              : false;
+            const isActive = selectedBuilderAssignment?.competencyId === competency.id;
+
+            return (
+              <button
+                key={competency.id}
+                type="button"
+                className={`set-builder-pill legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
+                  coverage?.isUnderstaffed ? "set-builder-pill--understaffed" : ""
+                } ${isActive ? "set-builder-pill--active" : ""} ${
+                  !isAssignable ? "set-builder-pill--disabled" : ""
+                }`}
+                onClick={() => handleBuilderAssign(competency.id)}
+                disabled={!selectedBuilderEmployee}
+                title={`${competency.label} · ${coverage?.minimumScheduled ?? 0}/${coverage?.requiredStaff ?? competency.requiredStaff} scheduled this week`}
+              >
+                <strong>{getCompactCode(competency.code)}</strong>
+                <span>{coverage?.minimumScheduled ?? 0}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       <section className="schedule-wrap" aria-label="Monthly schedule grid">
         <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>

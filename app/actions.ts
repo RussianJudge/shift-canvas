@@ -252,6 +252,7 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
     code: update.code,
     label: update.label,
     color_token: update.colorToken,
+    required_staff: update.requiredStaff,
   }));
 
   const error =
