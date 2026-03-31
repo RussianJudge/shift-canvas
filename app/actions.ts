@@ -12,8 +12,104 @@ import type {
   SaveTimeCodesInput,
 } from "@/lib/types";
 import { getSchedulerSnapshot } from "@/lib/data";
-import { buildAssignmentIndex, getEmployeeMap, getScheduleById, shiftForDate } from "@/lib/scheduling";
+import {
+  buildAssignmentIndex,
+  getEmployeeMap,
+  getMonthDays,
+  getScheduleById,
+  shiftForDate,
+} from "@/lib/scheduling";
 import { getSupabaseAdminClient } from "@/lib/supabase";
+
+type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
+
+async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: string[]) {
+  const uniqueMonths = Array.from(new Set(months.filter(Boolean)));
+  let removedClaims = 0;
+
+  for (const month of uniqueMonths) {
+    const snapshot = await getSchedulerSnapshot(month);
+    const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
+    const monthDays = getMonthDays(month);
+    const claimsByCoverageKey = snapshot.overtimeClaims.reduce<Record<string, typeof snapshot.overtimeClaims>>(
+      (map, claim) => {
+        const key = `${claim.scheduleId}:${claim.competencyId}:${claim.date}`;
+        map[key] ??= [];
+        map[key].push(claim);
+        return map;
+      },
+      {},
+    );
+    const claimsToRemove = snapshot.schedules.flatMap((schedule) =>
+      monthDays.flatMap((day) => {
+        if (shiftForDate(schedule, day.date) === "OFF") {
+          return [];
+        }
+
+        return snapshot.competencies.flatMap((competency) => {
+          const claims =
+            claimsByCoverageKey[`${schedule.id}:${competency.id}:${day.date}`]
+              ?.slice()
+              .sort((left, right) => left.id.localeCompare(right.id)) ?? [];
+
+          if (claims.length === 0) {
+            return [];
+          }
+
+          const regularFilled = schedule.employees.reduce((count, employee) => {
+            const selection = assignmentIndex[`${employee.id}:${day.date}`];
+            return count + Number(selection?.competencyId === competency.id);
+          }, 0);
+          const allowedClaims = Math.max(0, competency.requiredStaff - regularFilled);
+
+          return claims.slice(allowedClaims);
+        });
+      }),
+    );
+
+    if (claimsToRemove.length === 0) {
+      continue;
+    }
+
+    const claimIds = claimsToRemove.map((claim) => claim.id);
+    const { error: claimDeleteError } = await supabase.from("overtime_claims").delete().in("id", claimIds);
+
+    if (claimDeleteError) {
+      return {
+        ok: false as const,
+        message: `Assignments saved, but overtime cleanup failed: ${claimDeleteError.message}`,
+        removedClaims,
+      };
+    }
+
+    const assignmentDeleteResults = await Promise.all(
+      claimsToRemove.map((claim) =>
+        supabase
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", claim.employeeId)
+          .eq("assignment_date", claim.date)
+          .eq("competency_id", claim.competencyId),
+      ),
+    );
+    const firstAssignmentDeleteError = assignmentDeleteResults.find((result) => result.error)?.error;
+
+    if (firstAssignmentDeleteError) {
+      return {
+        ok: false as const,
+        message: `Assignments saved, but overtime cleanup failed: ${firstAssignmentDeleteError.message}`,
+        removedClaims,
+      };
+    }
+
+    removedClaims += claimsToRemove.length;
+  }
+
+  return {
+    ok: true as const,
+    removedClaims,
+  };
+}
 
 export async function saveAssignments(input: SaveAssignmentsInput) {
   const supabase = getSupabaseAdminClient();
@@ -78,12 +174,21 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     }
   }
 
+  const cleanupResult = await removeStaleOvertimeClaims(
+    supabase,
+    input.updates.map((update) => update.date.slice(0, 7)),
+  );
+
   revalidatePath("/");
   revalidatePath("/overtime");
 
   return {
     ok: true,
-    message: "Assignments saved to Supabase.",
+    message: cleanupResult.ok
+      ? cleanupResult.removedClaims > 0
+        ? `Assignments saved. Removed ${cleanupResult.removedClaims} overtime claim${cleanupResult.removedClaims === 1 ? "" : "s"} that were no longer needed.`
+        : "Assignments saved to Supabase."
+      : cleanupResult.message,
   };
 }
 
