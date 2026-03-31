@@ -509,6 +509,14 @@ select {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--team-accent) 18%, transparent);
 }
 
+.set-builder-pill--filled {
+  border-color: rgba(23, 20, 17, 0.08);
+}
+
+.set-builder-pill--overtime {
+  box-shadow: 0 0 0 3px rgba(23, 20, 17, 0.08);
+}
+
 .set-builder-pill--understaffed {
   background: rgba(148, 163, 184, 0.18);
   color: #475569;
@@ -857,6 +865,52 @@ select {
 
 .table-action--danger {
   color: #991b1b;
+}
+
+.overtime-list {
+  display: grid;
+  gap: 1rem;
+  padding: 0 1.5rem 1.5rem;
+}
+
+.overtime-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 1.1rem;
+  background: rgba(255, 252, 247, 0.85);
+}
+
+.overtime-card-top,
+.overtime-card-actions,
+.overtime-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.overtime-card-team {
+  margin: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.overtime-card-title {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.overtime-card-meta,
+.overtime-card-hint {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .empty-state {

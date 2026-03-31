@@ -3,12 +3,15 @@
 import { revalidatePath } from "next/cache";
 
 import type {
+  ClaimOvertimePostingInput,
   SaveAssignmentsInput,
   SaveCompetenciesInput,
   SavePersonnelInput,
   SaveSchedulesInput,
   SaveTimeCodesInput,
 } from "@/lib/types";
+import { getSchedulerSnapshot } from "@/lib/data";
+import { buildAssignmentIndex, getEmployeeMap, getScheduleById, shiftForDate } from "@/lib/scheduling";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
 export async function saveAssignments(input: SaveAssignmentsInput) {
@@ -79,6 +82,109 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   return {
     ok: true,
     message: "Assignments saved to Supabase.",
+  };
+}
+
+export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Overtime postings are unavailable.",
+    };
+  }
+
+  if (input.dates.length === 0) {
+    return {
+      ok: false,
+      message: "No overtime dates were provided.",
+    };
+  }
+
+  const month = input.dates[0]?.slice(0, 7);
+  const snapshot = await getSchedulerSnapshot(month);
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const employee = employeeMap[input.employeeId];
+  const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+  const targetSchedule = getScheduleById(snapshot, input.scheduleId);
+  const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
+  const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
+
+  if (!employee || !employeeSchedule || !competency) {
+    return {
+      ok: false,
+      message: "Could not find the employee or competency for this posting.",
+    };
+  }
+
+  if (!employee.competencyIds.includes(input.competencyId)) {
+    return {
+      ok: false,
+      message: `${employee.name} is not qualified for ${competency.code}.`,
+    };
+  }
+
+  for (const date of input.dates) {
+    const shiftKind = shiftForDate(employeeSchedule, date);
+    const currentAssignment = assignmentIndex[`${employee.id}:${date}`] ?? {
+      competencyId: null,
+      timeCodeId: null,
+    };
+
+    if (shiftKind !== "OFF" || currentAssignment.competencyId || currentAssignment.timeCodeId) {
+      return {
+        ok: false,
+        message: `${employee.name} is not available for every shift in that posting.`,
+      };
+    }
+  }
+
+  const assignmentRows = input.dates.map((date) => ({
+    employee_id: input.employeeId,
+    assignment_date: date,
+    competency_id: input.competencyId,
+    time_code_id: null,
+    notes: "Overtime",
+    shift_kind: shiftForDate(targetSchedule, date),
+  }));
+
+  const claimRows = input.dates.map((date) => ({
+    id: `ot-${input.scheduleId}-${input.employeeId}-${input.competencyId}-${date}`,
+    schedule_id: input.scheduleId,
+    employee_id: input.employeeId,
+    competency_id: input.competencyId,
+    assignment_date: date,
+  }));
+
+  const { error: assignmentError } = await supabase.from("schedule_assignments").upsert(assignmentRows, {
+    onConflict: "employee_id,assignment_date",
+  });
+
+  if (assignmentError) {
+    return {
+      ok: false,
+      message: `Could not save overtime assignments: ${assignmentError.message}`,
+    };
+  }
+
+  const { error: claimError } = await supabase.from("overtime_claims").upsert(claimRows, {
+    onConflict: "id",
+  });
+
+  if (claimError) {
+    return {
+      ok: false,
+      message: `Could not save overtime claim: ${claimError.message}`,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: `${employee.name} was added to the overtime posting.`,
   };
 }
 

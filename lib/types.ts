@@ -53,6 +53,14 @@ export interface StoredAssignment {
   shiftKind: ShiftKind;
 }
 
+export interface OvertimeClaim {
+  id: string;
+  scheduleId: string;
+  employeeId: string;
+  competencyId: string;
+  date: string;
+}
+
 export interface SchedulerSnapshot {
   month: string;
   schedules: Schedule[];
@@ -60,10 +68,18 @@ export interface SchedulerSnapshot {
   competencies: Competency[];
   timeCodes: TimeCode[];
   assignments: StoredAssignment[];
+  overtimeClaims: OvertimeClaim[];
 }
 
 export interface SaveAssignmentsInput {
   updates: StoredAssignment[];
+}
+
+export interface ClaimOvertimePostingInput {
+  scheduleId: string;
+  employeeId: string;
+  competencyId: string;
+  dates: string[];
 }
 
 export interface PersonnelUpdate {

@@ -5,6 +5,7 @@ import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase"
 import type {
   Competency,
   Employee,
+  OvertimeClaim,
   ProductionUnit,
   Schedule,
   SchedulerSnapshot,
@@ -64,6 +65,14 @@ type ProductionUnitRow = {
   description: string | null;
 };
 
+type OvertimeClaimRow = {
+  id: string;
+  schedule_id: string;
+  employee_id: string;
+  competency_id: string;
+  assignment_date: string;
+};
+
 function withMonth(snapshot: SchedulerSnapshot, month: string): SchedulerSnapshot {
   return {
     ...snapshot,
@@ -90,6 +99,7 @@ export async function getSchedulerSnapshot(month: string) {
     employeesResult,
     employeeCompetenciesResult,
     assignmentsResult,
+    overtimeClaimsResult,
   ] =
     await Promise.all([
       supabase.from("production_units").select("id, name, description").order("name"),
@@ -110,6 +120,11 @@ export async function getSchedulerSnapshot(month: string) {
         .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
         .gte("assignment_date", monthStart)
         .lte("assignment_date", monthEnd),
+      supabase
+        .from("overtime_claims")
+        .select("id, schedule_id, employee_id, competency_id, assignment_date")
+        .gte("assignment_date", monthStart)
+        .lte("assignment_date", monthEnd),
     ]);
 
   const results = [
@@ -120,6 +135,7 @@ export async function getSchedulerSnapshot(month: string) {
     employeesResult,
     employeeCompetenciesResult,
     assignmentsResult,
+    overtimeClaimsResult,
   ];
 
   if (results.some((result) => result.error)) {
@@ -190,6 +206,14 @@ export async function getSchedulerSnapshot(month: string) {
     shiftKind: row.shift_kind,
   }));
 
+  const overtimeClaims: OvertimeClaim[] = (overtimeClaimsResult.data as OvertimeClaimRow[]).map((row) => ({
+    id: row.id,
+    scheduleId: row.schedule_id,
+    employeeId: row.employee_id,
+    competencyId: row.competency_id,
+    date: row.assignment_date,
+  }));
+
   return {
     month,
     schedules,
@@ -197,5 +221,6 @@ export async function getSchedulerSnapshot(month: string) {
     competencies,
     timeCodes,
     assignments,
+    overtimeClaims,
   };
 }

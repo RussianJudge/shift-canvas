@@ -31,6 +31,9 @@ type DragRange = {
 type CoverageSummary = {
   filledCells: number;
   requiredCells: number;
+  assignedPeople: number;
+  requiredStaff: number;
+  hasOvertime: boolean;
   isUnderstaffed: boolean;
 };
 
@@ -174,6 +177,10 @@ function formatShortDate(isoDate: string) {
   }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
+function formatStaffCount(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 function getSetDays(
   schedule: Schedule | null,
   monthDays: Array<{ date: string }>,
@@ -260,6 +267,7 @@ export function MonthlyScheduler({
   const competencyCoverage = useMemo(() => {
     return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
+      let hasOvertime = false;
 
       for (const employee of activeSchedule.employees) {
         for (const day of selectedSetDays) {
@@ -272,17 +280,35 @@ export function MonthlyScheduler({
         }
       }
 
+      for (const claim of snapshot.overtimeClaims) {
+        const claimEmployee = employeeMap[claim.employeeId];
+
+        if (
+          claim.scheduleId === activeSchedule.id &&
+          claim.competencyId === competency.id &&
+          selectedSetDays.some((day) => day.date === claim.date) &&
+          claimEmployee?.scheduleId !== activeSchedule.id
+        ) {
+          filledCells += 1;
+          hasOvertime = true;
+        }
+      }
+
       const requiredCells = competency.requiredStaff * selectedSetDays.length;
+      const assignedPeople = selectedSetDays.length > 0 ? filledCells / selectedSetDays.length : 0;
 
       map[competency.id] = {
         filledCells,
         requiredCells,
+        assignedPeople,
+        requiredStaff: competency.requiredStaff,
+        hasOvertime,
         isUnderstaffed: selectedSetDays.length === 0 || filledCells < requiredCells,
       };
 
       return map;
     }, {});
-  }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.competencies]);
+  }, [activeSchedule, draftAssignments, employeeMap, selectedSetDays, snapshot.competencies, snapshot.overtimeClaims]);
 
   if (!activeSchedule) {
     return (
@@ -673,15 +699,17 @@ export function MonthlyScheduler({
                 type="button"
                 className={`set-builder-pill legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
                   coverage?.isUnderstaffed ? "set-builder-pill--understaffed" : ""
+                } ${coverage?.hasOvertime ? "set-builder-pill--overtime" : ""} ${
+                  !coverage?.isUnderstaffed && selectedSetDays.length > 0 ? "set-builder-pill--filled" : ""
                 } ${isActive ? "set-builder-pill--active" : ""} ${
                   !isAssignable || selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
                 }`}
                 onClick={() => handleBuilderAssign(competency.id)}
                 disabled={selectedSetDays.length === 0}
-                title={`${competency.label} · ${coverage?.filledCells ?? 0}/${coverage?.requiredCells ?? 0} cells filled in this set`}
+                title={`${competency.label} · ${formatStaffCount(coverage?.assignedPeople ?? 0)}/${coverage?.requiredStaff ?? competency.requiredStaff} people staffed in this set`}
               >
                 <strong>{getCompactCode(competency.code)}</strong>
-                <span>{coverage?.filledCells ?? 0}/{coverage?.requiredCells ?? 0}</span>
+                <span>{formatStaffCount(coverage?.assignedPeople ?? 0)}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
               </button>
             );
           })}

@@ -37,6 +37,14 @@ function TimeCodesIcon() {
   );
 }
 
+function OvertimeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M13 3L5 14h5l-1 7l8-11h-5l1-7Z" />
+    </svg>
+  );
+}
+
 function PersonnelIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -110,6 +118,7 @@ export function WorkspaceShell({
             <NavLink href="/personnel" label="Personnel" icon={<PersonnelIcon />} collapsed={isCollapsed} />
             <NavLink href="/schedules" label="Shifts" icon={<PatternsIcon />} collapsed={isCollapsed} />
             <NavLink href="/competencies" label="Competencies" icon={<CompetenciesIcon />} collapsed={isCollapsed} />
+            <NavLink href="/overtime" label="Overtime" icon={<OvertimeIcon />} collapsed={isCollapsed} />
             <NavLink href="/time-codes" label="Time Codes" icon={<TimeCodesIcon />} collapsed={isCollapsed} />
           </nav>
         </aside>
