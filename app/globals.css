@@ -575,6 +575,8 @@ select {
   position: relative;
   padding: 0 0 0.5rem;
   overflow: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--line);
 }
 
@@ -727,8 +729,8 @@ select {
   --schedule-name-column-width: 10.5rem;
   display: grid;
   align-items: stretch;
-  width: 100%;
-  min-width: 0;
+  width: max-content;
+  min-width: 100%;
 }
 
 .employee-header,
@@ -850,6 +852,12 @@ select {
   left: 0;
   z-index: 3;
   box-shadow: 1px 0 0 rgba(131, 110, 87, 0.08);
+}
+
+.employee-header.sticky-column,
+.employee-cell.sticky-column,
+.empty-state.sticky-column {
+  left: 0;
 }
 
 .employee-cell {
