@@ -789,13 +789,14 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
   const invalidTimeCode = input.updates.find(
     (update) =>
       isBlank(update.code) ||
-      isBlank(update.label),
+      isBlank(update.label) ||
+      update.code.trim().length > 5,
   );
 
   if (invalidTimeCode) {
     return {
       ok: false,
-      message: "Each time code needs a code and label.",
+      message: "Each time code needs a code of 5 characters or fewer and a label.",
     };
   }
 

@@ -540,7 +540,7 @@ export function MonthlyScheduler({
     ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
     : new Set<string>();
 
-  const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.7rem, 1fr))`;
+  const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(3rem, 1fr))`;
 
   useEffect(() => {
     if (!selectedCell) {
@@ -1158,15 +1158,20 @@ function EmployeeRow({
       </div>
 
       {monthDays.map((day, dayIndex) => {
-        const shiftKind =
-          overtimeDateSet && !overtimeDateSet.has(day.date) ? "OFF" : shiftForDate(schedule, day.date);
-        const selection = getSelectionForCell(
-          employee.sourceEmployeeId,
-          day.date,
-          shiftKind,
-          assignments,
-          timeCodes,
-        );
+        const isOvertimeCell = !overtimeDateSet || overtimeDateSet.has(day.date);
+        const shiftKind = isOvertimeCell ? shiftForDate(schedule, day.date) : "OFF";
+        const selection = isOvertimeCell
+          ? getSelectionForCell(
+              employee.sourceEmployeeId,
+              day.date,
+              shiftKind,
+              assignments,
+              timeCodes,
+            )
+          : {
+              competencyId: null,
+              timeCodeId: null,
+            };
         const activeCompetency = selection.competencyId ? competencyMap[selection.competencyId] : null;
         const activeTimeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
         const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
@@ -1195,14 +1200,14 @@ function EmployeeRow({
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
             }`}
             onPointerDown={(event) => {
-              if (event.button !== 0) {
+              if (event.button !== 0 || !isOvertimeCell) {
                 return;
               }
 
               onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, selection);
             }}
             onPointerEnter={(event) => {
-              if (dragRange && event.buttons === 1) {
+              if (isOvertimeCell && dragRange && event.buttons === 1) {
                 onDragHover(employee.sourceEmployeeId, dayIndex);
               }
             }}
@@ -1212,7 +1217,14 @@ function EmployeeRow({
               className={`shift-cell-button ${
                 activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
               }`}
-              onClick={() => onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date })}
+              onClick={() => {
+                if (!isOvertimeCell) {
+                  return;
+                }
+
+                onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date });
+              }}
+              disabled={!isOvertimeCell}
               aria-label={`${employee.name} ${day.date} assignment`}
             >
               {getSelectionCode(selection, competencyMap, timeCodeMap)}

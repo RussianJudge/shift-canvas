@@ -34,6 +34,10 @@ function getTimeCodeIssues(timeCode: EditableTimeCode) {
     issues.push("Code required");
   }
 
+  if (timeCode.code.trim().length > 5) {
+    issues.push("Max 5 characters");
+  }
+
   if (!timeCode.label.trim()) {
     issues.push("Label required");
   }
@@ -205,6 +209,7 @@ export function TimeCodesPanel({
                   <input
                     className="table-input"
                     value={timeCode.code}
+                    maxLength={5}
                     onChange={(event) =>
                       updateTimeCode(timeCode.id, (current) => ({
                         ...current,

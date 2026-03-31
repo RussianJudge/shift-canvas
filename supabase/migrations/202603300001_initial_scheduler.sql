@@ -31,6 +31,7 @@ create table if not exists time_codes (
   label text not null,
   color_token text not null default 'slate',
   created_at timestamptz not null default now(),
+  check (char_length(code) <= 5),
   unique (code)
 );
 

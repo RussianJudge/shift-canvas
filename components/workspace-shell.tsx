@@ -114,10 +114,10 @@ export function WorkspaceShell({
 
           <nav className="workspace-nav" aria-label="Primary">
             <NavLink href="/" label="Schedule" icon={<ScheduleIcon />} />
+            <NavLink href="/overtime" label="Overtime" icon={<OvertimeIcon />} />
             <NavLink href="/personnel" label="Personnel" icon={<PersonnelIcon />} />
             <NavLink href="/schedules" label="Shifts" icon={<PatternsIcon />} />
             <NavLink href="/competencies" label="Competencies" icon={<CompetenciesIcon />} />
-            <NavLink href="/overtime" label="Overtime" icon={<OvertimeIcon />} />
             <NavLink href="/time-codes" label="Time Codes" icon={<TimeCodesIcon />} />
           </nav>
         </aside>

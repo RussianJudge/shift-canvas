@@ -455,15 +455,6 @@ export function OvertimePanel({
           </select>
         </label>
 
-        <div className="workspace-copy workspace-copy--full">
-          <strong>{new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${snapshot.month}-01T00:00:00Z`))}</strong>
-          <p>
-            {claimingEmployee
-              ? `${claimingEmployee.name} can claim only qualified postings that fall on days off.`
-              : "Select an employee to claim a posting."}
-          </p>
-        </div>
-
         <div className="toolbar-status-wrap">
           {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
         </div>
