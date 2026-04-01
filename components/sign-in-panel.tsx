@@ -8,8 +8,12 @@ function getErrorMessage(error: string | undefined) {
     return "Enter an email address to sign in.";
   }
 
+  if (error === "auth-unavailable") {
+    return "Supabase auth lookup is unavailable right now. Try again in a moment.";
+  }
+
   if (error === "unknown-email") {
-    return "That email is not in the demo access list yet. Use one of the demo accounts below.";
+    return "That email does not have access yet. Use one of the demo accounts below.";
   }
 
   return "";
@@ -49,7 +53,7 @@ export function SignInPanel({
         <div className="auth-directory">
           <div className="auth-directory__header">
             <strong>Demo accounts</strong>
-            <span>Use any of these emails right now.</span>
+            <span>These emails should exist in Supabase auth and profiles.</span>
           </div>
           <div className="auth-directory__list">
             {accounts.map((account) => (
