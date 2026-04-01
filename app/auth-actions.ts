@@ -3,69 +3,50 @@
 import { redirect } from "next/navigation";
 
 import { clearAppSession, setAppSession } from "@/lib/auth";
-import { getPersonnelSnapshot } from "@/lib/data";
-import { getCurrentMonthKey } from "@/lib/scheduling";
-import type { AppRole, AppSession } from "@/lib/types";
+import { buildDemoSession, getDemoAccountByEmail } from "@/lib/demo-users";
+import type { AppRole } from "@/lib/types";
 
 function isAppRole(value: FormDataEntryValue | null): value is AppRole {
   return value === "admin" || value === "leader" || value === "worker";
 }
 
 export async function signIn(formData: FormData) {
-  const role = formData.get("role");
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
 
-  if (!isAppRole(role)) {
-    redirect("/sign-in");
+  if (!email) {
+    redirect("/sign-in?error=missing-email");
   }
 
-  const month = getCurrentMonthKey("America/Edmonton");
-  const snapshot = await getPersonnelSnapshot(month);
-  let session: AppSession;
+  const account = getDemoAccountByEmail(email);
 
-  if (role === "admin") {
-    session = {
-      role,
-      displayName: "Admin",
-      scheduleId: null,
-      employeeId: null,
-      scheduleName: null,
-    };
-  } else if (role === "leader") {
-    const scheduleId = String(formData.get("scheduleId") ?? "");
-    const schedule = snapshot.schedules.find((entry) => entry.id === scheduleId);
+  if (!account) {
+    redirect("/sign-in?error=unknown-email");
+  }
 
-    if (!schedule) {
-      redirect("/sign-in");
-    }
+  await setAppSession(account);
+  redirect("/schedule");
+}
 
-    session = {
-      role,
-      displayName: `Shift ${schedule.name} Leader`,
-      scheduleId: schedule.id,
-      employeeId: null,
-      scheduleName: schedule.name,
-    };
-  } else {
-    const employeeId = String(formData.get("employeeId") ?? "");
-    const employee = snapshot.schedules.flatMap((schedule) => schedule.employees).find((entry) => entry.id === employeeId);
+export async function signUp(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const role = formData.get("role");
 
-    if (!employee) {
-      redirect("/sign-in");
-    }
+  if (!email) {
+    redirect("/sign-up?error=missing-email");
+  }
 
-    const schedule = snapshot.schedules.find((entry) => entry.id === employee.scheduleId);
+  if (!isAppRole(role)) {
+    redirect("/sign-up?error=invalid-role");
+  }
 
-    session = {
-      role,
-      displayName: employee.name,
-      scheduleId: employee.scheduleId,
-      employeeId: employee.id,
-      scheduleName: schedule?.name ?? null,
-    };
+  const session = buildDemoSession(email, role);
+
+  if (!session) {
+    redirect("/sign-up?error=invalid-role");
   }
 
   await setAppSession(session);
-  redirect(role === "worker" ? "/schedule" : "/schedule");
+  redirect("/schedule");
 }
 
 export async function signOut() {

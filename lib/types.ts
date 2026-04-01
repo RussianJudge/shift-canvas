@@ -70,6 +70,7 @@ export interface CompletedSet {
 }
 
 export interface AppSession {
+  email: string;
   role: AppRole;
   displayName: string;
   scheduleId: string | null;

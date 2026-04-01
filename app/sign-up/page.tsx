@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
 
-import { SignInPanel } from "@/components/sign-in-panel";
+import { SignUpPanel } from "@/components/sign-up-panel";
 import { getAppSession, getSessionHomePath } from "@/lib/auth";
 import { getDemoAccounts } from "@/lib/demo-users";
 
 export const dynamic = "force-dynamic";
 
-export default async function SignInPage({
+export default async function SignUpPage({
   searchParams,
 }: {
   searchParams?: Promise<{ error?: string }>;
@@ -19,5 +19,5 @@ export default async function SignInPage({
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
-  return <SignInPanel accounts={getDemoAccounts()} error={resolvedSearchParams?.error} />;
+  return <SignUpPanel accounts={getDemoAccounts()} error={resolvedSearchParams?.error} />;
 }

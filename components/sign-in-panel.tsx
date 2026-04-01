@@ -1,37 +1,30 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
 
 import { signIn } from "@/app/auth-actions";
-import type { AppRole } from "@/lib/types";
+import type { DemoAccount } from "@/lib/demo-users";
 
-type SignInSchedule = {
-  id: string;
-  name: string;
-};
+function getErrorMessage(error: string | undefined) {
+  if (error === "missing-email") {
+    return "Enter an email address to sign in.";
+  }
 
-type SignInEmployee = {
-  id: string;
-  name: string;
-  scheduleId: string;
-  scheduleName: string;
-};
+  if (error === "unknown-email") {
+    return "That email is not in the demo access list yet. Use one of the demo accounts below or sign up.";
+  }
+
+  return "";
+}
 
 export function SignInPanel({
-  schedules,
-  employees,
+  accounts,
+  error,
 }: {
-  schedules: SignInSchedule[];
-  employees: SignInEmployee[];
+  accounts: DemoAccount[];
+  error?: string;
 }) {
-  const [role, setRole] = useState<AppRole>("worker");
-  const [selectedScheduleId, setSelectedScheduleId] = useState(schedules[0]?.id ?? "");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState(employees[0]?.id ?? "");
-
-  const selectedEmployee = useMemo(
-    () => employees.find((employee) => employee.id === selectedEmployeeId) ?? null,
-    [employees, selectedEmployeeId],
-  );
+  const errorMessage = getErrorMessage(error);
 
   return (
     <section className="auth-shell">
@@ -39,69 +32,43 @@ export function SignInPanel({
         <div className="auth-panel__copy">
           <span className="auth-eyebrow">Shift Canvas</span>
           <h1 className="auth-title">Sign In</h1>
-          <p className="auth-subtitle">Choose the role and workspace view you want to enter.</p>
+          <p className="auth-subtitle">Use an email to enter the demo workspace.</p>
         </div>
 
         <form action={signIn} className="auth-form">
           <label className="field">
-            <span>Role</span>
-            <select
-              name="role"
-              value={role}
-              onChange={(event) => setRole(event.target.value as AppRole)}
-            >
-              <option value="admin">Admin</option>
-              <option value="leader">Leader</option>
-              <option value="worker">Worker</option>
-            </select>
+            <span>Email</span>
+            <input type="email" name="email" placeholder="you@company.com" required />
           </label>
 
-          {role === "leader" ? (
-            <label className="field">
-              <span>Assigned shift</span>
-              <select
-                name="scheduleId"
-                value={selectedScheduleId}
-                onChange={(event) => setSelectedScheduleId(event.target.value)}
-              >
-                {schedules.map((schedule) => (
-                  <option key={schedule.id} value={schedule.id}>
-                    Shift {schedule.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          {role === "worker" ? (
-            <>
-              <label className="field">
-                <span>Worker</span>
-                <select
-                  name="employeeId"
-                  value={selectedEmployeeId}
-                  onChange={(event) => setSelectedEmployeeId(event.target.value)}
-                >
-                  {employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>
-                      {employee.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {selectedEmployee ? (
-                <div className="auth-selection-note">
-                  <strong>{selectedEmployee.name}</strong>
-                  <span>Shift {selectedEmployee.scheduleName}</span>
-                </div>
-              ) : null}
-            </>
-          ) : null}
+          {errorMessage ? <p className="auth-error">{errorMessage}</p> : null}
 
           <button type="submit" className="primary-button auth-submit">
-            Enter workspace
+            Sign in
           </button>
         </form>
+
+        <div className="auth-directory">
+          <div className="auth-directory__header">
+            <strong>Demo accounts</strong>
+            <span>Use any of these emails right now.</span>
+          </div>
+          <div className="auth-directory__list">
+            {accounts.map((account) => (
+              <article key={account.email} className="auth-account">
+                <div>
+                  <span className="auth-account__role">{account.roleTitle}</span>
+                  <strong>{account.email}</strong>
+                </div>
+                <p>{account.helperText}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <p className="auth-switch">
+          Need a fresh demo identity? <Link href="/sign-up">Create demo access</Link>
+        </p>
       </div>
     </section>
   );
