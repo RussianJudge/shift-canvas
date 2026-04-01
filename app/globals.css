@@ -30,6 +30,10 @@ body {
   font-family: var(--font-body), sans-serif;
 }
 
+a {
+  color: inherit;
+}
+
 button,
 input,
 select {
@@ -98,6 +102,34 @@ select {
   font-family: var(--font-display), sans-serif;
   font-size: 1.4rem;
   font-weight: 600;
+}
+
+.workspace-session {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: auto;
+  padding: 0.9rem 0.75rem 0.35rem;
+  border-top: 1px solid var(--line);
+}
+
+.workspace-session__meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.workspace-session__meta strong {
+  font-size: 0.92rem;
+}
+
+.workspace-session__meta span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.workspace-session__signout {
+  width: 100%;
 }
 
 .sidebar-toggle {
@@ -195,6 +227,290 @@ select {
     var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.68);
   overflow: hidden;
+}
+
+.landing-shell {
+  display: grid;
+  gap: 0;
+  min-height: 100vh;
+}
+
+.landing-hero,
+.landing-band,
+.landing-detail,
+.landing-cta {
+  padding-inline: clamp(1.2rem, 5vw, 4rem);
+}
+
+.landing-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(20rem, 0.95fr);
+  gap: 2rem;
+  align-items: stretch;
+  min-height: 100vh;
+  padding-block: clamp(1.5rem, 4vw, 3rem);
+}
+
+.landing-hero__copy {
+  display: grid;
+  align-content: center;
+  gap: 1.2rem;
+  max-width: 34rem;
+}
+
+.landing-kicker,
+.landing-band__label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.landing-hero__copy h1,
+.landing-band h2,
+.landing-detail h2,
+.landing-cta h2 {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  line-height: 0.96;
+  letter-spacing: -0.05em;
+}
+
+.landing-hero__copy h1 {
+  font-size: clamp(3.4rem, 8vw, 6.8rem);
+}
+
+.landing-hero__copy p,
+.landing-band p,
+.landing-detail p,
+.landing-cta p {
+  margin: 0;
+  color: #4b433b;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.landing-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.landing-hero__visual {
+  display: grid;
+  align-items: stretch;
+}
+
+.landing-blueprint {
+  min-height: 28rem;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 1.1rem;
+  padding: clamp(1.2rem, 3vw, 2rem);
+  border: 1px solid rgba(255, 255, 255, 0.46);
+  border-radius: 2rem;
+  background:
+    linear-gradient(180deg, rgba(20, 27, 38, 0.9), rgba(36, 48, 68, 0.92)),
+    radial-gradient(circle at top right, rgba(251, 191, 36, 0.18), transparent 30%);
+  color: #f8f3ea;
+  box-shadow: 0 24px 60px rgba(12, 18, 28, 0.28);
+}
+
+.landing-blueprint__rail,
+.landing-blueprint__grid,
+.landing-blueprint__roles {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1.2rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.landing-blueprint__rail,
+.landing-blueprint__roles {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+}
+
+.landing-blueprint__grid {
+  display: grid;
+  align-content: space-between;
+  padding: 1.1rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: auto, 3.2rem 3.2rem, 3.2rem 3.2rem;
+}
+
+.landing-blueprint strong,
+.landing-role-grid strong,
+.landing-columns strong {
+  font-size: 1rem;
+}
+
+.landing-blueprint span,
+.landing-role-grid span {
+  color: rgba(248, 243, 234, 0.72);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.landing-blueprint__roles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.landing-blueprint__roles div,
+.landing-role-grid article,
+.landing-columns article {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.landing-band,
+.landing-detail,
+.landing-cta {
+  padding-block: 3.5rem;
+}
+
+.landing-band {
+  display: grid;
+  gap: 1.8rem;
+  background: rgba(255, 250, 242, 0.52);
+  border-top: 1px solid rgba(255, 255, 255, 0.45);
+  border-bottom: 1px solid rgba(23, 20, 17, 0.06);
+}
+
+.landing-columns,
+.landing-role-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.2rem;
+}
+
+.landing-detail {
+  display: grid;
+  gap: 1.8rem;
+}
+
+.landing-role-grid article {
+  padding: 1.2rem 0 0;
+  border-top: 1px solid rgba(23, 20, 17, 0.1);
+}
+
+.landing-role-grid span {
+  color: var(--muted);
+}
+
+.landing-cta {
+  display: grid;
+  gap: 1rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(250, 243, 234, 0.76)),
+    rgba(255, 250, 242, 0.52);
+}
+
+.auth-shell {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.auth-panel {
+  width: min(32rem, 100%);
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 1.7rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 249, 240, 0.9)),
+    var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.auth-panel__copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.auth-eyebrow {
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.auth-title {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(2.3rem, 6vw, 3.2rem);
+  line-height: 0.96;
+  letter-spacing: -0.04em;
+}
+
+.auth-subtitle {
+  margin: 0;
+  color: var(--muted);
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.auth-selection-note {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  background: rgba(255, 252, 247, 0.84);
+  border: 1px solid var(--line);
+}
+
+.auth-selection-note span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.auth-submit {
+  width: 100%;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  padding: 0 1.5rem 1rem;
+}
+
+.profile-card {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 252, 247, 0.82);
+}
+
+.profile-card strong {
+  font-size: 1rem;
+}
+
+.profile-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.profile-section {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0 1.5rem 1.5rem;
 }
 
 .panel-heading {
@@ -330,11 +646,25 @@ select {
   gap: 0.45rem;
 }
 
+.field--static {
+  align-content: start;
+}
+
 .field span {
   font-size: 0.8rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.field--static strong {
+  min-height: 2.65rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .field select,
@@ -1241,6 +1571,17 @@ select {
 }
 
 @media (max-width: 1100px) {
+  .landing-hero,
+  .landing-columns,
+  .landing-role-grid,
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-hero {
+    min-height: auto;
+  }
+
   .shell {
     padding: 1rem;
   }
@@ -1264,6 +1605,12 @@ select {
     border-right: 0;
     border-bottom: 1px solid var(--line);
     gap: 1rem;
+  }
+
+  .workspace-session {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
   }
 
   .workspace-brand-row {
@@ -1342,6 +1689,31 @@ select {
 }
 
 @media (max-width: 720px) {
+  .landing-hero,
+  .landing-band,
+  .landing-detail,
+  .landing-cta {
+    padding-inline: 1rem;
+  }
+
+  .landing-blueprint__rail,
+  .landing-blueprint__roles {
+    grid-template-columns: 1fr;
+    justify-content: flex-start;
+  }
+
+  .landing-blueprint__roles {
+    display: grid;
+  }
+
+  .auth-shell {
+    padding: 1rem;
+  }
+
+  .auth-panel {
+    padding: 1.2rem;
+  }
+
   .planner-actions {
     width: 100%;
     flex-direction: column;
@@ -1386,6 +1758,14 @@ select {
 
   .employee-name-compact {
     display: inline;
+  }
+
+  .profile-grid {
+    padding-inline: 1rem;
+  }
+
+  .profile-section {
+    padding-inline: 1rem;
   }
 
   .planner-topline {

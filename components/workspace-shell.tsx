@@ -4,6 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { signOut } from "@/app/auth-actions";
+import type { AppSession } from "@/lib/types";
+
 function ScheduleIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -53,6 +56,15 @@ function PersonnelIcon() {
   );
 }
 
+function ProfileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5.25a3.75 3.75 0 1 1 0 7.5a3.75 3.75 0 0 1 0-7.5Z" />
+      <path d="M4.5 19.25a7.5 7.5 0 0 1 15 0" />
+    </svg>
+  );
+}
+
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -91,10 +103,32 @@ function NavLink({
 
 export function WorkspaceShell({
   children,
+  viewer,
 }: {
   children: React.ReactNode;
+  viewer: AppSession;
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const navItems =
+    viewer.role === "admin"
+      ? [
+          { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
+          { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
+          { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
+          { href: "/schedules", label: "Shifts", icon: <PatternsIcon /> },
+          { href: "/competencies", label: "Competencies", icon: <CompetenciesIcon /> },
+          { href: "/time-codes", label: "Time Codes", icon: <TimeCodesIcon /> },
+        ]
+      : viewer.role === "leader"
+      ? [
+          { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
+          { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
+          { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
+        ]
+      : [
+          { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
+          { href: "/profile", label: "My Profile", icon: <ProfileIcon /> },
+        ];
 
   return (
     <main className="shell">
@@ -103,6 +137,7 @@ export function WorkspaceShell({
           <div className="workspace-brand-row">
             <div className="workspace-brand">
               <strong>Shift Canvas</strong>
+              <span>{viewer.role === "admin" ? "Administrator" : viewer.displayName}</span>
             </div>
             <button
               type="button"
@@ -116,13 +151,22 @@ export function WorkspaceShell({
           </div>
 
           <nav className="workspace-nav" aria-label="Primary">
-            <NavLink href="/" label="Schedule" icon={<ScheduleIcon />} />
-            <NavLink href="/overtime" label="Overtime" icon={<OvertimeIcon />} />
-            <NavLink href="/personnel" label="Personnel" icon={<PersonnelIcon />} />
-            <NavLink href="/schedules" label="Shifts" icon={<PatternsIcon />} />
-            <NavLink href="/competencies" label="Competencies" icon={<CompetenciesIcon />} />
-            <NavLink href="/time-codes" label="Time Codes" icon={<TimeCodesIcon />} />
+            {navItems.map((item) => (
+              <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} />
+            ))}
           </nav>
+
+          <form action={signOut} className="workspace-session">
+            <div className="workspace-session__meta">
+              <strong>{viewer.displayName}</strong>
+              <span>
+                {viewer.role === "leader" && viewer.scheduleName ? `Shift ${viewer.scheduleName}` : viewer.role}
+              </span>
+            </div>
+            <button type="submit" className="ghost-button workspace-session__signout">
+              Sign out
+            </button>
+          </form>
         </aside>
 
         <div className="workspace-content">{children}</div>

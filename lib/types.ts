@@ -1,4 +1,5 @@
 export type ShiftKind = "DAY" | "NIGHT" | "OFF";
+export type AppRole = "admin" | "leader" | "worker";
 
 export type ScheduleCode = "601" | "602" | "603" | "604";
 
@@ -68,6 +69,14 @@ export interface CompletedSet {
   endDate: string;
 }
 
+export interface AppSession {
+  role: AppRole;
+  displayName: string;
+  scheduleId: string | null;
+  employeeId: string | null;
+  scheduleName: string | null;
+}
+
 export interface SchedulerSnapshot {
   month: string;
   schedules: Schedule[];
@@ -80,6 +89,7 @@ export interface SchedulerSnapshot {
 }
 
 export interface SaveAssignmentsInput {
+  scheduleId: string;
   updates: StoredAssignment[];
 }
 

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import type {
+  AppRole,
   ClaimOvertimePostingInput,
   ReleaseOvertimePostingInput,
   SaveAssignmentsInput,
@@ -24,6 +25,7 @@ import {
   getWorkedSetDays,
   shiftForDate,
 } from "@/lib/scheduling";
+import { getAppSession } from "@/lib/auth";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
@@ -35,6 +37,16 @@ function isBlank(value: string) {
 function hasValidShiftPattern(dayShiftDays: number, nightShiftDays: number, offDays: number) {
   return [dayShiftDays, nightShiftDays, offDays].every((value) => Number.isInteger(value) && value >= 0) &&
     dayShiftDays + nightShiftDays + offDays > 0;
+}
+
+async function requireActionRole(allowedRoles: AppRole[]) {
+  const session = await getAppSession();
+
+  if (!session || !allowedRoles.includes(session.role)) {
+    return null;
+  }
+
+  return session;
 }
 
 async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: string[]) {
@@ -139,6 +151,22 @@ async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: 
 }
 
 export async function saveAssignments(input: SaveAssignmentsInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to change schedule assignments.",
+    };
+  }
+
+  if (session.role === "leader" && session.scheduleId !== input.scheduleId) {
+    return {
+      ok: false,
+      message: "Leaders can only save assignments for their own shift.",
+    };
+  }
+
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -206,7 +234,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     input.updates.map((update) => update.date.slice(0, 7)),
   );
 
-  revalidatePath("/");
+  revalidatePath("/schedule");
   revalidatePath("/overtime");
 
   return {
@@ -220,6 +248,22 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
 }
 
 export async function setScheduleSetCompletion(input: SetScheduleCompletionInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to complete sets.",
+    };
+  }
+
+  if (session.role === "leader" && session.scheduleId !== input.scheduleId) {
+    return {
+      ok: false,
+      message: "Leaders can only complete sets for their own shift.",
+    };
+  }
+
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -339,7 +383,7 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
     }
   }
 
-  revalidatePath("/");
+  revalidatePath("/schedule");
   revalidatePath("/overtime");
 
   return {
@@ -349,6 +393,22 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
 }
 
 export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to claim overtime postings.",
+    };
+  }
+
+  if (session.role === "leader" && session.scheduleId !== input.scheduleId) {
+    return {
+      ok: false,
+      message: "Leaders can only manage overtime for their own shift.",
+    };
+  }
+
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -463,7 +523,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     };
   }
 
-  revalidatePath("/");
+  revalidatePath("/schedule");
   revalidatePath("/overtime");
 
   return {
@@ -473,6 +533,22 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 }
 
 export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to release overtime postings.",
+    };
+  }
+
+  if (session.role === "leader" && session.scheduleId !== input.scheduleId) {
+    return {
+      ok: false,
+      message: "Leaders can only manage overtime for their own shift.",
+    };
+  }
+
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -525,7 +601,7 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     };
   }
 
-  revalidatePath("/");
+  revalidatePath("/schedule");
   revalidatePath("/overtime");
 
   return {
@@ -535,6 +611,25 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
 }
 
 export async function savePersonnel(input: SavePersonnelInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to manage personnel.",
+    };
+  }
+
+  if (
+    session.role === "leader" &&
+    input.updates.some((update) => update.scheduleId !== session.scheduleId)
+  ) {
+    return {
+      ok: false,
+      message: "Leaders can only manage workers on their assigned shift.",
+    };
+  }
+
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -615,6 +710,23 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   if (input.deletedEmployeeIds.length > 0) {
+    if (session.role === "leader") {
+      const deletedRowsResult = await supabase
+        .from("employees")
+        .select("id, schedule_id")
+        .in("id", input.deletedEmployeeIds);
+
+      if (
+        deletedRowsResult.error ||
+        (deletedRowsResult.data ?? []).some((row) => row.schedule_id !== session.scheduleId)
+      ) {
+        return {
+          ok: false,
+          message: "Leaders can only remove workers from their assigned shift.",
+        };
+      }
+    }
+
     const { error: deleteError } = await supabase
       .from("employees")
       .delete()
@@ -628,7 +740,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
     }
   }
 
-  revalidatePath("/");
+  revalidatePath("/schedule");
   revalidatePath("/personnel");
 
   return {
@@ -638,6 +750,15 @@ export async function savePersonnel(input: SavePersonnelInput) {
 }
 
 export async function saveSchedules(input: SaveSchedulesInput) {
+  const session = await requireActionRole(["admin"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins can change shift definitions.",
+    };
+  }
+
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -701,7 +822,7 @@ export async function saveSchedules(input: SaveSchedulesInput) {
     }
   }
 
-  revalidatePath("/");
+  revalidatePath("/schedule");
   revalidatePath("/personnel");
   revalidatePath("/schedules");
   revalidatePath("/competencies");
@@ -714,6 +835,15 @@ export async function saveSchedules(input: SaveSchedulesInput) {
 }
 
 export async function saveCompetencies(input: SaveCompetenciesInput) {
+  const session = await requireActionRole(["admin"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins can change competencies.",
+    };
+  }
+
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -777,7 +907,7 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
     }
   }
 
-  revalidatePath("/");
+  revalidatePath("/schedule");
   revalidatePath("/personnel");
   revalidatePath("/competencies");
   revalidatePath("/overtime");
@@ -789,6 +919,15 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
 }
 
 export async function saveTimeCodes(input: SaveTimeCodesInput) {
+  const session = await requireActionRole(["admin"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins can change time codes.",
+    };
+  }
+
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -850,7 +989,7 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
     }
   }
 
-  revalidatePath("/");
+  revalidatePath("/schedule");
   revalidatePath("/time-codes");
   revalidatePath("/overtime");
 

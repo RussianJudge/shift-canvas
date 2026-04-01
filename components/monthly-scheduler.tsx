@@ -306,14 +306,22 @@ function AssignmentModal({
 
 export function MonthlyScheduler({
   initialSnapshot,
+  canEdit,
+  canManageSetBuilder,
+  canSwitchSchedule,
+  forcedScheduleId,
 }: {
   initialSnapshot: SchedulerSnapshot;
+  canEdit: boolean;
+  canManageSetBuilder: boolean;
+  canSwitchSchedule: boolean;
+  forcedScheduleId: string | null;
 }) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [currentMonth, setCurrentMonth] = useState(initialSnapshot.month);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
-    initialSnapshot.schedules[0]?.id ?? "",
+    forcedScheduleId ?? initialSnapshot.schedules[0]?.id ?? "",
   );
   const [search, setSearch] = useState("");
   const [baselineAssignments, setBaselineAssignments] = useState(() =>
@@ -577,6 +585,14 @@ export function MonthlyScheduler({
   const gridColumns = `var(--schedule-name-column-width, 10.5rem) repeat(${monthDays.length}, minmax(3rem, 1fr))`;
 
   useEffect(() => {
+    if (!forcedScheduleId || selectedScheduleId === forcedScheduleId) {
+      return;
+    }
+
+    setSelectedScheduleId(forcedScheduleId);
+  }, [forcedScheduleId, selectedScheduleId]);
+
+  useEffect(() => {
     if (!selectedCell) {
       return;
     }
@@ -746,7 +762,9 @@ export function MonthlyScheduler({
         startTransition(() => {
           setSnapshot(nextSnapshot);
           setSelectedScheduleId((current) =>
-            nextSnapshot.schedules.some((schedule) => schedule.id === current)
+            forcedScheduleId && nextSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
+              ? forcedScheduleId
+              : nextSnapshot.schedules.some((schedule) => schedule.id === current)
               ? current
               : nextSnapshot.schedules[0]?.id ?? "",
           );
@@ -847,8 +865,12 @@ export function MonthlyScheduler({
   }
 
   function handleSave() {
+    if (!canEdit) {
+      return;
+    }
+
     startSaveTransition(async () => {
-      const result = await saveAssignments({ updates: dirtyUpdates });
+      const result = await saveAssignments({ scheduleId: activeSchedule.id, updates: dirtyUpdates });
 
       setStatusMessage(result.message);
 
@@ -859,6 +881,10 @@ export function MonthlyScheduler({
   }
 
   function handleRevert() {
+    if (!canEdit) {
+      return;
+    }
+
     startTransition(() => {
       setDraftAssignments(cloneAssignments(baselineAssignments));
       setDragRange(null);
@@ -868,7 +894,7 @@ export function MonthlyScheduler({
   }
 
   function handleSetCompletion() {
-    if (selectedSetDays.length === 0) {
+    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
       return;
     }
 
@@ -973,39 +999,48 @@ export function MonthlyScheduler({
               Next month
             </button>
           </div>
-          <div className="planner-actions__row planner-actions__row--save">
-            <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
-              Revert
-            </button>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={handleSave}
-              disabled={isSaving || !hasChanges}
-            >
-              {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
-            </button>
-          </div>
+          {canEdit ? (
+            <div className="planner-actions__row planner-actions__row--save">
+              <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+                Revert
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleSave}
+                disabled={isSaving || !hasChanges}
+              >
+                {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
       <div className="workspace-toolbar">
-        <label className="field">
-          <span>Shift</span>
-          <select
-            value={selectedScheduleId}
-            onChange={(event) => {
-              setSelectedScheduleId(event.target.value);
-              setSelectedCoverageCompetencyId(null);
-            }}
-          >
-            {snapshot.schedules.map((schedule) => (
-              <option key={schedule.id} value={schedule.id}>
-                {schedule.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {canSwitchSchedule ? (
+          <label className="field">
+            <span>Shift</span>
+            <select
+              value={selectedScheduleId}
+              onChange={(event) => {
+                setSelectedScheduleId(event.target.value);
+                setSelectedCoverageCompetencyId(null);
+              }}
+            >
+              {snapshot.schedules.map((schedule) => (
+                <option key={schedule.id} value={schedule.id}>
+                  {schedule.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="field field--static">
+            <span>Shift</span>
+            <strong>{activeSchedule.name}</strong>
+          </div>
+        )}
 
         <label className="field">
           <span>Search employee</span>
@@ -1022,6 +1057,7 @@ export function MonthlyScheduler({
         </div>
       </div>
 
+      {canManageSetBuilder ? (
       <section className="set-builder" aria-label="Set builder">
         <div className="set-builder-heading">
           <div>
@@ -1085,6 +1121,7 @@ export function MonthlyScheduler({
           })}
         </div>
       </section>
+      ) : null}
 
       <section className="schedule-wrap" aria-label="Monthly schedule grid">
         <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
@@ -1107,10 +1144,14 @@ export function MonthlyScheduler({
                   selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
                 } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
                 title={`${day.dayName} ${day.date}`}
-                onClick={() => {
-                  setSelectedSetAnchorDate(day.date);
-                  setSelectedCoverageCompetencyId(null);
-                }}
+                onClick={
+                  canManageSetBuilder
+                    ? () => {
+                        setSelectedSetAnchorDate(day.date);
+                        setSelectedCoverageCompetencyId(null);
+                      }
+                    : undefined
+                }
               >
                 <span>{day.dayName.slice(0, 1)}</span>
                 <strong>{day.dayNumber}</strong>
@@ -1134,9 +1175,14 @@ export function MonthlyScheduler({
               highlightedMissingDates={highlightedMissingDates}
               selectedCoverageCompetencyId={selectedCoverageCompetencyId}
               selectedSetDays={selectedSetDays}
+              canEdit={canEdit}
               onCellPointerDown={handleCellPointerDown}
               onDragHover={handleDragHover}
               onCellClick={(cell) => {
+                if (!canEdit) {
+                  return;
+                }
+
                 setSelectedCell(cell);
                 setEditorCell(cell);
               }}
@@ -1155,23 +1201,25 @@ export function MonthlyScheduler({
         </div>
       </section>
 
-      <AssignmentModal
-        selectedEmployee={editorEmployee}
-        selectedDate={editorCell?.date ?? null}
-        shiftKind={editorShiftKind}
-        selection={editorSelection}
-        competencies={editorEmployeeCompetencies}
-        timeCodes={snapshot.timeCodes}
-        onApply={(selection) => {
-          if (!editorCell) {
-            return;
-          }
+      {canEdit ? (
+        <AssignmentModal
+          selectedEmployee={editorEmployee}
+          selectedDate={editorCell?.date ?? null}
+          shiftKind={editorShiftKind}
+          selection={editorSelection}
+          competencies={editorEmployeeCompetencies}
+          timeCodes={snapshot.timeCodes}
+          onApply={(selection) => {
+            if (!editorCell) {
+              return;
+            }
 
-          handleAssignmentChange(editorCell.employeeId, editorCell.date, selection);
-          setEditorCell(null);
-        }}
-        onClose={() => setEditorCell(null)}
-      />
+            handleAssignmentChange(editorCell.employeeId, editorCell.date, selection);
+            setEditorCell(null);
+          }}
+          onClose={() => setEditorCell(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -1190,6 +1238,7 @@ function EmployeeRow({
   highlightedMissingDates,
   selectedCoverageCompetencyId,
   selectedSetDays,
+  canEdit,
   onCellPointerDown,
   onDragHover,
   onCellClick,
@@ -1207,6 +1256,7 @@ function EmployeeRow({
   highlightedMissingDates: Set<string>;
   selectedCoverageCompetencyId: string | null;
   selectedSetDays: Array<{ date: string }>;
+  canEdit: boolean;
   onCellPointerDown: (
     employeeId: string,
     date: string,
@@ -1286,14 +1336,14 @@ function EmployeeRow({
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
             }`}
             onPointerDown={(event) => {
-              if (event.button !== 0 || !isOvertimeCell || isLockedCell) {
+              if (event.button !== 0 || !canEdit || !isOvertimeCell || isLockedCell) {
                 return;
               }
 
               onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, effectiveSelection);
             }}
             onPointerEnter={(event) => {
-              if (isOvertimeCell && !isLockedCell && dragRange && event.buttons === 1) {
+              if (canEdit && isOvertimeCell && !isLockedCell && dragRange && event.buttons === 1) {
                 onDragHover(employee.sourceEmployeeId, dayIndex);
               }
             }}
@@ -1304,13 +1354,13 @@ function EmployeeRow({
                 activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
               }`}
               onClick={() => {
-                if (!isOvertimeCell || isLockedCell) {
+                if (!canEdit || !isOvertimeCell || isLockedCell) {
                   return;
                 }
 
                 onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date });
               }}
-              disabled={!isOvertimeCell || isLockedCell}
+              disabled={!canEdit || !isOvertimeCell || isLockedCell}
               aria-label={`${employee.name} ${day.date} assignment`}
             >
               {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
