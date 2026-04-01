@@ -115,6 +115,20 @@ function subsetSnapshot(
   };
 }
 
+function emptySnapshot(month: string, overrides: Partial<SchedulerSnapshot> = {}): SchedulerSnapshot {
+  return {
+    month,
+    productionUnits: [],
+    competencies: [],
+    timeCodes: [],
+    schedules: [],
+    assignments: [],
+    overtimeClaims: [],
+    completedSets: [],
+    ...overrides,
+  };
+}
+
 function getMonthBounds(month: string) {
   const [year, monthIndex] = month.split("-").map(Number);
   return {
@@ -409,12 +423,7 @@ export async function getPersonnelSnapshot(month: string) {
   const supabase = getDataClient();
 
   if (!supabase) {
-    return subsetSnapshot(month, {
-      timeCodes: [],
-      assignments: [],
-      overtimeClaims: [],
-      completedSets: [],
-    });
+    return emptySnapshot(month);
   }
 
   const [unitsResult, competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult] =
@@ -430,28 +439,17 @@ export async function getPersonnelSnapshot(month: string) {
       supabase.from("employee_competencies").select("employee_id, competency_id"),
     ]);
 
-  const results = [unitsResult, competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult];
-
-  if (results.some((result) => result.error)) {
-    return subsetSnapshot(month, {
-      timeCodes: [],
-      assignments: [],
-      overtimeClaims: [],
-      completedSets: [],
-    });
-  }
-
   const employeesBySchedule = buildEmployeesBySchedule(
-    employeesResult.data as EmployeeRow[],
-    employeeCompetenciesResult.data as EmployeeCompetencyRow[],
+    (employeesResult.data as EmployeeRow[] | null) ?? [],
+    (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
 
   return {
     month,
-    productionUnits: mapProductionUnits(unitsResult.data as ProductionUnitRow[]),
-    competencies: mapCompetencies(competenciesResult.data as CompetencyRow[]),
+    productionUnits: mapProductionUnits((unitsResult.data as ProductionUnitRow[] | null) ?? []),
+    competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
     timeCodes: [],
-    schedules: mapSchedules(schedulesResult.data as ScheduleRow[], employeesBySchedule),
+    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
     completedSets: [],
@@ -462,13 +460,7 @@ export async function getSchedulesSnapshot(month: string) {
   const supabase = getDataClient();
 
   if (!supabase) {
-    return subsetSnapshot(month, {
-      competencies: [],
-      timeCodes: [],
-      assignments: [],
-      overtimeClaims: [],
-      completedSets: [],
-    });
+    return emptySnapshot(month);
   }
 
   const [schedulesResult, employeesResult] = await Promise.all([
@@ -476,18 +468,8 @@ export async function getSchedulesSnapshot(month: string) {
     supabase.from("employees").select("id, schedule_id, unit_id, full_name, role_title").eq("is_active", true),
   ]);
 
-  if (schedulesResult.error || employeesResult.error) {
-    return subsetSnapshot(month, {
-      competencies: [],
-      timeCodes: [],
-      assignments: [],
-      overtimeClaims: [],
-      completedSets: [],
-    });
-  }
-
   const employeesBySchedule = buildEmployeesBySchedule(
-    employeesResult.data as EmployeeRow[],
+    (employeesResult.data as EmployeeRow[] | null) ?? [],
     [],
   );
 
@@ -496,7 +478,7 @@ export async function getSchedulesSnapshot(month: string) {
     productionUnits: [],
     competencies: [],
     timeCodes: [],
-    schedules: mapSchedules(schedulesResult.data as ScheduleRow[], employeesBySchedule),
+    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
     completedSets: [],
@@ -507,12 +489,7 @@ export async function getCompetenciesSnapshot(month: string) {
   const supabase = getDataClient();
 
   if (!supabase) {
-    return subsetSnapshot(month, {
-      timeCodes: [],
-      assignments: [],
-      overtimeClaims: [],
-      completedSets: [],
-    });
+    return emptySnapshot(month);
   }
 
   const [competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult] = await Promise.all([
@@ -526,28 +503,17 @@ export async function getCompetenciesSnapshot(month: string) {
     supabase.from("employee_competencies").select("employee_id, competency_id"),
   ]);
 
-  const results = [competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult];
-
-  if (results.some((result) => result.error)) {
-    return subsetSnapshot(month, {
-      timeCodes: [],
-      assignments: [],
-      overtimeClaims: [],
-      completedSets: [],
-    });
-  }
-
   const employeesBySchedule = buildEmployeesBySchedule(
-    employeesResult.data as EmployeeRow[],
-    employeeCompetenciesResult.data as EmployeeCompetencyRow[],
+    (employeesResult.data as EmployeeRow[] | null) ?? [],
+    (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
 
   return {
     month,
     productionUnits: [],
-    competencies: mapCompetencies(competenciesResult.data as CompetencyRow[]),
+    competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
     timeCodes: [],
-    schedules: mapSchedules(schedulesResult.data as ScheduleRow[], employeesBySchedule),
+    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
     completedSets: [],
@@ -558,13 +524,7 @@ export async function getTimeCodesSnapshot(month: string) {
   const supabase = getDataClient();
 
   if (!supabase) {
-    return subsetSnapshot(month, {
-      competencies: [],
-      schedules: [],
-      assignments: [],
-      overtimeClaims: [],
-      completedSets: [],
-    });
+    return emptySnapshot(month);
   }
 
   const timeCodesResult = await supabase
@@ -572,21 +532,11 @@ export async function getTimeCodesSnapshot(month: string) {
     .select("id, code, label, color_token")
     .order("code");
 
-  if (timeCodesResult.error) {
-    return subsetSnapshot(month, {
-      competencies: [],
-      schedules: [],
-      assignments: [],
-      overtimeClaims: [],
-      completedSets: [],
-    });
-  }
-
   return {
     month,
     productionUnits: [],
     competencies: [],
-    timeCodes: mapTimeCodes(timeCodesResult.data as TimeCodeRow[]),
+    timeCodes: mapTimeCodes((timeCodesResult.data as TimeCodeRow[] | null) ?? []),
     schedules: [],
     assignments: [],
     overtimeClaims: [],
