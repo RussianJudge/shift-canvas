@@ -11,7 +11,7 @@ export default async function OvertimePage({
 }: {
   searchParams?: Promise<{ month?: string }>;
 }) {
-  const session = await requireAppSession(["admin", "leader"]);
+  const session = await requireAppSession(["admin", "leader", "worker"]);
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const availableMonths = await getOvertimeMonths(currentMonth);
@@ -22,19 +22,10 @@ export default async function OvertimePage({
       ? currentMonth
       : availableMonths[0] ?? currentMonth;
   const snapshot = await getSchedulerSnapshot(month);
-  const scopedSnapshot =
-    session.role === "leader" && session.scheduleId
-      ? {
-          ...snapshot,
-          schedules: snapshot.schedules.filter((schedule) => schedule.id === session.scheduleId),
-          overtimeClaims: snapshot.overtimeClaims.filter((claim) => claim.scheduleId === session.scheduleId),
-          completedSets: snapshot.completedSets.filter((entry) => entry.scheduleId === session.scheduleId),
-        }
-      : snapshot;
 
   return (
     <WorkspaceShell viewer={session}>
-      <OvertimePanel snapshot={scopedSnapshot} availableMonths={availableMonths} />
+      <OvertimePanel snapshot={snapshot} availableMonths={availableMonths} viewer={session} />
     </WorkspaceShell>
   );
 }

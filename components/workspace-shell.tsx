@@ -127,6 +127,7 @@ export function WorkspaceShell({
         ]
       : [
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
+          { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
           { href: "/profile", label: "My Profile", icon: <ProfileIcon /> },
         ];
 
@@ -159,9 +160,7 @@ export function WorkspaceShell({
           <form action={signOut} className="workspace-session">
             <div className="workspace-session__meta">
               <strong>{viewer.displayName}</strong>
-              <span>
-                {viewer.role === "leader" && viewer.scheduleName ? `Shift ${viewer.scheduleName}` : viewer.role}
-              </span>
+              <span>{viewer.role}</span>
             </div>
             <button type="submit" className="ghost-button workspace-session__signout">
               Sign out

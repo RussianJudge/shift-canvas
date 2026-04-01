@@ -1,4 +1,4 @@
-import type { AppRole, AppSession } from "@/lib/types";
+import type { AppSession } from "@/lib/types";
 
 export type DemoAccount = AppSession & {
   roleTitle: string;
@@ -20,7 +20,7 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
     email: "leader@shiftcanvas.demo",
     role: "leader",
     roleTitle: "Leader",
-    helperText: "Assigned to Shift 1 with access to schedule and personnel changes for that shift.",
+    helperText: "Access to schedule, overtime, and personnel changes across all shifts.",
     displayName: "Jordan Leader",
     scheduleId: "schedule-601",
     employeeId: null,
@@ -30,7 +30,7 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
     email: "worker@shiftcanvas.demo",
     role: "worker",
     roleTitle: "Worker",
-    helperText: "Read-only schedule access plus a personal worker profile.",
+    helperText: "Can view all shifts, claim overtime as themselves, and manage their own profile.",
     displayName: "Ava Patel",
     scheduleId: "schedule-601",
     employeeId: "emp-ava",
@@ -38,34 +38,10 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
   },
 ];
 
-function titleCaseFromEmail(email: string) {
-  const localPart = email.split("@")[0] ?? "";
-
-  return localPart
-    .split(/[.\-_+]+/)
-    .filter(Boolean)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
-}
-
 export function getDemoAccounts() {
   return DEMO_ACCOUNTS;
 }
 
 export function getDemoAccountByEmail(email: string) {
   return DEMO_ACCOUNTS.find((account) => account.email.toLowerCase() === email.trim().toLowerCase()) ?? null;
-}
-
-export function buildDemoSession(email: string, role: AppRole) {
-  const template = DEMO_ACCOUNTS.find((account) => account.role === role);
-
-  if (!template) {
-    return null;
-  }
-
-  return {
-    ...template,
-    email: email.trim().toLowerCase(),
-    displayName: role === "worker" ? template.displayName : titleCaseFromEmail(email) || template.displayName,
-  } satisfies AppSession;
 }

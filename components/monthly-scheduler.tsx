@@ -857,7 +857,7 @@ export function MonthlyScheduler({
     startMonthTransition(() => {
       setCurrentMonth((current) => {
         const nextMonth = addMonths(current, delta);
-        router.push(`/?month=${nextMonth}`, { scroll: false });
+        router.push(`/schedule?month=${nextMonth}`, { scroll: false });
         return nextMonth;
       });
       setStatusMessage("Changing month");

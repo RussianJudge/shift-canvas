@@ -160,13 +160,6 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     };
   }
 
-  if (session.role === "leader" && session.scheduleId !== input.scheduleId) {
-    return {
-      ok: false,
-      message: "Leaders can only save assignments for their own shift.",
-    };
-  }
-
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -254,13 +247,6 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
     return {
       ok: false,
       message: "You do not have permission to complete sets.",
-    };
-  }
-
-  if (session.role === "leader" && session.scheduleId !== input.scheduleId) {
-    return {
-      ok: false,
-      message: "Leaders can only complete sets for their own shift.",
     };
   }
 
@@ -393,7 +379,7 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
 }
 
 export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
-  const session = await requireActionRole(["admin", "leader"]);
+  const session = await requireActionRole(["admin", "leader", "worker"]);
 
   if (!session) {
     return {
@@ -402,10 +388,10 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     };
   }
 
-  if (session.role === "leader" && session.scheduleId !== input.scheduleId) {
+  if (session.role === "worker" && session.employeeId !== input.employeeId) {
     return {
       ok: false,
-      message: "Leaders can only manage overtime for their own shift.",
+      message: "Workers can only claim overtime as themselves.",
     };
   }
 
@@ -533,7 +519,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 }
 
 export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput) {
-  const session = await requireActionRole(["admin", "leader"]);
+  const session = await requireActionRole(["admin", "leader", "worker"]);
 
   if (!session) {
     return {
@@ -542,10 +528,10 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     };
   }
 
-  if (session.role === "leader" && session.scheduleId !== input.scheduleId) {
+  if (session.role === "worker" && session.employeeId !== input.employeeId) {
     return {
       ok: false,
-      message: "Leaders can only manage overtime for their own shift.",
+      message: "Workers can only release their own overtime claims.",
     };
   }
 
@@ -617,16 +603,6 @@ export async function savePersonnel(input: SavePersonnelInput) {
     return {
       ok: false,
       message: "You do not have permission to manage personnel.",
-    };
-  }
-
-  if (
-    session.role === "leader" &&
-    input.updates.some((update) => update.scheduleId !== session.scheduleId)
-  ) {
-    return {
-      ok: false,
-      message: "Leaders can only manage workers on their assigned shift.",
     };
   }
 
@@ -710,23 +686,6 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   if (input.deletedEmployeeIds.length > 0) {
-    if (session.role === "leader") {
-      const deletedRowsResult = await supabase
-        .from("employees")
-        .select("id, schedule_id")
-        .in("id", input.deletedEmployeeIds);
-
-      if (
-        deletedRowsResult.error ||
-        (deletedRowsResult.data ?? []).some((row) => row.schedule_id !== session.scheduleId)
-      ) {
-        return {
-          ok: false,
-          message: "Leaders can only remove workers from their assigned shift.",
-        };
-      }
-    }
-
     const { error: deleteError } = await supabase
       .from("employees")
       .delete()

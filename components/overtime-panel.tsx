@@ -15,7 +15,7 @@ import {
   getWorkedSetDays,
   shiftForDate,
 } from "@/lib/scheduling";
-import type { Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
+import type { AppSession, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
 
 type OvertimePosting = {
   id: string;
@@ -30,7 +30,8 @@ type OvertimePosting = {
   staffedPeople: number;
   requiredStaff: number;
   openShifts: number;
-  claimedBySelectedEmployee: boolean;
+  claimedEmployeeId: string | null;
+  claimedByName: string | null;
 };
 
 function formatShortDate(isoDate: string) {
@@ -157,13 +158,17 @@ function getClaimStatus(
 export function OvertimePanel({
   snapshot,
   availableMonths,
+  viewer,
 }: {
   snapshot: SchedulerSnapshot;
   availableMonths: string[];
+  viewer: AppSession;
 }) {
   const router = useRouter();
   const [claimingEmployeeId, setClaimingEmployeeId] = useState(
-    snapshot.schedules.flatMap((schedule) => schedule.employees).sort((left, right) => left.name.localeCompare(right.name))[0]?.id ?? "",
+    viewer.role === "worker"
+      ? viewer.employeeId ?? ""
+      : snapshot.schedules.flatMap((schedule) => schedule.employees).sort((left, right) => left.name.localeCompare(right.name))[0]?.id ?? "",
   );
   const [selectedScheduleFilter, setSelectedScheduleFilter] = useState("all");
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
@@ -254,22 +259,62 @@ export function OvertimePanel({
               .map((claim) => claim.date)
               .sort();
 
-            if (claimedDates.length > 0) {
-              nextPostings.push({
-                id: `claimed:${schedule.id}:${competency.id}:${claimedDates[0]}`,
-                scheduleId: schedule.id,
-                scheduleName: schedule.name,
-                shiftKind: segment.shiftKind,
-                competencyId: competency.id,
-                competencyCode: competency.code,
-                competencyLabel: competency.label,
-                colorToken: competency.colorToken,
-                dates: claimedDates,
-                staffedPeople,
-                requiredStaff: competency.requiredStaff,
-                openShifts: claimedDates.length,
-                claimedBySelectedEmployee: true,
-              });
+            const claimDatesByEmployee = snapshot.overtimeClaims.reduce<Record<string, string[]>>((map, claim) => {
+              if (
+                claim.scheduleId === schedule.id &&
+                claim.competencyId === competency.id &&
+                setDates.includes(claim.date)
+              ) {
+                map[claim.employeeId] ??= [];
+                map[claim.employeeId].push(claim.date);
+              }
+
+              return map;
+            }, {});
+
+            for (const [employeeId, employeeDates] of Object.entries(claimDatesByEmployee)) {
+              const orderedDates = setDates.filter((date) => employeeDates.includes(date));
+              const claimEmployee = employeeMap[employeeId];
+              let currentRun: string[] = [];
+
+              const flushRun = () => {
+                if (currentRun.length === 0) {
+                  return;
+                }
+
+                nextPostings.push({
+                  id: `claimed:${schedule.id}:${competency.id}:${employeeId}:${currentRun[0]}`,
+                  scheduleId: schedule.id,
+                  scheduleName: schedule.name,
+                  shiftKind: segment.shiftKind,
+                  competencyId: competency.id,
+                  competencyCode: competency.code,
+                  competencyLabel: competency.label,
+                  colorToken: competency.colorToken,
+                  dates: [...currentRun],
+                  staffedPeople,
+                  requiredStaff: competency.requiredStaff,
+                  openShifts: currentRun.length,
+                  claimedEmployeeId: employeeId,
+                  claimedByName: claimEmployee?.name ?? "Unknown worker",
+                });
+                currentRun = [];
+              };
+
+              for (let index = 0; index < orderedDates.length; index += 1) {
+                const date = orderedDates[index];
+                const previousDate = orderedDates[index - 1];
+                const currentDateIndex = setDates.indexOf(date);
+                const previousDateIndex = previousDate ? setDates.indexOf(previousDate) : -1;
+
+                if (previousDate && currentDateIndex !== previousDateIndex + 1) {
+                  flushRun();
+                }
+
+                currentRun.push(date);
+              }
+
+              flushRun();
             }
 
             for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
@@ -292,7 +337,8 @@ export function OvertimePanel({
                 staffedPeople,
                 requiredStaff: competency.requiredStaff,
                 openShifts: postingDates.length,
-                claimedBySelectedEmployee: false,
+                claimedEmployeeId: null,
+                claimedByName: null,
               });
             }
           }
@@ -301,15 +347,15 @@ export function OvertimePanel({
     }
 
     return nextPostings.sort((left, right) =>
-      Number(right.claimedBySelectedEmployee) - Number(left.claimedBySelectedEmployee) ||
+      Number(Boolean(right.claimedEmployeeId)) - Number(Boolean(left.claimedEmployeeId)) ||
       left.scheduleName.localeCompare(right.scheduleName) ||
       left.dates[0].localeCompare(right.dates[0]) ||
       left.shiftKind.localeCompare(right.shiftKind) ||
-      left.competencyCode.localeCompare(right.competencyCode),
+      left.competencyCode.localeCompare(right.competencyCode) ||
+      (left.claimedByName ?? "").localeCompare(right.claimedByName ?? ""),
     );
   }, [
     assignmentIndex,
-    claimingEmployeeId,
     completedSetRangeKeys,
     employeeMap,
     extendedMonthDays,
@@ -427,19 +473,26 @@ export function OvertimePanel({
           </select>
         </label>
 
-        <label className="field">
-          <span>Claim As</span>
-          <select
-            value={claimingEmployeeId}
-            onChange={(event) => setClaimingEmployeeId(event.target.value)}
-          >
-            {allEmployees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {viewer.role === "worker" ? (
+          <div className="field field--static">
+            <span>Claim As</span>
+            <strong>{claimingEmployee?.name ?? viewer.displayName}</strong>
+          </div>
+        ) : (
+          <label className="field">
+            <span>Claim As</span>
+            <select
+              value={claimingEmployeeId}
+              onChange={(event) => setClaimingEmployeeId(event.target.value)}
+            >
+              {allEmployees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label className="field">
           <span>Team</span>
@@ -496,7 +549,7 @@ export function OvertimePanel({
                 return (
                   <article
                     key={posting.id}
-                    className={`overtime-card ${posting.claimedBySelectedEmployee ? "overtime-card--claimed" : ""}`}
+                    className={`overtime-card ${posting.claimedEmployeeId ? "overtime-card--claimed" : ""}`}
                   >
                     <div className="overtime-card-top">
                       <div>
@@ -515,20 +568,28 @@ export function OvertimePanel({
 
                     <div className="overtime-card-actions">
                       <span className="overtime-card-hint">
-                        {posting.claimedBySelectedEmployee ? "Claimed by selected employee" : claimStatus.reason}
+                        {posting.claimedByName ? `Claimed by ${posting.claimedByName}` : claimStatus.reason}
                       </span>
                       <button
                         type="button"
                         className="primary-button"
-                        onClick={() => (posting.claimedBySelectedEmployee ? handleRelease(posting) : handleClaim(posting))}
-                        disabled={isClaiming || (!posting.claimedBySelectedEmployee && !claimStatus.canClaim)}
+                        onClick={() =>
+                          posting.claimedEmployeeId === claimingEmployeeId ? handleRelease(posting) : handleClaim(posting)
+                        }
+                        disabled={
+                          isClaiming ||
+                          (posting.claimedEmployeeId !== null && posting.claimedEmployeeId !== claimingEmployeeId) ||
+                          (posting.claimedEmployeeId === null && !claimStatus.canClaim)
+                        }
                       >
                         {isClaiming
-                          ? posting.claimedBySelectedEmployee
+                          ? posting.claimedEmployeeId === claimingEmployeeId
                             ? "Releasing..."
                             : "Claiming..."
-                          : posting.claimedBySelectedEmployee
+                          : posting.claimedEmployeeId === claimingEmployeeId
                           ? "Release Posting"
+                          : posting.claimedEmployeeId
+                          ? "Claimed"
                           : "Claim Posting"}
                       </button>
                     </div>

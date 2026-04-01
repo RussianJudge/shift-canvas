@@ -10,17 +10,10 @@ export default async function PersonnelPage() {
   const session = await requireAppSession(["admin", "leader"]);
   const month = getCurrentMonthKey("America/Edmonton");
   const snapshot = await getPersonnelSnapshot(month);
-  const scopedSnapshot =
-    session.role === "leader" && session.scheduleId
-      ? {
-          ...snapshot,
-          schedules: snapshot.schedules.filter((schedule) => schedule.id === session.scheduleId),
-        }
-      : snapshot;
 
   return (
     <WorkspaceShell viewer={session}>
-      <PersonnelPanel snapshot={scopedSnapshot} />
+      <PersonnelPanel snapshot={snapshot} />
     </WorkspaceShell>
   );
 }

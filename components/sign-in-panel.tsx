@@ -1,7 +1,5 @@
 "use client";
 
-import Link from "next/link";
-
 import { signIn } from "@/app/auth-actions";
 import type { DemoAccount } from "@/lib/demo-users";
 
@@ -11,7 +9,7 @@ function getErrorMessage(error: string | undefined) {
   }
 
   if (error === "unknown-email") {
-    return "That email is not in the demo access list yet. Use one of the demo accounts below or sign up.";
+    return "That email is not in the demo access list yet. Use one of the demo accounts below.";
   }
 
   return "";
@@ -65,10 +63,6 @@ export function SignInPanel({
             ))}
           </div>
         </div>
-
-        <p className="auth-switch">
-          Need a fresh demo identity? <Link href="/sign-up">Create demo access</Link>
-        </p>
       </div>
     </section>
   );

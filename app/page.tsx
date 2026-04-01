@@ -23,17 +23,11 @@ export default async function HomePage() {
           <Link href={primaryHref} className="primary-button">
             {session ? "Open workspace" : "Log in"}
           </Link>
-          {!session ? (
-            <Link href="/sign-up" className="ghost-button">
-              Sign up
-            </Link>
-          ) : null}
         </div>
 
         {!session ? (
           <div className="auth-home__links">
             <Link href="/sign-in">Use existing email</Link>
-            <Link href="/sign-up">Create demo access</Link>
           </div>
         ) : null}
       </section>

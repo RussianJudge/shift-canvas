@@ -28,8 +28,8 @@ export default async function SchedulePage({
         initialSnapshot={snapshot}
         canEdit={canManageWorkspace(session)}
         canManageSetBuilder={session.role !== "worker"}
-        canSwitchSchedule={session.role === "admin"}
-        forcedScheduleId={session.role === "admin" ? null : session.scheduleId}
+        canSwitchSchedule={true}
+        forcedScheduleId={null}
       />
     </WorkspaceShell>
   );
