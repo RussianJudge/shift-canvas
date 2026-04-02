@@ -207,6 +207,7 @@ export function OvertimePanel({
   );
   const [selectedScheduleFilter, setSelectedScheduleFilter] = useState("all");
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
+  const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
 
@@ -667,88 +668,124 @@ export function OvertimePanel({
 
       <div className="overtime-list">
         {groupedPostings.map((group) => (
-          <section key={group.key} className="overtime-group">
-            <div className="overtime-group__header">
-              <div>
-                <p className="overtime-card-team">Shift {group.scheduleName}</p>
-                <h2 className="overtime-card-title">
-                  {formatShortDate(group.dates[0])} - {formatShortDate(group.dates[group.dates.length - 1])}
-                </h2>
-              </div>
-              <span className="overtime-group__meta">{getShiftLabel(group.shiftKind, group.dates.length)}</span>
-            </div>
+          (() => {
+            const selectedPosting =
+              group.postings.find((posting) => posting.id === selectedPostingByGroup[group.key]) ??
+              group.postings[0];
+            const claimStatus = selectedPosting
+              ? getClaimStatus(claimingEmployee, selectedPosting, snapshot, assignmentIndex)
+              : { canClaim: false, reason: "No overtime posting selected." };
 
-            <div className="overtime-group__cards">
-              {group.postings.map((posting) => {
-                const claimStatus = getClaimStatus(claimingEmployee, posting, snapshot, assignmentIndex);
-
-                return (
-                  <article
-                    key={posting.id}
-                    className={`overtime-card ${posting.claimedEmployeeId ? "overtime-card--claimed" : ""}`}
-                  >
-                    <div className="overtime-card-top">
-                      <div>
-                        <p className="overtime-card-team">{posting.competencyCode}</p>
-                        <h3 className="overtime-card-title">{posting.competencyLabel}</h3>
-                      </div>
-                      <span className={`legend-pill legend-pill--${posting.colorToken.toLowerCase()}`}>
-                        {posting.competencyCode.replace("Post ", "")}
-                      </span>
+            return (
+              <section key={group.key} className="overtime-group">
+                <article
+                  className={`overtime-card ${selectedPosting?.claimedEmployeeId ? "overtime-card--claimed" : ""}`}
+                >
+                  <div className="overtime-group__header">
+                    <div>
+                      <p className="overtime-card-team">Shift {group.scheduleName}</p>
+                      <h2 className="overtime-card-title">
+                        {formatShortDate(group.dates[0])} - {formatShortDate(group.dates[group.dates.length - 1])}
+                      </h2>
                     </div>
+                    <span className="overtime-group__meta">{getShiftLabel(group.shiftKind, group.dates.length)}</span>
+                  </div>
 
-                    <div className="overtime-card-meta">
-                      <span>{posting.openShifts} open shift{posting.openShifts === 1 ? "" : "s"}</span>
-                      <span>{formatStaffCount(posting.staffedPeople)}/{posting.requiredStaff} staffed</span>
-                    </div>
-
-                    {posting.coverageCompetencyId !== posting.competencyId ? (
-                      <div className="overtime-card-meta">
-                        <span>
-                          Resolves {posting.coverageCompetencyCode}
-                          {posting.swapEmployeeName ? ` via ${posting.swapEmployeeName}` : " via swap"}
-                        </span>
-                      </div>
-                    ) : null}
-
-                    <div className="overtime-card-actions">
-                      <span className="overtime-card-hint">
-                        {posting.claimedByName
-                          ? `Claimed by ${posting.claimedByName}${
-                              posting.coverageCompetencyId !== posting.competencyId
-                                ? ` · resolves ${posting.coverageCompetencyCode}`
-                                : ""
-                            }`
-                          : claimStatus.reason}
-                      </span>
+                  <div className="overtime-option-pills">
+                    {group.postings.map((posting) => (
                       <button
+                        key={posting.id}
                         type="button"
-                        className="primary-button"
+                        className={`overtime-option-pill legend-pill legend-pill--${posting.colorToken.toLowerCase()} ${
+                          selectedPosting?.id === posting.id ? "overtime-option-pill--active" : ""
+                        } ${posting.claimedEmployeeId ? "overtime-option-pill--claimed" : ""}`}
                         onClick={() =>
-                          posting.claimedEmployeeId === claimingEmployeeId ? handleRelease(posting) : handleClaim(posting)
-                        }
-                        disabled={
-                          isClaiming ||
-                          (posting.claimedEmployeeId !== null && posting.claimedEmployeeId !== claimingEmployeeId) ||
-                          (posting.claimedEmployeeId === null && !claimStatus.canClaim)
+                          setSelectedPostingByGroup((current) => ({
+                            ...current,
+                            [group.key]: posting.id,
+                          }))
                         }
                       >
-                        {isClaiming
-                          ? posting.claimedEmployeeId === claimingEmployeeId
-                            ? "Releasing..."
-                            : "Claiming..."
-                          : posting.claimedEmployeeId === claimingEmployeeId
-                          ? "Release Posting"
-                          : posting.claimedEmployeeId
-                          ? "Claimed"
-                          : "Claim Posting"}
+                        <strong>{posting.competencyCode.replace("Post ", "")}</strong>
+                        <span>
+                          {posting.coverageCompetencyId !== posting.competencyId
+                            ? `covers ${posting.coverageCompetencyCode}`
+                            : `${posting.openShifts} shift${posting.openShifts === 1 ? "" : "s"}`}
+                        </span>
                       </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
+                    ))}
+                  </div>
+
+                  {selectedPosting ? (
+                    <>
+                      <div className="overtime-card-top">
+                        <div>
+                          <p className="overtime-card-team">{selectedPosting.competencyCode}</p>
+                          <h3 className="overtime-card-title">{selectedPosting.competencyLabel}</h3>
+                        </div>
+                        <span className={`legend-pill legend-pill--${selectedPosting.colorToken.toLowerCase()}`}>
+                          {selectedPosting.competencyCode.replace("Post ", "")}
+                        </span>
+                      </div>
+
+                      <div className="overtime-card-meta">
+                        <span>
+                          {selectedPosting.openShifts} open shift{selectedPosting.openShifts === 1 ? "" : "s"}
+                        </span>
+                        <span>{formatStaffCount(selectedPosting.staffedPeople)}/{selectedPosting.requiredStaff} staffed</span>
+                      </div>
+
+                      {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId ? (
+                        <div className="overtime-card-meta">
+                          <span>
+                            Resolves {selectedPosting.coverageCompetencyCode}
+                            {selectedPosting.swapEmployeeName ? ` via ${selectedPosting.swapEmployeeName}` : " via swap"}
+                          </span>
+                        </div>
+                      ) : null}
+
+                      <div className="overtime-card-actions">
+                        <span className="overtime-card-hint">
+                          {selectedPosting.claimedByName
+                            ? `Claimed by ${selectedPosting.claimedByName}${
+                                selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                                  ? ` · resolves ${selectedPosting.coverageCompetencyCode}`
+                                  : ""
+                              }`
+                            : claimStatus.reason}
+                        </span>
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() =>
+                            selectedPosting.claimedEmployeeId === claimingEmployeeId
+                              ? handleRelease(selectedPosting)
+                              : handleClaim(selectedPosting)
+                          }
+                          disabled={
+                            isClaiming ||
+                            (selectedPosting.claimedEmployeeId !== null &&
+                              selectedPosting.claimedEmployeeId !== claimingEmployeeId) ||
+                            (selectedPosting.claimedEmployeeId === null && !claimStatus.canClaim)
+                          }
+                        >
+                          {isClaiming
+                            ? selectedPosting.claimedEmployeeId === claimingEmployeeId
+                              ? "Releasing..."
+                              : "Claiming..."
+                            : selectedPosting.claimedEmployeeId === claimingEmployeeId
+                            ? "Release Posting"
+                            : selectedPosting.claimedEmployeeId
+                            ? "Claimed"
+                            : "Claim Posting"}
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+                </article>
+              </section>
+            );
+          })()
         ))}
 
         {groupedPostings.length === 0 ? (

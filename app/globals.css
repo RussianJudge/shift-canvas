@@ -1919,6 +1919,39 @@ select {
   font-size: 0.9rem;
 }
 
+.overtime-option-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.overtime-option-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.overtime-option-pill strong,
+.overtime-option-pill span {
+  line-height: 1;
+}
+
+.overtime-option-pill span {
+  color: inherit;
+  font-size: 0.72rem;
+  opacity: 0.78;
+}
+
+.overtime-option-pill--active {
+  box-shadow: inset 0 0 0 2px rgba(23, 20, 17, 0.16);
+}
+
+.overtime-option-pill--claimed {
+  opacity: 0.92;
+}
+
 .empty-state {
   display: grid;
   align-content: center;
@@ -2210,6 +2243,10 @@ select {
   .overtime-group__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .overtime-option-pills {
+    gap: 0.45rem;
   }
 
   .import-preview__row {

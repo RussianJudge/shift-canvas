@@ -5,7 +5,7 @@ export function ProfilePanel({
   employeeId,
 }: {
   snapshot: SchedulerSnapshot;
-  employeeId: string;
+  employeeId: string | null;
 }) {
   const employee = snapshot.schedules.flatMap((schedule) => schedule.employees).find((entry) => entry.id === employeeId);
   const schedule = employee ? snapshot.schedules.find((entry) => entry.id === employee.scheduleId) : null;
