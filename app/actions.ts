@@ -92,7 +92,7 @@ async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: 
           }
 
           if (!completedDateKeys.has(`${schedule.id}:${day.date}`)) {
-            return claims;
+            return [];
           }
 
           const regularFilled = schedule.employees.reduce((count, employee) => {
@@ -306,59 +306,21 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
         message: `Could not mark that set complete: ${error.message}`,
       };
     }
+
+    const cleanupResult = await removeStaleOvertimeClaims(supabase, touchedMonths);
+
+    revalidatePath("/schedule");
+    revalidatePath("/overtime");
+
+    return {
+      ok: true,
+      message: cleanupResult.ok
+        ? cleanupResult.removedClaims > 0
+          ? `Set marked schedule complete. Removed ${cleanupResult.removedClaims} overtime claim${cleanupResult.removedClaims === 1 ? "" : "s"} that were no longer needed.`
+          : "Set marked schedule complete."
+        : cleanupResult.message,
+    };
   } else {
-    const claimsResult = await supabase
-      .from("overtime_claims")
-      .select("id, employee_id, competency_id, assignment_date")
-      .eq("schedule_id", input.scheduleId)
-      .gte("assignment_date", input.startDate)
-      .lte("assignment_date", input.endDate);
-
-    if (claimsResult.error) {
-      return {
-        ok: false,
-        message: `Could not look up overtime claims for that set: ${claimsResult.error.message}`,
-      };
-    }
-
-    if ((claimsResult.data ?? []).length > 0) {
-      const claimRows = claimsResult.data as Array<{
-        id: string;
-        employee_id: string;
-        competency_id: string;
-        assignment_date: string;
-      }>;
-      const claimIds = claimRows.map((claim) => claim.id);
-      const { error: deleteClaimsError } = await supabase.from("overtime_claims").delete().in("id", claimIds);
-
-      if (deleteClaimsError) {
-        return {
-          ok: false,
-          message: `Could not clear overtime claims for that set: ${deleteClaimsError.message}`,
-        };
-      }
-
-      const assignmentDeleteResults = await Promise.all(
-        claimRows.map((claim) =>
-          supabase
-            .from("schedule_assignments")
-            .delete()
-            .eq("employee_id", claim.employee_id)
-            .eq("assignment_date", claim.assignment_date)
-            .eq("competency_id", claim.competency_id)
-            .eq("notes", "Overtime"),
-        ),
-      );
-      const assignmentDeleteError = assignmentDeleteResults.find((result) => result.error)?.error;
-
-      if (assignmentDeleteError) {
-        return {
-          ok: false,
-          message: `Set was unmarked, but overtime cleanup failed: ${assignmentDeleteError.message}`,
-        };
-      }
-    }
-
     const { error } = await deleteCompletedSetRows();
 
     if (error) {
@@ -374,7 +336,7 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
 
   return {
     ok: true,
-    message: input.isComplete ? "Set marked schedule complete." : "Set reopened and overtime cleared.",
+    message: "Set reopened for edits. Existing overtime claims were left in place.",
   };
 }
 

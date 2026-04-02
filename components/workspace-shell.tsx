@@ -122,12 +122,12 @@ export function WorkspaceShell({
     viewer.role === "admin"
       ? [
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
-          { href: "/metrics", label: "Metrics", icon: <MetricsIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
           { href: "/schedules", label: "Shifts", icon: <PatternsIcon /> },
           { href: "/competencies", label: "Competencies", icon: <CompetenciesIcon /> },
           { href: "/time-codes", label: "Time Codes", icon: <TimeCodesIcon /> },
+          { href: "/metrics", label: "Metrics", icon: <MetricsIcon /> },
         ]
       : viewer.role === "leader"
       ? [
