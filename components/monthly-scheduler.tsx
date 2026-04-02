@@ -1205,6 +1205,15 @@ export function MonthlyScheduler({
     });
   }
 
+  function handlePrintSchedules() {
+    const target = `/schedule/print?month=${currentMonth}`;
+    const printWindow = window.open(target, "_blank");
+
+    if (!printWindow) {
+      router.push(target);
+    }
+  }
+
   return (
     <section
       className="panel-frame"
@@ -1225,7 +1234,7 @@ export function MonthlyScheduler({
             </button>
           </div>
           <div className="planner-actions__row planner-actions__row--save">
-            <button type="button" className="ghost-button" onClick={() => window.print()}>
+            <button type="button" className="ghost-button" onClick={handlePrintSchedules}>
               Print schedules
             </button>
             {canEdit ? (

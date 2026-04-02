@@ -1205,6 +1205,31 @@ select {
   display: none;
 }
 
+.print-preview-page {
+  min-height: 100vh;
+  padding: 1.25rem;
+  background: white;
+}
+
+.print-preview-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.print-preview-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.print-preview-stack {
+  display: grid;
+  gap: 1rem;
+}
+
 .print-schedule-sheet {
   display: block;
 }
@@ -2274,7 +2299,8 @@ select {
   .workspace-toolbar,
   .set-builder,
   .schedule-wrap,
-  .assignment-modal-backdrop {
+  .assignment-modal-backdrop,
+  .print-preview-toolbar {
     display: none !important;
   }
 
@@ -2291,6 +2317,14 @@ select {
   }
 
   .print-schedule-stack {
+    display: block;
+  }
+
+  .print-preview-page {
+    padding: 0;
+  }
+
+  .print-preview-stack {
     display: block;
   }
 
