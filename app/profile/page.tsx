@@ -10,17 +10,26 @@ export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {
   const session = await requireAppSession(["worker"]);
+  const month = getCurrentMonthKey("America/Edmonton");
+  const snapshot = await getPersonnelSnapshot(month);
+  const allEmployees = snapshot.schedules.flatMap((schedule) => schedule.employees);
+  const displayName = session.displayName.trim().toLowerCase();
+  const emailLocalPart = session.email.split("@")[0]?.trim().toLowerCase() ?? "";
+  const resolvedEmployeeId =
+    session.employeeId ??
+    allEmployees.find((employee) => {
+      const employeeName = employee.name.trim().toLowerCase();
+      return employeeName === displayName || employeeName === emailLocalPart;
+    })?.id ??
+    null;
 
-  if (!session.employeeId) {
+  if (!resolvedEmployeeId) {
     redirect("/schedule");
   }
 
-  const month = getCurrentMonthKey("America/Edmonton");
-  const snapshot = await getPersonnelSnapshot(month);
-
   return (
     <WorkspaceShell viewer={session}>
-      <ProfilePanel snapshot={snapshot} employeeId={session.employeeId} />
+      <ProfilePanel snapshot={snapshot} employeeId={resolvedEmployeeId} />
     </WorkspaceShell>
   );
 }

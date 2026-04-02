@@ -98,6 +98,8 @@ export interface ClaimOvertimePostingInput {
   scheduleId: string;
   employeeId: string;
   competencyId: string;
+  coverageCompetencyId?: string | null;
+  swapEmployeeId?: string | null;
   dates: string[];
 }
 

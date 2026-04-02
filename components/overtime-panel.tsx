@@ -25,6 +25,9 @@ type OvertimePosting = {
   competencyId: string;
   competencyCode: string;
   competencyLabel: string;
+  coverageCompetencyId: string;
+  coverageCompetencyCode: string;
+  coverageCompetencyLabel: string;
   colorToken: string;
   dates: string[];
   staffedPeople: number;
@@ -32,7 +35,39 @@ type OvertimePosting = {
   openShifts: number;
   claimedEmployeeId: string | null;
   claimedByName: string | null;
+  swapEmployeeId: string | null;
+  swapEmployeeName: string | null;
 };
+
+type AssignmentMeta = {
+  coverageCompetencyId: string | null;
+  swapEmployeeId: string | null;
+  originalCompetencyId: string | null;
+};
+
+function parseAssignmentMeta(note: string | null | undefined): AssignmentMeta {
+  if (!note?.startsWith("OT|")) {
+    return {
+      coverageCompetencyId: null,
+      swapEmployeeId: null,
+      originalCompetencyId: null,
+    };
+  }
+
+  const parts = note.split("|").slice(1);
+  const values = new Map(
+    parts.map((part) => {
+      const [key, value] = part.split(":");
+      return [key, value ?? ""];
+    }),
+  );
+
+  return {
+    coverageCompetencyId: values.get("coverage") || null,
+    swapEmployeeId: values.get("swap") || null,
+    originalCompetencyId: values.get("orig") || null,
+  };
+}
 
 function formatShortDate(isoDate: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -177,6 +212,14 @@ export function OvertimePanel({
 
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
+  const assignmentMetaIndex = useMemo(
+    () =>
+      snapshot.assignments.reduce<Record<string, AssignmentMeta>>((map, assignment) => {
+        map[`${assignment.employeeId}:${assignment.date}`] = parseAssignmentMeta(assignment.notes);
+        return map;
+      }, {}),
+    [snapshot.assignments],
+  );
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
   const extendedMonthDays = useMemo(() => getExtendedMonthDays(snapshot.month), [snapshot.month]);
   const completedSetRangeKeys = useMemo(
@@ -275,6 +318,13 @@ export function OvertimePanel({
             for (const [employeeId, employeeDates] of Object.entries(claimDatesByEmployee)) {
               const orderedDates = setDates.filter((date) => employeeDates.includes(date));
               const claimEmployee = employeeMap[employeeId];
+              const assignmentMeta = orderedDates[0]
+                ? assignmentMetaIndex[`${employeeId}:${orderedDates[0]}`]
+                : undefined;
+              const coverageCompetencyId = assignmentMeta?.coverageCompetencyId ?? competency.id;
+              const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
+              const swapEmployeeId = assignmentMeta?.swapEmployeeId ?? null;
+              const swapEmployee = swapEmployeeId ? employeeMap[swapEmployeeId] : null;
               let currentRun: string[] = [];
 
               const flushRun = () => {
@@ -290,6 +340,9 @@ export function OvertimePanel({
                   competencyId: competency.id,
                   competencyCode: competency.code,
                   competencyLabel: competency.label,
+                  coverageCompetencyId,
+                  coverageCompetencyCode: coverageCompetency?.code ?? competency.code,
+                  coverageCompetencyLabel: coverageCompetency?.label ?? competency.label,
                   colorToken: competency.colorToken,
                   dates: [...currentRun],
                   staffedPeople,
@@ -297,6 +350,8 @@ export function OvertimePanel({
                   openShifts: currentRun.length,
                   claimedEmployeeId: employeeId,
                   claimedByName: claimEmployee?.name ?? "Unknown worker",
+                  swapEmployeeId,
+                  swapEmployeeName: swapEmployee?.name ?? null,
                 });
                 currentRun = [];
               };
@@ -332,6 +387,9 @@ export function OvertimePanel({
                 competencyId: competency.id,
                 competencyCode: competency.code,
                 competencyLabel: competency.label,
+                coverageCompetencyId: competency.id,
+                coverageCompetencyCode: competency.code,
+                coverageCompetencyLabel: competency.label,
                 colorToken: competency.colorToken,
                 dates: postingDates,
                 staffedPeople,
@@ -339,7 +397,82 @@ export function OvertimePanel({
                 openShifts: postingDates.length,
                 claimedEmployeeId: null,
                 claimedByName: null,
+                swapEmployeeId: null,
+                swapEmployeeName: null,
               });
+              const swapCandidates = schedule.employees.reduce<
+                Record<string, { employeeId: string; employeeName: string; competencyId: string }>
+              >((map, teamEmployee) => {
+                if (!teamEmployee.competencyIds.includes(competency.id)) {
+                  return map;
+                }
+
+                const assignedCompetencyIds = postingDates.reduce<string[]>((ids, date) => {
+                  const selection = getCellSelection(teamEmployee, date, assignmentIndex);
+
+                  if (selection.competencyId) {
+                    ids.push(selection.competencyId);
+                  }
+
+                  return ids;
+                }, []);
+
+                if (assignedCompetencyIds.length !== postingDates.length) {
+                  return map;
+                }
+
+                const offeredCompetencyId = assignedCompetencyIds[0];
+
+                if (
+                  !offeredCompetencyId ||
+                  offeredCompetencyId === competency.id ||
+                  assignedCompetencyIds.some((assignedCompetencyId) => assignedCompetencyId !== offeredCompetencyId)
+                ) {
+                  return map;
+                }
+
+                if (map[offeredCompetencyId]) {
+                  return map;
+                }
+
+                map[offeredCompetencyId] = {
+                  employeeId: teamEmployee.id,
+                  employeeName: teamEmployee.name,
+                  competencyId: offeredCompetencyId,
+                };
+
+                return map;
+              }, {});
+
+              for (const candidate of Object.values(swapCandidates)) {
+                const offeredCompetency = snapshot.competencies.find((entry) => entry.id === candidate.competencyId);
+
+                if (!offeredCompetency) {
+                  continue;
+                }
+
+                nextPostings.push({
+                  id: `${schedule.id}:${candidate.competencyId}:${competency.id}:${postingDates[0]}:${slotIndex}:swap`,
+                  scheduleId: schedule.id,
+                  scheduleName: schedule.name,
+                  shiftKind: segment.shiftKind,
+                  competencyId: candidate.competencyId,
+                  competencyCode: offeredCompetency.code,
+                  competencyLabel: offeredCompetency.label,
+                  coverageCompetencyId: competency.id,
+                  coverageCompetencyCode: competency.code,
+                  coverageCompetencyLabel: competency.label,
+                  colorToken: offeredCompetency.colorToken,
+                  dates: postingDates,
+                  staffedPeople,
+                  requiredStaff: competency.requiredStaff,
+                  openShifts: postingDates.length,
+                  claimedEmployeeId: null,
+                  claimedByName: null,
+                  swapEmployeeId: candidate.employeeId,
+                  swapEmployeeName: candidate.employeeName,
+                });
+              }
             }
           }
         }
@@ -360,6 +493,7 @@ export function OvertimePanel({
     employeeMap,
     extendedMonthDays,
     monthDays,
+    assignmentMetaIndex,
     snapshot,
     snapshot.competencies,
     snapshot.month,
@@ -415,6 +549,8 @@ export function OvertimePanel({
         scheduleId: posting.scheduleId,
         employeeId: claimingEmployeeId,
         competencyId: posting.competencyId,
+        coverageCompetencyId: posting.coverageCompetencyId,
+        swapEmployeeId: posting.swapEmployeeId,
         dates: posting.dates,
       });
 
@@ -566,9 +702,24 @@ export function OvertimePanel({
                       <span>{formatStaffCount(posting.staffedPeople)}/{posting.requiredStaff} staffed</span>
                     </div>
 
+                    {posting.coverageCompetencyId !== posting.competencyId ? (
+                      <div className="overtime-card-meta">
+                        <span>
+                          Resolves {posting.coverageCompetencyCode}
+                          {posting.swapEmployeeName ? ` via ${posting.swapEmployeeName}` : " via swap"}
+                        </span>
+                      </div>
+                    ) : null}
+
                     <div className="overtime-card-actions">
                       <span className="overtime-card-hint">
-                        {posting.claimedByName ? `Claimed by ${posting.claimedByName}` : claimStatus.reason}
+                        {posting.claimedByName
+                          ? `Claimed by ${posting.claimedByName}${
+                              posting.coverageCompetencyId !== posting.competencyId
+                                ? ` · resolves ${posting.coverageCompetencyCode}`
+                                : ""
+                            }`
+                          : claimStatus.reason}
                       </span>
                       <button
                         type="button"

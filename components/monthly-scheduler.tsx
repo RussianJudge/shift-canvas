@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useState, useTransition, startTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -54,6 +55,89 @@ type CoverageSummary = {
   isUnderstaffed: boolean;
   missingDates: string[];
 };
+
+function buildDisplayEmployeesForSchedule({
+  schedule,
+  snapshot,
+  employeeMap,
+  currentMonth,
+  pinnedEmployeesBySchedule,
+}: {
+  schedule: Schedule;
+  snapshot: SchedulerSnapshot;
+  employeeMap: Record<string, Employee>;
+  currentMonth: string;
+  pinnedEmployeesBySchedule: Record<string, string[]>;
+}) {
+  const baseRows: DisplayEmployee[] = schedule.employees.map((employee) => ({
+    rowId: `base:${employee.id}`,
+    sourceEmployeeId: employee.id,
+    name: employee.name,
+    role: employee.role,
+    competencyIds: employee.competencyIds,
+  }));
+
+  const overtimeRows = Object.values(
+    snapshot.overtimeClaims
+      .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
+      .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
+        const employee = employeeMap[claim.employeeId];
+
+        if (!employee || employee.scheduleId === schedule.id) {
+          return rows;
+        }
+
+        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+        const existingDates = rows[employee.id]?.overtimeDates ?? [];
+        const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
+
+        rows[employee.id] = {
+          rowId: `ot:${schedule.id}:${employee.id}`,
+          sourceEmployeeId: employee.id,
+          name: employee.name,
+          role: `${employee.role} · OT from ${homeSchedule.name}`,
+          competencyIds: employee.competencyIds,
+          overtimeDates: existingDates.includes(claim.date)
+            ? existingDates
+            : [...existingDates, claim.date].sort(),
+          overtimeCompetencyByDate: {
+            ...existingCompetencies,
+            [claim.date]: claim.competencyId,
+          },
+        };
+
+        return rows;
+      }, {}),
+  ).sort((left, right) => left.name.localeCompare(right.name));
+
+  const rows = [...baseRows, ...overtimeRows];
+  const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
+  const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
+
+  return rows
+    .map((employee, index) => ({ employee, index }))
+    .sort((left, right) => {
+      const leftPinned = pinnedIndex.get(left.employee.sourceEmployeeId);
+      const rightPinned = pinnedIndex.get(right.employee.sourceEmployeeId);
+
+      if (leftPinned !== undefined || rightPinned !== undefined) {
+        if (leftPinned === undefined) {
+          return 1;
+        }
+
+        if (rightPinned === undefined) {
+          return -1;
+        }
+
+        if (leftPinned !== rightPinned) {
+          return leftPinned - rightPinned;
+        }
+      }
+
+      return left.index - right.index;
+    })
+    .map((entry) => entry.employee);
+}
 
 function isMonthKey(value: string) {
   return /^\d{4}-\d{2}$/.test(value);
@@ -311,6 +395,111 @@ function AssignmentModal({
   );
 }
 
+function PrintScheduleSheet({
+  schedule,
+  monthKey,
+  monthDays,
+  assignments,
+  competencyMap,
+  timeCodeMap,
+  timeCodes,
+  employees,
+}: {
+  schedule: Schedule;
+  monthKey: string;
+  monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
+  assignments: Record<string, AssignmentSelection>;
+  competencyMap: Record<string, Competency>;
+  timeCodeMap: Record<string, TimeCode>;
+  timeCodes: TimeCode[];
+  employees: DisplayEmployee[];
+}) {
+  const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.5rem, 1fr))`;
+
+  return (
+    <section className="print-schedule-sheet">
+      <header className="print-schedule-sheet__header">
+        <div>
+          <span className="print-schedule-sheet__eyebrow">{formatMonthLabel(monthKey)}</span>
+          <h2 className="print-schedule-sheet__title">Shift {schedule.name}</h2>
+        </div>
+      </header>
+
+      <div className="print-schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
+        <div className="employee-header print-cell">
+          <span>{formatMonthLabel(monthKey)}</span>
+          <strong>Employees</strong>
+        </div>
+
+        {monthDays.map((day) => (
+          <div
+            key={`print-header-${schedule.id}-${day.date}`}
+            className={`day-header print-cell ${day.isWeekend ? "day-header--weekend" : ""}`}
+          >
+            <span>{day.dayName.slice(0, 1)}</span>
+            <strong>{day.dayNumber}</strong>
+          </div>
+        ))}
+
+        {employees.map((employee) => {
+          const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
+
+          return (
+            <Fragment key={`print-${schedule.id}-${employee.rowId}`}>
+              <div className="employee-cell print-cell">
+                <div className="employee-cell__main">
+                  <strong>{employee.name}</strong>
+                  <span>{employee.role}</span>
+                </div>
+              </div>
+
+              {monthDays.map((day) => {
+                const isOvertimeCell = !overtimeDateSet || overtimeDateSet.has(day.date);
+                const shiftKind = isOvertimeCell ? shiftForDate(schedule, day.date) : "OFF";
+                const selection = isOvertimeCell
+                  ? getSelectionForCell(employee.sourceEmployeeId, day.date, shiftKind, assignments, timeCodes)
+                  : {
+                      competencyId: null,
+                      timeCodeId: null,
+                    };
+                const overtimeClaimCompetencyId =
+                  !selection.competencyId && !selection.timeCodeId
+                    ? employee.overtimeCompetencyByDate?.[day.date] ?? null
+                    : null;
+                const effectiveSelection = overtimeClaimCompetencyId
+                  ? { competencyId: overtimeClaimCompetencyId, timeCodeId: null }
+                  : selection;
+                const activeCompetency = effectiveSelection.competencyId
+                  ? competencyMap[effectiveSelection.competencyId]
+                  : null;
+                const activeTimeCode = effectiveSelection.timeCodeId
+                  ? timeCodeMap[effectiveSelection.timeCodeId]
+                  : null;
+                const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
+
+                return (
+                  <div
+                    key={`print-cell-${schedule.id}-${employee.rowId}-${day.date}`}
+                    className={`shift-cell print-cell shift-cell--${getShiftTone(shiftKind)} ${
+                      day.isWeekend ? "shift-cell--weekend" : ""
+                    } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
+                      activeColorToken ? "shift-cell--coded" : ""
+                    }`}
+                  >
+                    <span className="shift-cell-button">
+                      {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
+                    </span>
+                  </div>
+                );
+              })}
+            </Fragment>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function MonthlyScheduler({
   initialSnapshot,
   canEdit,
@@ -463,76 +652,31 @@ export function MonthlyScheduler({
       }),
     );
   }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.timeCodes]);
-  const displayEmployees = useMemo<DisplayEmployee[]>(() => {
-    const baseRows = activeSchedule.employees.map((employee) => ({
-      rowId: `base:${employee.id}`,
-      sourceEmployeeId: employee.id,
-      name: employee.name,
-      role: employee.role,
-      competencyIds: employee.competencyIds,
-    }));
-
-    const overtimeRows = Object.values(
-      snapshot.overtimeClaims
-        .filter((claim) => claim.scheduleId === activeSchedule.id && claim.date.slice(0, 7) === currentMonth)
-        .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
-          const employee = employeeMap[claim.employeeId];
-
-          if (!employee || employee.scheduleId === activeSchedule.id) {
-            return rows;
-          }
-
-          const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
-          const existingDates = rows[employee.id]?.overtimeDates ?? [];
-          const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
-
-          rows[employee.id] = {
-            rowId: `ot:${activeSchedule.id}:${employee.id}`,
-            sourceEmployeeId: employee.id,
-            name: employee.name,
-            role: `${employee.role} · OT from ${homeSchedule.name}`,
-            competencyIds: employee.competencyIds,
-            overtimeDates: existingDates.includes(claim.date)
-              ? existingDates
-              : [...existingDates, claim.date].sort(),
-            overtimeCompetencyByDate: {
-              ...existingCompetencies,
-              [claim.date]: claim.competencyId,
-            },
-          };
-
-          return rows;
-        }, {}),
-    ).sort((left, right) => left.name.localeCompare(right.name));
-
-    const rows = [...baseRows, ...overtimeRows];
-    const pinnedIds = pinnedEmployeesBySchedule[activeSchedule.id] ?? [];
-    const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
-
-    return rows
-      .map((employee, index) => ({ employee, index }))
-      .sort((left, right) => {
-        const leftPinned = pinnedIndex.get(left.employee.sourceEmployeeId);
-        const rightPinned = pinnedIndex.get(right.employee.sourceEmployeeId);
-
-        if (leftPinned !== undefined || rightPinned !== undefined) {
-          if (leftPinned === undefined) {
-            return 1;
-          }
-
-          if (rightPinned === undefined) {
-            return -1;
-          }
-
-          if (leftPinned !== rightPinned) {
-            return leftPinned - rightPinned;
-          }
-        }
-
-        return left.index - right.index;
-      })
-      .map((entry) => entry.employee);
-  }, [activeSchedule, currentMonth, employeeMap, pinnedEmployeesBySchedule, snapshot, snapshot.overtimeClaims]);
+  const displayEmployees = useMemo<DisplayEmployee[]>(
+    () =>
+      buildDisplayEmployeesForSchedule({
+        schedule: activeSchedule,
+        snapshot,
+        employeeMap,
+        currentMonth,
+        pinnedEmployeesBySchedule,
+      }),
+    [activeSchedule, currentMonth, employeeMap, pinnedEmployeesBySchedule, snapshot],
+  );
+  const printSchedules = useMemo(
+    () =>
+      snapshot.schedules.map((schedule) => ({
+        schedule,
+        employees: buildDisplayEmployeesForSchedule({
+          schedule,
+          snapshot,
+          employeeMap,
+          currentMonth,
+          pinnedEmployeesBySchedule,
+        }),
+      })),
+    [currentMonth, employeeMap, pinnedEmployeesBySchedule, snapshot],
+  );
 
   if (!activeSchedule) {
     return (
@@ -1080,21 +1224,26 @@ export function MonthlyScheduler({
               Next month
             </button>
           </div>
-          {canEdit ? (
-            <div className="planner-actions__row planner-actions__row--save">
-              <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
-                Revert
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={handleSave}
-                disabled={isSaving || !hasChanges}
-              >
-                {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
-              </button>
-            </div>
-          ) : null}
+          <div className="planner-actions__row planner-actions__row--save">
+            <button type="button" className="ghost-button" onClick={() => window.print()}>
+              Print schedules
+            </button>
+            {canEdit ? (
+              <>
+                <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+                  Revert
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleSave}
+                  disabled={isSaving || !hasChanges}
+                >
+                  {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
+                </button>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -1282,6 +1431,22 @@ export function MonthlyScheduler({
             </div>
           ) : null}
         </div>
+      </section>
+
+      <section className="print-schedule-stack" aria-hidden="true">
+        {printSchedules.map(({ schedule, employees }) => (
+          <PrintScheduleSheet
+            key={`print-sheet-${schedule.id}`}
+            schedule={schedule}
+            monthKey={currentMonth}
+            monthDays={monthDays}
+            assignments={draftAssignments}
+            competencyMap={competencyMap}
+            timeCodeMap={timeCodeMap}
+            timeCodes={snapshot.timeCodes}
+            employees={employees}
+          />
+        ))}
       </section>
 
       {canEdit ? (

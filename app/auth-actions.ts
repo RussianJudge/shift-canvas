@@ -2,7 +2,8 @@
 
 import { redirect } from "next/navigation";
 
-import { clearAppSession, setAppSession } from "@/lib/auth";
+import { clearAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
+import type { AppSession } from "@/lib/types";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
 type ProfileRow = {
@@ -42,6 +43,14 @@ export async function signIn(formData: FormData) {
 
     if (profile) {
       let scheduleName: string | null = null;
+      const session: AppSession = {
+        email: profile.email,
+        role: profile.role,
+        displayName: profile.display_name || profile.email.split("@")[0] || "User",
+        scheduleId: profile.schedule_id,
+        employeeId: profile.employee_id,
+        scheduleName,
+      };
 
       if (profile.schedule_id) {
         const scheduleResult = await supabase
@@ -53,18 +62,13 @@ export async function signIn(formData: FormData) {
         if (!scheduleResult.error) {
           scheduleName = (scheduleResult.data as ScheduleRow | null)?.name ?? null;
         }
+
+        session.scheduleName = scheduleName;
       }
 
-      await setAppSession({
-        email: profile.email,
-        role: profile.role,
-        displayName: profile.display_name || profile.email.split("@")[0] || "User",
-        scheduleId: profile.schedule_id,
-        employeeId: profile.employee_id,
-        scheduleName,
-      });
+      await setAppSession(session);
 
-      redirect("/schedule");
+      redirect(getSessionHomePath(session));
     }
   }
 

@@ -1201,6 +1201,48 @@ select {
   border-top: 1px solid var(--line);
 }
 
+.print-schedule-stack {
+  display: none;
+}
+
+.print-schedule-sheet {
+  display: block;
+}
+
+.print-schedule-sheet__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.9rem;
+}
+
+.print-schedule-sheet__eyebrow {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: #6b5b4d;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.print-schedule-sheet__title {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.25rem;
+}
+
+.print-schedule-grid {
+  display: grid;
+  width: 100%;
+}
+
+.print-cell {
+  position: static;
+  left: auto;
+  top: auto;
+  box-shadow: none;
+}
+
 .assignment-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2172,5 +2214,94 @@ select {
 
   .import-preview__row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    background: white;
+  }
+
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .workspace-sidebar,
+  .panel-heading,
+  .workspace-toolbar,
+  .set-builder,
+  .schedule-wrap,
+  .assignment-modal-backdrop {
+    display: none !important;
+  }
+
+  .shell,
+  .workspace-frame,
+  .workspace-content,
+  .panel-frame {
+    display: block;
+    padding: 0;
+    margin: 0;
+    background: white !important;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .print-schedule-stack {
+    display: block;
+  }
+
+  .print-schedule-sheet {
+    padding: 0.35in 0.25in;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .print-schedule-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .print-schedule-grid .employee-header,
+  .print-schedule-grid .day-header,
+  .print-schedule-grid .employee-cell,
+  .print-schedule-grid .shift-cell {
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    min-height: 0;
+    box-shadow: none !important;
+  }
+
+  .print-schedule-grid .employee-header {
+    padding: 0.45rem 0.6rem;
+  }
+
+  .print-schedule-grid .day-header {
+    padding: 0.25rem 0.05rem;
+  }
+
+  .print-schedule-grid .employee-cell {
+    padding: 0.35rem 0.45rem;
+  }
+
+  .print-schedule-grid .employee-pin-button {
+    display: none;
+  }
+
+  .print-schedule-grid .shift-cell-button {
+    width: 100%;
+    min-height: 1.9rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    font-size: 0.68rem;
   }
 }

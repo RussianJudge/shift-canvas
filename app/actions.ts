@@ -12,6 +12,7 @@ import type {
   SaveSchedulesInput,
   SaveTimeCodesInput,
   SetScheduleCompletionInput,
+  ShiftKind,
 } from "@/lib/types";
 import { getSchedulerSnapshot } from "@/lib/data";
 import {
@@ -30,6 +31,23 @@ import { getSupabaseAdminClient } from "@/lib/supabase";
 
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
 
+type OvertimeAssignmentRow = {
+  employee_id: string;
+  assignment_date: string;
+  competency_id: string | null;
+  time_code_id: string | null;
+  notes: string | null;
+  shift_kind: ShiftKind;
+};
+
+type ParsedOvertimeNote = {
+  claimantEmployeeId: string | null;
+  claimedCompetencyId: string | null;
+  coverageCompetencyId: string | null;
+  swapEmployeeId: string | null;
+  originalCompetencyId: string | null;
+};
+
 function isBlank(value: string) {
   return value.trim().length === 0;
 }
@@ -37,6 +55,154 @@ function isBlank(value: string) {
 function hasValidShiftPattern(dayShiftDays: number, nightShiftDays: number, offDays: number) {
   return [dayShiftDays, nightShiftDays, offDays].every((value) => Number.isInteger(value) && value >= 0) &&
     dayShiftDays + nightShiftDays + offDays > 0;
+}
+
+function buildOvertimeAssignmentNote({
+  claimantEmployeeId,
+  claimedCompetencyId,
+  coverageCompetencyId,
+  swapEmployeeId,
+  originalCompetencyId,
+}: {
+  claimantEmployeeId: string;
+  claimedCompetencyId: string;
+  coverageCompetencyId?: string | null;
+  swapEmployeeId?: string | null;
+  originalCompetencyId?: string | null;
+}) {
+  const parts = [
+    "OT",
+    `claimant:${claimantEmployeeId}`,
+    `claim:${claimedCompetencyId}`,
+  ];
+
+  if (coverageCompetencyId) {
+    parts.push(`coverage:${coverageCompetencyId}`);
+  }
+
+  if (swapEmployeeId) {
+    parts.push(`swap:${swapEmployeeId}`);
+  }
+
+  if (originalCompetencyId) {
+    parts.push(`orig:${originalCompetencyId}`);
+  }
+
+  return parts.join("|");
+}
+
+function parseOvertimeAssignmentNote(note: string | null | undefined): ParsedOvertimeNote {
+  if (!note?.startsWith("OT|")) {
+    return {
+      claimantEmployeeId: null,
+      claimedCompetencyId: null,
+      coverageCompetencyId: null,
+      swapEmployeeId: null,
+      originalCompetencyId: null,
+    };
+  }
+
+  const values = new Map(
+    note
+      .split("|")
+      .slice(1)
+      .map((part) => {
+        const [key, value] = part.split(":");
+        return [key, value ?? ""];
+      }),
+  );
+
+  return {
+    claimantEmployeeId: values.get("claimant") || null,
+    claimedCompetencyId: values.get("claim") || null,
+    coverageCompetencyId: values.get("coverage") || null,
+    swapEmployeeId: values.get("swap") || null,
+    originalCompetencyId: values.get("orig") || null,
+  };
+}
+
+async function restoreSwappedAssignmentsForClaims(
+  supabase: SupabaseAdminClient,
+  claims: Array<{ employeeId: string; competencyId: string; date: string }>,
+) {
+  if (claims.length === 0) {
+    return { ok: true as const };
+  }
+
+  const groupedClaims = claims.reduce<Record<string, { employeeId: string; competencyId: string; dates: string[] }>>(
+    (map, claim) => {
+      const key = `${claim.employeeId}:${claim.competencyId}`;
+      map[key] ??= {
+        employeeId: claim.employeeId,
+        competencyId: claim.competencyId,
+        dates: [],
+      };
+      map[key].dates.push(claim.date);
+      return map;
+    },
+    {},
+  );
+
+  for (const group of Object.values(groupedClaims)) {
+    const notePrefix = `OT|claimant:${group.employeeId}|claim:${group.competencyId}|`;
+    const { data, error } = await supabase
+      .from("schedule_assignments")
+      .select("employee_id, assignment_date, notes, shift_kind")
+      .in("assignment_date", group.dates)
+      .like("notes", `${notePrefix}%`);
+
+    if (error) {
+      return {
+        ok: false as const,
+        message: `Could not restore swapped overtime assignments: ${error.message}`,
+      };
+    }
+
+    const restoreRows = ((data as Array<{
+      employee_id: string;
+      assignment_date: string;
+      notes: string | null;
+      shift_kind: ShiftKind;
+    }> | null) ?? [])
+      .flatMap((row) => {
+        const parsed = parseOvertimeAssignmentNote(row.notes);
+
+        if (
+          row.employee_id === group.employeeId ||
+          !parsed.originalCompetencyId
+        ) {
+          return [];
+        }
+
+        return [
+          {
+            employee_id: row.employee_id,
+            assignment_date: row.assignment_date,
+            competency_id: parsed.originalCompetencyId,
+            time_code_id: null,
+            notes: null,
+            shift_kind: row.shift_kind,
+          } satisfies OvertimeAssignmentRow,
+        ];
+      });
+
+    if (restoreRows.length === 0) {
+      continue;
+    }
+
+    const { error: restoreError } = await supabase.from("schedule_assignments").upsert(restoreRows, {
+      onConflict: "employee_id,assignment_date",
+    });
+
+    if (restoreError) {
+      return {
+        ok: false as const,
+        message: `Could not restore swapped overtime assignments: ${restoreError.message}`,
+      };
+    }
+  }
+
+  return { ok: true as const };
 }
 
 async function requireActionRole(allowedRoles: AppRole[]) {
@@ -108,6 +274,23 @@ async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: 
 
     if (claimsToRemove.length === 0) {
       continue;
+    }
+
+    const restoreResult = await restoreSwappedAssignmentsForClaims(
+      supabase,
+      claimsToRemove.map((claim) => ({
+        employeeId: claim.employeeId,
+        competencyId: claim.competencyId,
+        date: claim.date,
+      })),
+    );
+
+    if (!restoreResult.ok) {
+      return {
+        ok: false as const,
+        message: restoreResult.message,
+        removedClaims,
+      };
     }
 
     const claimIds = claimsToRemove.map((claim) => claim.id);
@@ -380,9 +563,11 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
   const targetSchedule = getScheduleById(snapshot, input.scheduleId);
   const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
+  const coverageCompetencyId = input.coverageCompetencyId ?? input.competencyId;
+  const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
   const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
 
-  if (!employee || !employeeSchedule || !competency || !targetSchedule) {
+  if (!employee || !employeeSchedule || !competency || !coverageCompetency || !targetSchedule) {
     return {
       ok: false,
       message: "Could not find the employee or competency for this posting.",
@@ -394,6 +579,62 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       ok: false,
       message: `${employee.name} is not qualified for ${competency.code}.`,
     };
+  }
+
+  let swapAssignmentRows: OvertimeAssignmentRow[] = [];
+
+  if (coverageCompetencyId !== input.competencyId) {
+    if (!input.swapEmployeeId) {
+      return {
+        ok: false,
+        message: "That overtime swap is missing the team member to rotate.",
+      };
+    }
+
+    const swapEmployee = employeeMap[input.swapEmployeeId];
+
+    if (!swapEmployee || swapEmployee.scheduleId !== input.scheduleId) {
+      return {
+        ok: false,
+        message: "Could not find the team member to rotate for that posting.",
+      };
+    }
+
+    if (!swapEmployee.competencyIds.includes(coverageCompetencyId)) {
+      return {
+        ok: false,
+        message: `${swapEmployee.name} cannot be moved to ${coverageCompetency.code}.`,
+      };
+    }
+
+    for (const date of input.dates) {
+      const swapSelection = assignmentIndex[`${swapEmployee.id}:${date}`] ?? {
+        competencyId: null,
+        timeCodeId: null,
+      };
+
+      if (swapSelection.competencyId !== input.competencyId) {
+        return {
+          ok: false,
+          message: `${swapEmployee.name} is no longer on ${competency.code} for every shift in that posting.`,
+        };
+      }
+    }
+
+    swapAssignmentRows = input.dates.map((date) => ({
+      employee_id: swapEmployee.id,
+      assignment_date: date,
+      competency_id: coverageCompetencyId,
+      time_code_id: null,
+      notes: buildOvertimeAssignmentNote({
+        claimantEmployeeId: input.employeeId,
+        claimedCompetencyId: input.competencyId,
+        coverageCompetencyId,
+        swapEmployeeId: swapEmployee.id,
+        originalCompetencyId: input.competencyId,
+      }),
+      shift_kind: shiftForDate(targetSchedule, date),
+    }));
   }
 
   const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), input.dates[0] ?? null);
@@ -437,7 +678,12 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     assignment_date: date,
     competency_id: input.competencyId,
     time_code_id: null,
-    notes: "Overtime",
+    notes: buildOvertimeAssignmentNote({
+      claimantEmployeeId: input.employeeId,
+      claimedCompetencyId: input.competencyId,
+      coverageCompetencyId,
+      swapEmployeeId: input.swapEmployeeId ?? null,
+    }),
     shift_kind: shiftForDate(targetSchedule, date),
   }));
 
@@ -449,7 +695,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     assignment_date: date,
   }));
 
-  const { error: assignmentError } = await supabase.from("schedule_assignments").upsert(assignmentRows, {
+  const { error: assignmentError } = await supabase.from("schedule_assignments").upsert([...assignmentRows, ...swapAssignmentRows], {
     onConflict: "employee_id,assignment_date",
   });
 
@@ -513,6 +759,22 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     };
   }
 
+  const restoreResult = await restoreSwappedAssignmentsForClaims(
+    supabase,
+    input.dates.map((date) => ({
+      employeeId: input.employeeId,
+      competencyId: input.competencyId,
+      date,
+    })),
+  );
+
+  if (!restoreResult.ok) {
+    return {
+      ok: false,
+      message: restoreResult.message,
+    };
+  }
+
   const { error: claimDeleteError } = await supabase
     .from("overtime_claims")
     .delete()
@@ -536,7 +798,6 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
         .eq("employee_id", input.employeeId)
         .eq("assignment_date", date)
         .eq("competency_id", input.competencyId)
-        .eq("notes", "Overtime"),
     ),
   );
 
