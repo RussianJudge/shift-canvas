@@ -356,17 +356,20 @@ function buildSetAutofillPlan({
   let assignedCells = 0;
 
   for (const employee of fullyBlankWorkers) {
-    const bestCompetencyId = employee.competencyIds
+    const availableCompetencyIds = employee.competencyIds
       .map((competencyId) => ({
         competencyId,
         missingCells: missingCellsByCompetency.get(competencyId) ?? 0,
       }))
       .filter((entry) => entry.missingCells > 0)
-      .sort((left, right) => right.missingCells - left.missingCells)[0]?.competencyId;
+      .map((entry) => entry.competencyId);
 
-    if (!bestCompetencyId) {
+    if (availableCompetencyIds.length === 0) {
       continue;
     }
+
+    const bestCompetencyId =
+      availableCompetencyIds[Math.floor(Math.random() * availableCompetencyIds.length)];
 
     for (const day of setDays) {
       nextAssignments[createAssignmentKey(employee.id, day.date)] = {
@@ -1359,6 +1362,31 @@ export function MonthlyScheduler({
     });
   }
 
+  function handleClearSet() {
+    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+      return;
+    }
+
+    startTransition(() => {
+      setDraftAssignments((current) => {
+        const nextAssignments = { ...current };
+
+        for (const employee of activeSchedule.employees) {
+          for (const day of selectedSetDays) {
+            delete nextAssignments[createAssignmentKey(employee.id, day.date)];
+          }
+        }
+
+        return nextAssignments;
+      });
+      setStatusMessage(
+        `Cleared ${activeSchedule.name} set from ${formatShortDate(selectedSetDays[0].date)} to ${formatShortDate(
+          selectedSetDays[selectedSetDays.length - 1].date,
+        )}.`,
+      );
+    });
+  }
+
   function handlePrintSchedules() {
     const target = `/schedule/print?month=${currentMonth}`;
     const printWindow = window.open(target, "_blank");
@@ -1462,6 +1490,14 @@ export function MonthlyScheduler({
             </p>
           </div>
           <div className="set-builder-actions">
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={handleClearSet}
+              disabled={selectedSetDays.length === 0}
+            >
+              Clear set
+            </button>
             <button
               type="button"
               className="ghost-button"
