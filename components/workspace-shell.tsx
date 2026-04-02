@@ -56,6 +56,15 @@ function PersonnelIcon() {
   );
 }
 
+function MetricsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 19V9M12 19V5M19 19v-7" />
+      <path d="M4 19h16" />
+    </svg>
+  );
+}
+
 function ProfileIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -113,6 +122,7 @@ export function WorkspaceShell({
     viewer.role === "admin"
       ? [
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
+          { href: "/metrics", label: "Metrics", icon: <MetricsIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
           { href: "/schedules", label: "Shifts", icon: <PatternsIcon /> },
