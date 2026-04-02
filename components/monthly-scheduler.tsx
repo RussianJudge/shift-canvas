@@ -25,6 +25,7 @@ import {
 import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
 
 const STORAGE_KEY = "shift-canvas-drafts";
+const PINNED_STORAGE_KEY = "shift-canvas-pinned-employees";
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
 type SelectedCell = { employeeId: string; date: string };
 type DragRange = {
@@ -142,6 +143,12 @@ function getScheduleAccent(scheduleId: string) {
 function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
   return Object.fromEntries(
     Object.entries(assignments).map(([key, selection]) => [key, { ...selection }]),
+  );
+}
+
+function clonePinnedEmployees(pinnedEmployees: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(pinnedEmployees).map(([scheduleId, employeeIds]) => [scheduleId, [...employeeIds]]),
   );
 }
 
@@ -336,6 +343,7 @@ export function MonthlyScheduler({
   const [selectedSetAnchorDate, setSelectedSetAnchorDate] = useState<string | null>(null);
   const [selectedCoverageCompetencyId, setSelectedCoverageCompetencyId] = useState<string | null>(null);
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
+  const [pinnedEmployeesBySchedule, setPinnedEmployeesBySchedule] = useState<Record<string, string[]>>({});
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
@@ -497,8 +505,34 @@ export function MonthlyScheduler({
         }, {}),
     ).sort((left, right) => left.name.localeCompare(right.name));
 
-    return [...baseRows, ...overtimeRows];
-  }, [activeSchedule, employeeMap, snapshot, snapshot.overtimeClaims]);
+    const rows = [...baseRows, ...overtimeRows];
+    const pinnedIds = pinnedEmployeesBySchedule[activeSchedule.id] ?? [];
+    const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
+
+    return rows
+      .map((employee, index) => ({ employee, index }))
+      .sort((left, right) => {
+        const leftPinned = pinnedIndex.get(left.employee.sourceEmployeeId);
+        const rightPinned = pinnedIndex.get(right.employee.sourceEmployeeId);
+
+        if (leftPinned !== undefined || rightPinned !== undefined) {
+          if (leftPinned === undefined) {
+            return 1;
+          }
+
+          if (rightPinned === undefined) {
+            return -1;
+          }
+
+          if (leftPinned !== rightPinned) {
+            return leftPinned - rightPinned;
+          }
+        }
+
+        return left.index - right.index;
+      })
+      .map((entry) => entry.employee);
+  }, [activeSchedule, employeeMap, pinnedEmployeesBySchedule, snapshot, snapshot.overtimeClaims]);
 
   if (!activeSchedule) {
     return (
@@ -641,6 +675,7 @@ export function MonthlyScheduler({
 
   useEffect(() => {
     const savedDrafts = window.localStorage.getItem(STORAGE_KEY);
+    const savedPinnedEmployees = window.localStorage.getItem(PINNED_STORAGE_KEY);
 
     if (savedDrafts) {
       try {
@@ -648,6 +683,15 @@ export function MonthlyScheduler({
         setDraftAssignments((current) => ({ ...current, ...parsed }));
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
+      }
+    }
+
+    if (savedPinnedEmployees) {
+      try {
+        const parsed = JSON.parse(savedPinnedEmployees) as Record<string, string[]>;
+        setPinnedEmployeesBySchedule(parsed);
+      } catch {
+        window.localStorage.removeItem(PINNED_STORAGE_KEY);
       }
     }
 
@@ -665,6 +709,21 @@ export function MonthlyScheduler({
 
     return () => window.clearTimeout(timer);
   }, [draftAssignments, isDraftHydrated]);
+
+  useEffect(() => {
+    if (!isDraftHydrated) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        PINNED_STORAGE_KEY,
+        JSON.stringify(clonePinnedEmployees(pinnedEmployeesBySchedule)),
+      );
+    }, 160);
+
+    return () => window.clearTimeout(timer);
+  }, [isDraftHydrated, pinnedEmployeesBySchedule]);
 
   useEffect(() => {
     function handlePointerUp() {
@@ -890,6 +949,28 @@ export function MonthlyScheduler({
       setDragRange(null);
       setEditorCell(null);
       setStatusMessage("Changes reverted.");
+    });
+  }
+
+  function handlePinToggle(employeeId: string) {
+    startTransition(() => {
+      setPinnedEmployeesBySchedule((current) => {
+        const next = clonePinnedEmployees(current);
+        const currentPins = next[activeSchedule.id] ?? [];
+
+        if (currentPins.includes(employeeId)) {
+          next[activeSchedule.id] = currentPins.filter((pinnedEmployeeId) => pinnedEmployeeId !== employeeId);
+          if (next[activeSchedule.id].length === 0) {
+            delete next[activeSchedule.id];
+          }
+          setStatusMessage("Employee unpinned");
+          return next;
+        }
+
+        next[activeSchedule.id] = [...currentPins, employeeId];
+        setStatusMessage("Employee pinned to top");
+        return next;
+      });
     });
   }
 
@@ -1163,6 +1244,7 @@ export function MonthlyScheduler({
             <EmployeeRow
               key={employee.rowId}
               employee={employee}
+              isPinned={(pinnedEmployeesBySchedule[activeSchedule.id] ?? []).includes(employee.sourceEmployeeId)}
               schedule={activeSchedule}
               monthDays={monthDays}
               assignments={draftAssignments}
@@ -1176,6 +1258,7 @@ export function MonthlyScheduler({
               selectedCoverageCompetencyId={selectedCoverageCompetencyId}
               selectedSetDays={selectedSetDays}
               canEdit={canEdit}
+              onPinToggle={handlePinToggle}
               onCellPointerDown={handleCellPointerDown}
               onDragHover={handleDragHover}
               onCellClick={(cell) => {
@@ -1226,6 +1309,7 @@ export function MonthlyScheduler({
 
 function EmployeeRow({
   employee,
+  isPinned,
   schedule,
   monthDays,
   assignments,
@@ -1239,11 +1323,13 @@ function EmployeeRow({
   selectedCoverageCompetencyId,
   selectedSetDays,
   canEdit,
+  onPinToggle,
   onCellPointerDown,
   onDragHover,
   onCellClick,
 }: {
   employee: DisplayEmployee;
+  isPinned: boolean;
   schedule: Schedule;
   monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
   assignments: Record<string, AssignmentSelection>;
@@ -1257,6 +1343,7 @@ function EmployeeRow({
   selectedCoverageCompetencyId: string | null;
   selectedSetDays: Array<{ date: string }>;
   canEdit: boolean;
+  onPinToggle: (employeeId: string) => void;
   onCellPointerDown: (
     employeeId: string,
     date: string,
@@ -1272,11 +1359,22 @@ function EmployeeRow({
   return (
     <>
       <div className="employee-cell sticky-column">
-        <strong title={employee.name}>
-          <span className="employee-name-full">{employee.name}</span>
-          <span className="employee-name-compact">{getCompactEmployeeName(employee.name)}</span>
-        </strong>
-        <span>{employee.role}</span>
+        <div className="employee-cell__main">
+          <strong title={employee.name}>
+            <span className="employee-name-full">{employee.name}</span>
+            <span className="employee-name-compact">{getCompactEmployeeName(employee.name)}</span>
+          </strong>
+          <span>{employee.role}</span>
+        </div>
+        <button
+          type="button"
+          className={`employee-pin-button ${isPinned ? "employee-pin-button--active" : ""}`}
+          onClick={() => onPinToggle(employee.sourceEmployeeId)}
+          aria-pressed={isPinned}
+          title={isPinned ? "Unpin employee" : "Pin employee to top"}
+        >
+          {isPinned ? "Pinned" : "Pin"}
+        </button>
       </div>
 
       {monthDays.map((day, dayIndex) => {

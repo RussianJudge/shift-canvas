@@ -1482,18 +1482,32 @@ select {
 }
 
 .employee-cell {
-  display: grid;
-  align-content: center;
-  gap: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
   min-height: 3.6rem;
   padding: 0.45rem 0.55rem 0.45rem 0.8rem;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 242, 230, 0.9));
 }
 
+.employee-cell__main {
+  display: grid;
+  align-content: center;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .employee-cell strong {
   font-size: 0.8rem;
   line-height: 1.1;
+}
+
+.employee-cell strong,
+.employee-cell span {
+  min-width: 0;
 }
 
 .employee-name-compact {
@@ -1505,6 +1519,38 @@ select {
   color: var(--muted);
   font-size: 0.62rem;
   line-height: 1.1;
+}
+
+.employee-pin-button {
+  flex: 0 0 auto;
+  min-width: 2.7rem;
+  padding: 0.24rem 0.45rem;
+  border: 1px solid rgba(131, 110, 87, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.employee-pin-button:hover {
+  border-color: color-mix(in srgb, var(--team-accent) 44%, rgba(131, 110, 87, 0.22));
+  color: color-mix(in srgb, var(--team-accent) 72%, #4b3424);
+}
+
+.employee-pin-button--active {
+  border-color: color-mix(in srgb, var(--team-accent) 58%, rgba(131, 110, 87, 0.22));
+  background: color-mix(in srgb, var(--team-accent) 14%, white);
+  color: color-mix(in srgb, var(--team-accent) 72%, #4b3424);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--team-accent) 18%, transparent);
 }
 
 .shift-cell {
@@ -2067,6 +2113,10 @@ select {
     padding: 0.4rem 0.35rem 0.4rem 0.55rem;
   }
 
+  .employee-cell {
+    gap: 0.3rem;
+  }
+
   .employee-cell strong {
     font-size: 0.74rem;
   }
@@ -2082,6 +2132,12 @@ select {
 
   .employee-name-compact {
     display: inline;
+  }
+
+  .employee-pin-button {
+    min-width: 2.1rem;
+    padding-inline: 0.35rem;
+    font-size: 0.52rem;
   }
 
   .profile-grid {

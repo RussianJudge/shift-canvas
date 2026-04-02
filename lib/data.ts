@@ -304,6 +304,21 @@ function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
         }
 
         for (const competency of snapshot.competencies) {
+          const hasClaimedPosting = snapshot.overtimeClaims.some((claim) => {
+            const claimEmployee = employeeMap[claim.employeeId];
+
+            return (
+              claim.scheduleId === schedule.id &&
+              claim.competencyId === competency.id &&
+              segment.dates.includes(claim.date) &&
+              claimEmployee?.scheduleId !== schedule.id
+            );
+          });
+
+          if (hasClaimedPosting) {
+            return true;
+          }
+
           for (const date of segment.dates) {
             let filledCount = 0;
 
