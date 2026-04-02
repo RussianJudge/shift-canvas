@@ -379,28 +379,6 @@ export function OvertimePanel({
               if (postingDates.length === 0) {
                 continue;
               }
-
-              nextPostings.push({
-                id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
-                scheduleId: schedule.id,
-                scheduleName: schedule.name,
-                shiftKind: segment.shiftKind,
-                competencyId: competency.id,
-                competencyCode: competency.code,
-                competencyLabel: competency.label,
-                coverageCompetencyId: competency.id,
-                coverageCompetencyCode: competency.code,
-                coverageCompetencyLabel: competency.label,
-                colorToken: competency.colorToken,
-                dates: postingDates,
-                staffedPeople,
-                requiredStaff: competency.requiredStaff,
-                openShifts: postingDates.length,
-                claimedEmployeeId: null,
-                claimedByName: null,
-                swapEmployeeId: null,
-                swapEmployeeName: null,
-              });
               const swapCandidates = schedule.employees.reduce<
                 Record<string, { employeeId: string; employeeName: string; competencyId: string }>
               >((map, teamEmployee) => {
@@ -445,7 +423,33 @@ export function OvertimePanel({
                 return map;
               }, {});
 
-              for (const candidate of Object.values(swapCandidates)) {
+              const candidateEntries = Object.values(swapCandidates);
+
+              if (candidateEntries.length === 0) {
+                nextPostings.push({
+                  id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
+                  scheduleId: schedule.id,
+                  scheduleName: schedule.name,
+                  shiftKind: segment.shiftKind,
+                  competencyId: competency.id,
+                  competencyCode: competency.code,
+                  competencyLabel: competency.label,
+                  coverageCompetencyId: competency.id,
+                  coverageCompetencyCode: competency.code,
+                  coverageCompetencyLabel: competency.label,
+                  colorToken: competency.colorToken,
+                  dates: postingDates,
+                  staffedPeople,
+                  requiredStaff: competency.requiredStaff,
+                  openShifts: postingDates.length,
+                  claimedEmployeeId: null,
+                  claimedByName: null,
+                  swapEmployeeId: null,
+                  swapEmployeeName: null,
+                });
+              }
+
+              for (const candidate of candidateEntries) {
                 const offeredCompetency = snapshot.competencies.find((entry) => entry.id === candidate.competencyId);
 
                 if (!offeredCompetency) {
