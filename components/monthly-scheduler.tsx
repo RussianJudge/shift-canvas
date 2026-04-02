@@ -291,6 +291,108 @@ function getSelectionCode(
   return "";
 }
 
+function buildSetAutofillPlan({
+  schedule,
+  setDays,
+  assignments,
+  competencies,
+  timeCodes,
+}: {
+  schedule: Schedule;
+  setDays: Array<{ date: string }>;
+  assignments: Record<string, AssignmentSelection>;
+  competencies: Competency[];
+  timeCodes: TimeCode[];
+}) {
+  const nextAssignments = { ...assignments };
+  const setLength = setDays.length;
+
+  if (setLength === 0) {
+    return {
+      nextAssignments,
+      assignedWorkers: 0,
+      assignedCells: 0,
+      unresolvedCompetencies: 0,
+    };
+  }
+
+  const missingCellsByCompetency = new Map<string, number>();
+
+  for (const competency of competencies) {
+    let filledCells = 0;
+
+    for (const day of setDays) {
+      for (const employee of schedule.employees) {
+        const shiftKind = shiftForDate(schedule, day.date);
+        const selection = getSelectionForCell(
+          employee.id,
+          day.date,
+          shiftKind,
+          nextAssignments,
+          timeCodes,
+        );
+
+        if (selection.competencyId === competency.id) {
+          filledCells += 1;
+        }
+      }
+    }
+
+    missingCellsByCompetency.set(
+      competency.id,
+      Math.max(0, competency.requiredStaff * setLength - filledCells),
+    );
+  }
+
+  const fullyBlankWorkers = schedule.employees.filter((employee) =>
+    setDays.every((day) => {
+      const shiftKind = shiftForDate(schedule, day.date);
+      const selection = getSelectionForCell(employee.id, day.date, shiftKind, nextAssignments, timeCodes);
+      return !selection.competencyId && !selection.timeCodeId;
+    }),
+  );
+
+  let assignedWorkers = 0;
+  let assignedCells = 0;
+
+  for (const employee of fullyBlankWorkers) {
+    const bestCompetencyId = employee.competencyIds
+      .map((competencyId) => ({
+        competencyId,
+        missingCells: missingCellsByCompetency.get(competencyId) ?? 0,
+      }))
+      .filter((entry) => entry.missingCells > 0)
+      .sort((left, right) => right.missingCells - left.missingCells)[0]?.competencyId;
+
+    if (!bestCompetencyId) {
+      continue;
+    }
+
+    for (const day of setDays) {
+      nextAssignments[createAssignmentKey(employee.id, day.date)] = {
+        competencyId: bestCompetencyId,
+        timeCodeId: null,
+      };
+      assignedCells += 1;
+    }
+
+    assignedWorkers += 1;
+    missingCellsByCompetency.set(
+      bestCompetencyId,
+      Math.max(0, (missingCellsByCompetency.get(bestCompetencyId) ?? 0) - setLength),
+    );
+  }
+
+  const unresolvedCompetencies = Array.from(missingCellsByCompetency.values()).filter((value) => value > 0).length;
+
+  return {
+    nextAssignments,
+    assignedWorkers,
+    assignedCells,
+    unresolvedCompetencies,
+  };
+}
+
 function AssignmentModal({
   selectedEmployee,
   selectedDate,
@@ -649,6 +751,26 @@ export function MonthlyScheduler({
             date: day.date,
           },
         ];
+      }),
+    );
+  }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.timeCodes]);
+  const fullyBlankSetWorkers = useMemo(() => {
+    if (selectedSetDays.length === 0) {
+      return [];
+    }
+
+    return activeSchedule.employees.filter((employee) =>
+      selectedSetDays.every((day) => {
+        const shiftKind = shiftForDate(activeSchedule, day.date);
+        const selection = getSelectionForCell(
+          employee.id,
+          day.date,
+          shiftKind,
+          draftAssignments,
+          snapshot.timeCodes,
+        );
+
+        return !selection.competencyId && !selection.timeCodeId;
       }),
     );
   }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.timeCodes]);
@@ -1205,6 +1327,38 @@ export function MonthlyScheduler({
     });
   }
 
+  function handleAutofillSet() {
+    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+      return;
+    }
+
+    const plan = buildSetAutofillPlan({
+      schedule: activeSchedule,
+      setDays: selectedSetDays,
+      assignments: draftAssignments,
+      competencies: snapshot.competencies,
+      timeCodes: snapshot.timeCodes,
+    });
+
+    if (plan.assignedWorkers === 0) {
+      setStatusMessage(
+        fullyBlankSetWorkers.length === 0
+          ? "No fully blank workers available in this set."
+          : "No qualified blank workers could fill the remaining post requirements.",
+      );
+      return;
+    }
+
+    startTransition(() => {
+      setDraftAssignments(plan.nextAssignments);
+      setStatusMessage(
+        plan.unresolvedCompetencies > 0
+          ? `Auto-filled ${plan.assignedWorkers} worker${plan.assignedWorkers === 1 ? "" : "s"} across ${plan.assignedCells} cells. ${plan.unresolvedCompetencies} post requirement${plan.unresolvedCompetencies === 1 ? "" : "s"} still short.`
+          : `Auto-filled ${plan.assignedWorkers} worker${plan.assignedWorkers === 1 ? "" : "s"} across ${plan.assignedCells} cells.`,
+      );
+    });
+  }
+
   function handlePrintSchedules() {
     const target = `/schedule/print?month=${currentMonth}`;
     const printWindow = window.open(target, "_blank");
@@ -1308,6 +1462,14 @@ export function MonthlyScheduler({
             </p>
           </div>
           <div className="set-builder-actions">
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={handleAutofillSet}
+              disabled={selectedSetDays.length === 0 || fullyBlankSetWorkers.length === 0}
+            >
+              Auto-fill set
+            </button>
             <button
               type="button"
               className={`ghost-button ${isSelectedSetComplete ? "ghost-button--active" : ""}`}
