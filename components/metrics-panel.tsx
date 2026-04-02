@@ -1,8 +1,6 @@
 import {
-  buildAssignmentIndex,
   formatMonthLabel,
   getEmployeeMap,
-  getMonthDays,
 } from "@/lib/scheduling";
 import type { SchedulerSnapshot } from "@/lib/types";
 
@@ -10,7 +8,7 @@ type TeamCompetencyMetric = {
   competencyId: string;
   code: string;
   colorToken: string;
-  assignedShifts: number;
+  qualifiedPeople: number;
 };
 
 type TeamMetric = {
@@ -23,52 +21,20 @@ type TeamMetric = {
 };
 
 function getTeamMetrics(snapshot: SchedulerSnapshot): TeamMetric[] {
-  const monthDays = getMonthDays(snapshot.month);
-  const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
   const employeeMap = getEmployeeMap(snapshot.schedules);
 
   return snapshot.schedules.map((schedule) => {
-    const competencyCounts = new Map<string, number>();
-
-    for (const employee of schedule.employees) {
-      for (const day of monthDays) {
-        const selection = assignmentIndex[`${employee.id}:${day.date}`];
-
-        if (selection?.competencyId) {
-          competencyCounts.set(
-            selection.competencyId,
-            (competencyCounts.get(selection.competencyId) ?? 0) + 1,
-          );
-        }
-      }
-    }
-
-    for (const claim of snapshot.overtimeClaims) {
-      if (claim.scheduleId !== schedule.id) {
-        continue;
-      }
-
-      const claimEmployee = employeeMap[claim.employeeId];
-
-      if (!claimEmployee || claimEmployee.scheduleId === schedule.id) {
-        continue;
-      }
-
-      competencyCounts.set(
-        claim.competencyId,
-        (competencyCounts.get(claim.competencyId) ?? 0) + 1,
-      );
-    }
-
     const competencyMetrics = snapshot.competencies
       .map((competency) => ({
         competencyId: competency.id,
         code: competency.code,
         colorToken: competency.colorToken,
-        assignedShifts: competencyCounts.get(competency.id) ?? 0,
+        qualifiedPeople: schedule.employees.filter((employee) =>
+          employee.competencyIds.includes(competency.id),
+        ).length,
       }))
-      .filter((metric) => metric.assignedShifts > 0)
-      .sort((left, right) => right.assignedShifts - left.assignedShifts || left.code.localeCompare(right.code));
+      .filter((metric) => metric.qualifiedPeople > 0)
+      .sort((left, right) => right.qualifiedPeople - left.qualifiedPeople || left.code.localeCompare(right.code));
 
     const borrowedClaims = snapshot.overtimeClaims.filter((claim) => {
       if (claim.scheduleId !== schedule.id) {
@@ -79,9 +45,16 @@ function getTeamMetrics(snapshot: SchedulerSnapshot): TeamMetric[] {
       return Boolean(claimEmployee && claimEmployee.scheduleId !== schedule.id);
     });
 
+    const overtimeCounts = borrowedClaims.reduce<Record<string, number>>((counts, claim) => {
+      counts[claim.competencyId] = (counts[claim.competencyId] ?? 0) + 1;
+      return counts;
+    }, {});
+
+    const topOvertimeCompetencyId =
+      Object.entries(overtimeCounts).sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+
     const topCompetencyCode =
-      competencyMetrics[0]?.code ??
-      snapshot.competencies.find((competency) => competency.id === borrowedClaims[0]?.competencyId)?.code ??
+      snapshot.competencies.find((competency) => competency.id === topOvertimeCompetencyId)?.code ??
       null;
 
     return {
@@ -97,9 +70,9 @@ function getTeamMetrics(snapshot: SchedulerSnapshot): TeamMetric[] {
 
 export function MetricsPanel({ snapshot }: { snapshot: SchedulerSnapshot }) {
   const teamMetrics = getTeamMetrics(snapshot);
-  const maxAssignedShifts = Math.max(
+  const maxQualifiedPeople = Math.max(
     1,
-    ...teamMetrics.flatMap((team) => team.competencyMetrics.map((metric) => metric.assignedShifts)),
+    ...teamMetrics.flatMap((team) => team.competencyMetrics.map((metric) => metric.qualifiedPeople)),
   );
   const maxOvertimeShifts = Math.max(1, ...teamMetrics.map((team) => team.overtimeShifts));
 
@@ -128,7 +101,7 @@ export function MetricsPanel({ snapshot }: { snapshot: SchedulerSnapshot }) {
                 <div className="metrics-card__header">
                   <div>
                     <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
-                    <h3 className="metrics-card__title">Competency load</h3>
+                    <h3 className="metrics-card__title">Qualified staff by competency</h3>
                   </div>
                 </div>
 
@@ -140,13 +113,13 @@ export function MetricsPanel({ snapshot }: { snapshot: SchedulerSnapshot }) {
                           <span className={`legend-pill legend-pill--${metric.colorToken.toLowerCase()}`}>
                             {metric.code}
                           </span>
-                          <strong>{metric.assignedShifts}</strong>
+                          <strong>{metric.qualifiedPeople}</strong>
                         </div>
                         <div className="metrics-bar-track">
                           <span
                             className={`metrics-bar-fill metrics-bar-fill--${metric.colorToken.toLowerCase()}`}
                             style={{
-                              width: `${Math.max(8, (metric.assignedShifts / maxAssignedShifts) * 100)}%`,
+                              width: `${Math.max(8, (metric.qualifiedPeople / maxQualifiedPeople) * 100)}%`,
                             }}
                           />
                         </div>
@@ -155,8 +128,8 @@ export function MetricsPanel({ snapshot }: { snapshot: SchedulerSnapshot }) {
                   </div>
                 ) : (
                   <div className="empty-state">
-                    <strong>No competency assignments yet.</strong>
-                    <span>This shift has no competency-coded cells in the current month.</span>
+                    <strong>No competency links yet.</strong>
+                    <span>This shift has no workers linked to competencies yet.</span>
                   </div>
                 )}
               </article>
