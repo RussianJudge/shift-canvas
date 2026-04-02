@@ -3,7 +3,6 @@
 import { redirect } from "next/navigation";
 
 import { clearAppSession, setAppSession } from "@/lib/auth";
-import { getDemoAccountByEmail } from "@/lib/demo-users";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
 type ProfileRow = {
@@ -69,14 +68,7 @@ export async function signIn(formData: FormData) {
     }
   }
 
-  const account = getDemoAccountByEmail(email);
-
-  if (!account) {
-    redirect("/sign-in?error=unknown-email");
-  }
-
-  await setAppSession(account);
-  redirect("/schedule");
+  redirect("/sign-in?error=unknown-email");
 }
 
 export async function signOut() {

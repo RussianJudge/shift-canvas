@@ -33,7 +33,6 @@ function getTeamMetrics(snapshot: SchedulerSnapshot): TeamMetric[] {
           employee.competencyIds.includes(competency.id),
         ).length,
       }))
-      .filter((metric) => metric.qualifiedPeople > 0)
       .sort((left, right) => right.qualifiedPeople - left.qualifiedPeople || left.code.localeCompare(right.code));
 
     const borrowedClaims = snapshot.overtimeClaims.filter((claim) => {
@@ -105,33 +104,29 @@ export function MetricsPanel({ snapshot }: { snapshot: SchedulerSnapshot }) {
                   </div>
                 </div>
 
-                {team.competencyMetrics.length > 0 ? (
-                  <div className="metrics-bars">
-                    {team.competencyMetrics.map((metric) => (
-                      <div key={metric.competencyId} className="metrics-bar-row">
-                        <div className="metrics-bar-row__label">
-                          <span className={`legend-pill legend-pill--${metric.colorToken.toLowerCase()}`}>
-                            {metric.code}
-                          </span>
-                          <strong>{metric.qualifiedPeople}</strong>
-                        </div>
-                        <div className="metrics-bar-track">
-                          <span
-                            className={`metrics-bar-fill metrics-bar-fill--${metric.colorToken.toLowerCase()}`}
-                            style={{
-                              width: `${Math.max(8, (metric.qualifiedPeople / maxQualifiedPeople) * 100)}%`,
-                            }}
-                          />
-                        </div>
+                <div className="metrics-bars">
+                  {team.competencyMetrics.map((metric) => (
+                    <div key={metric.competencyId} className="metrics-bar-row">
+                      <div className="metrics-bar-row__label">
+                        <span className={`legend-pill legend-pill--${metric.colorToken.toLowerCase()}`}>
+                          {metric.code}
+                        </span>
+                        <strong>{metric.qualifiedPeople}</strong>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="empty-state">
-                    <strong>No competency links yet.</strong>
-                    <span>This shift has no workers linked to competencies yet.</span>
-                  </div>
-                )}
+                      <div className="metrics-bar-track">
+                        <span
+                          className={`metrics-bar-fill metrics-bar-fill--${metric.colorToken.toLowerCase()}`}
+                          style={{
+                            width:
+                              metric.qualifiedPeople === 0
+                                ? "0%"
+                                : `${Math.max(8, (metric.qualifiedPeople / maxQualifiedPeople) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </article>
             ))}
           </div>
