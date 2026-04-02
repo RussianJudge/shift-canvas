@@ -56,6 +56,60 @@ function normalizeLookupValue(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function normalizeCompactLookupValue(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function createLookupVariants(value: string) {
+  const variants = new Set<string>();
+  const normalized = normalizeLookupValue(value);
+  const compact = normalizeCompactLookupValue(value);
+
+  if (normalized) {
+    variants.add(normalized);
+  }
+
+  if (compact) {
+    variants.add(compact);
+  }
+
+  return variants;
+}
+
+function createScheduleLookupKeys(schedule: SchedulerSnapshot["schedules"][number]) {
+  const variants = new Set<string>();
+  const idSuffix = schedule.id.replace(/^schedule-/, "");
+
+  [schedule.id, schedule.name, idSuffix, `shift ${schedule.name}`, `shift ${idSuffix}`].forEach((value) => {
+    for (const variant of createLookupVariants(value)) {
+      variants.add(variant);
+    }
+  });
+
+  return [...variants];
+}
+
+function createCompetencyLookupKeys(competency: SchedulerSnapshot["competencies"][number]) {
+  const variants = new Set<string>();
+  const numericCode = competency.code.match(/^\d+$/)?.[0] ?? "";
+
+  [competency.id, competency.code, competency.label].forEach((value) => {
+    for (const variant of createLookupVariants(value)) {
+      variants.add(variant);
+    }
+  });
+
+  if (numericCode) {
+    [`post ${numericCode}`, `p${numericCode}`].forEach((value) => {
+      for (const variant of createLookupVariants(value)) {
+        variants.add(variant);
+      }
+    });
+  }
+
+  return [...variants];
+}
+
 function parseCsvText(text: string) {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -149,6 +203,12 @@ function splitCompetencyValues(value: string) {
     .split(/[,;|/]+/)
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function isTruthyCsvCell(value: string) {
+  const normalized = value.trim().toLowerCase();
+
+  return normalized === "yes" || normalized === "y" || normalized === "true" || normalized === "1" || normalized === "x";
 }
 
 function cloneEmployees(employees: EditableEmployee[]) {
@@ -251,22 +311,47 @@ export function PersonnelPanel({
     [employees],
   );
   const scheduleIdByLookup = useMemo(() => {
-    const entries = snapshot.schedules.flatMap((schedule) => [
-      [normalizeLookupValue(schedule.id), schedule.id] as const,
-      [normalizeLookupValue(schedule.name), schedule.id] as const,
-    ]);
+    const entries = snapshot.schedules.flatMap((schedule) =>
+      createScheduleLookupKeys(schedule).map((key) => [key, schedule.id] as const),
+    );
 
     return new Map(entries);
   }, [snapshot.schedules]);
   const competencyIdByLookup = useMemo(() => {
-    const entries = snapshot.competencies.flatMap((competency) => [
-      [normalizeLookupValue(competency.id), competency.id] as const,
-      [normalizeLookupValue(competency.code), competency.id] as const,
-      [normalizeLookupValue(competency.label), competency.id] as const,
-    ]);
+    const entries = snapshot.competencies.flatMap((competency) =>
+      createCompetencyLookupKeys(competency).map((key) => [key, competency.id] as const),
+    );
 
     return new Map(entries);
   }, [snapshot.competencies]);
+  const csvReservedColumns = useMemo(
+    () =>
+      new Set([
+        "id",
+        "employee_id",
+        "personnel_id",
+        "name",
+        "full_name",
+        "employee",
+        "employee_name",
+        "role",
+        "role_title",
+        "title",
+        "position",
+        "shift",
+        "schedule",
+        "shift_code",
+        "schedule_code",
+        "pattern",
+        "competencies",
+        "competency",
+        "posts",
+        "post",
+        "skills",
+        "qualifications",
+      ]),
+    [],
+  );
 
   const dirtyUpdates = employees
     .map((employee) => normalizeEmployee(employee))
@@ -441,6 +526,20 @@ export function PersonnelPanel({
         "skills",
         "qualifications",
       ]);
+      const matrixCompetencyIds = Object.entries(row).flatMap(([header, value]) => {
+        if (csvReservedColumns.has(header) || !isTruthyCsvCell(value)) {
+          return [];
+        }
+
+        const competencyId = competencyIdByLookup.get(normalizeLookupValue(header));
+
+        if (!competencyId) {
+          unknownCompetencies.add(header);
+          return [];
+        }
+
+        return competencyId;
+      });
 
       if (!csvName && !csvId) {
         skippedCount += 1;
@@ -470,7 +569,7 @@ export function PersonnelPanel({
         notes.push(`Unknown shift "${csvShift}"`);
       }
 
-      const resolvedCompetencyIds = splitCompetencyValues(csvCompetencies).flatMap((value) => {
+      const listedCompetencyIds = splitCompetencyValues(csvCompetencies).flatMap((value) => {
         const competencyId = competencyIdByLookup.get(normalizeLookupValue(value));
 
         if (!competencyId) {
@@ -480,8 +579,9 @@ export function PersonnelPanel({
 
         return competencyId;
       });
+      const resolvedCompetencyIds = [...new Set([...matrixCompetencyIds, ...listedCompetencyIds])];
 
-      if (csvCompetencies && resolvedCompetencyIds.length === 0) {
+      if ((csvCompetencies || matrixCompetencyIds.length > 0) && resolvedCompetencyIds.length === 0) {
         notes.push("No valid competencies matched");
       }
 
