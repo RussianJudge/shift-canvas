@@ -778,6 +778,7 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
   const invalidCompetency = input.updates.find(
     (update) =>
       isBlank(update.code) ||
+      update.code.trim().length > 5 ||
       isBlank(update.label) ||
       !Number.isInteger(update.requiredStaff) ||
       update.requiredStaff < 1,
@@ -786,7 +787,7 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
   if (invalidCompetency) {
     return {
       ok: false,
-      message: "Each competency needs a code, label, and at least 1 required staff.",
+      message: "Each competency needs a code of 5 characters or fewer, a label, and at least 1 required staff.",
     };
   }
 

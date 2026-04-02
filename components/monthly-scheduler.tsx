@@ -474,7 +474,7 @@ export function MonthlyScheduler({
 
     const overtimeRows = Object.values(
       snapshot.overtimeClaims
-        .filter((claim) => claim.scheduleId === activeSchedule.id)
+        .filter((claim) => claim.scheduleId === activeSchedule.id && claim.date.slice(0, 7) === currentMonth)
         .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
           const employee = employeeMap[claim.employeeId];
 
@@ -532,7 +532,7 @@ export function MonthlyScheduler({
         return left.index - right.index;
       })
       .map((entry) => entry.employee);
-  }, [activeSchedule, employeeMap, pinnedEmployeesBySchedule, snapshot, snapshot.overtimeClaims]);
+  }, [activeSchedule, currentMonth, employeeMap, pinnedEmployeesBySchedule, snapshot, snapshot.overtimeClaims]);
 
   if (!activeSchedule) {
     return (

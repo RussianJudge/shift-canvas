@@ -24,12 +24,6 @@ export default async function HomePage() {
             {session ? "Open workspace" : "Log in"}
           </Link>
         </div>
-
-        {!session ? (
-          <div className="auth-home__links">
-            <Link href="/sign-in">Use existing email</Link>
-          </div>
-        ) : null}
       </section>
     </main>
   );

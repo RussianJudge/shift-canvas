@@ -32,9 +32,14 @@ function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
 
 function getCompetencyIssues(competency: EditableCompetency) {
   const issues: string[] = [];
+  const trimmedCode = competency.code.trim();
 
-  if (!competency.code.trim()) {
+  if (!trimmedCode) {
     issues.push("Code required");
+  }
+
+  if (trimmedCode.length > 5) {
+    issues.push("Max 5 characters");
   }
 
   if (!competency.label.trim()) {
@@ -223,6 +228,7 @@ export function CompetenciesPanel({
                 <td>
                   <input
                     className="table-input"
+                    maxLength={5}
                     value={competency.code}
                     onChange={(event) =>
                       updateCompetency(competency.id, (current) => ({

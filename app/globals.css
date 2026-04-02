@@ -1501,7 +1501,7 @@ select {
 }
 
 .employee-cell strong {
-  font-size: 0.8rem;
+  font-size: 0.86rem;
   line-height: 1.1;
 }
 
@@ -2118,7 +2118,7 @@ select {
   }
 
   .employee-cell strong {
-    font-size: 0.74rem;
+    font-size: 0.78rem;
   }
 
   .employee-cell span,

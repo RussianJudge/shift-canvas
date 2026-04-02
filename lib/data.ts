@@ -1,6 +1,5 @@
 import "server-only";
 
-import { demoSchedulerSnapshot } from "@/lib/demo-data";
 import {
   buildAssignmentIndex,
   createSetRangeKey,
@@ -95,24 +94,6 @@ type CompletedSetRow = {
 
 function getDataClient() {
   return getSupabaseAdminClient() ?? getSupabaseServerClient();
-}
-
-function withMonth(snapshot: SchedulerSnapshot, month: string): SchedulerSnapshot {
-  return {
-    ...snapshot,
-    month,
-  };
-}
-
-function subsetSnapshot(
-  month: string,
-  overrides: Partial<SchedulerSnapshot>,
-): SchedulerSnapshot {
-  return {
-    ...withMonth(demoSchedulerSnapshot, month),
-    ...overrides,
-    month,
-  };
 }
 
 function emptySnapshot(month: string, overrides: Partial<SchedulerSnapshot> = {}): SchedulerSnapshot {
@@ -355,7 +336,7 @@ export async function getSchedulerSnapshot(month: string) {
   const supabase = getDataClient();
 
   if (!supabase) {
-    return withMonth(demoSchedulerSnapshot, month);
+    return emptySnapshot(month);
   }
 
   const { monthStart, monthEnd, windowMonths } = getExtendedMonthBounds(month);
@@ -410,7 +391,7 @@ export async function getSchedulerSnapshot(month: string) {
   ];
 
   if (results.some((result) => result.error)) {
-    return withMonth(demoSchedulerSnapshot, month);
+    return emptySnapshot(month);
   }
 
   const employeesBySchedule = buildEmployeesBySchedule(
