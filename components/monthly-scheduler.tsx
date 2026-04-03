@@ -4,6 +4,7 @@ import { Fragment } from "react";
 import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useState, useTransition, startTransition } from "react";
 import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 
 import { saveAssignments, setScheduleSetCompletion } from "@/app/actions";
 import {
@@ -419,7 +420,11 @@ function AssignmentModal({
     return null;
   }
 
-  return (
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
     <div className="assignment-modal-backdrop" onClick={onClose}>
       <section
         className="assignment-modal"
@@ -496,7 +501,8 @@ function AssignmentModal({
           </button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

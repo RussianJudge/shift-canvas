@@ -16,6 +16,12 @@ import type {
 } from "@/lib/types";
 import { getSchedulerSnapshot } from "@/lib/data";
 import {
+  buildOvertimeAssignmentNote,
+  buildSwapOvertimeAssignmentRows,
+  parseOvertimeAssignmentNote,
+  type OvertimeAssignmentRow,
+} from "@/lib/overtime";
+import {
   buildAssignmentIndex,
   createSetRangeKey,
   getEmployeeMap,
@@ -28,25 +34,7 @@ import {
 } from "@/lib/scheduling";
 import { getAppSession } from "@/lib/auth";
 import { getSupabaseAdminClient } from "@/lib/supabase";
-
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
-
-type OvertimeAssignmentRow = {
-  employee_id: string;
-  assignment_date: string;
-  competency_id: string | null;
-  time_code_id: string | null;
-  notes: string | null;
-  shift_kind: ShiftKind;
-};
-
-type ParsedOvertimeNote = {
-  claimantEmployeeId: string | null;
-  claimedCompetencyId: string | null;
-  coverageCompetencyId: string | null;
-  swapEmployeeId: string | null;
-  originalCompetencyId: string | null;
-};
 
 function isBlank(value: string) {
   return value.trim().length === 0;
@@ -55,70 +43,6 @@ function isBlank(value: string) {
 function hasValidShiftPattern(dayShiftDays: number, nightShiftDays: number, offDays: number) {
   return [dayShiftDays, nightShiftDays, offDays].every((value) => Number.isInteger(value) && value >= 0) &&
     dayShiftDays + nightShiftDays + offDays > 0;
-}
-
-function buildOvertimeAssignmentNote({
-  claimantEmployeeId,
-  claimedCompetencyId,
-  coverageCompetencyId,
-  swapEmployeeId,
-  originalCompetencyId,
-}: {
-  claimantEmployeeId: string;
-  claimedCompetencyId: string;
-  coverageCompetencyId?: string | null;
-  swapEmployeeId?: string | null;
-  originalCompetencyId?: string | null;
-}) {
-  const parts = [
-    "OT",
-    `claimant:${claimantEmployeeId}`,
-    `claim:${claimedCompetencyId}`,
-  ];
-
-  if (coverageCompetencyId) {
-    parts.push(`coverage:${coverageCompetencyId}`);
-  }
-
-  if (swapEmployeeId) {
-    parts.push(`swap:${swapEmployeeId}`);
-  }
-
-  if (originalCompetencyId) {
-    parts.push(`orig:${originalCompetencyId}`);
-  }
-
-  return parts.join("|");
-}
-
-function parseOvertimeAssignmentNote(note: string | null | undefined): ParsedOvertimeNote {
-  if (!note?.startsWith("OT|")) {
-    return {
-      claimantEmployeeId: null,
-      claimedCompetencyId: null,
-      coverageCompetencyId: null,
-      swapEmployeeId: null,
-      originalCompetencyId: null,
-    };
-  }
-
-  const values = new Map(
-    note
-      .split("|")
-      .slice(1)
-      .map((part) => {
-        const [key, value] = part.split(":");
-        return [key, value ?? ""];
-      }),
-  );
-
-  return {
-    claimantEmployeeId: values.get("claimant") || null,
-    claimedCompetencyId: values.get("claim") || null,
-    coverageCompetencyId: values.get("coverage") || null,
-    swapEmployeeId: values.get("swap") || null,
-    originalCompetencyId: values.get("orig") || null,
-  };
 }
 
 async function restoreSwappedAssignmentsForClaims(
@@ -621,20 +545,14 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       }
     }
 
-    swapAssignmentRows = input.dates.map((date) => ({
-      employee_id: swapEmployee.id,
-      assignment_date: date,
-      competency_id: coverageCompetencyId,
-      time_code_id: null,
-      notes: buildOvertimeAssignmentNote({
-        claimantEmployeeId: input.employeeId,
-        claimedCompetencyId: input.competencyId,
-        coverageCompetencyId,
-        swapEmployeeId: swapEmployee.id,
-        originalCompetencyId: input.competencyId,
-      }),
-      shift_kind: shiftForDate(targetSchedule, date),
-    }));
+    swapAssignmentRows = buildSwapOvertimeAssignmentRows({
+      claimantEmployeeId: input.employeeId,
+      claimedCompetencyId: input.competencyId,
+      coverageCompetencyId,
+      swapEmployeeId: swapEmployee.id,
+      dates: input.dates,
+      shiftKindForDate: (date) => shiftForDate(targetSchedule, date),
+    });
   }
 
   const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), input.dates[0] ?? null);

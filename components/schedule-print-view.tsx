@@ -232,9 +232,7 @@ function PrintScheduleSheet({
                       activeColorToken ? "shift-cell--coded" : ""
                     }`}
                   >
-                    <span className="shift-cell-button">
-                      {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
-                    </span>
+                    {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
                   </div>
                 );
               })}
