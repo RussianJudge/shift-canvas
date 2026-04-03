@@ -1,6 +1,5 @@
 "use client";
 
-import { Fragment } from "react";
 import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useState, useTransition, startTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -499,111 +498,6 @@ function AssignmentModal({
   );
 }
 
-function PrintScheduleSheet({
-  schedule,
-  monthKey,
-  monthDays,
-  assignments,
-  competencyMap,
-  timeCodeMap,
-  timeCodes,
-  employees,
-}: {
-  schedule: Schedule;
-  monthKey: string;
-  monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
-  assignments: Record<string, AssignmentSelection>;
-  competencyMap: Record<string, Competency>;
-  timeCodeMap: Record<string, TimeCode>;
-  timeCodes: TimeCode[];
-  employees: DisplayEmployee[];
-}) {
-  const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.5rem, 1fr))`;
-
-  return (
-    <section className="print-schedule-sheet">
-      <header className="print-schedule-sheet__header">
-        <div>
-          <span className="print-schedule-sheet__eyebrow">{formatMonthLabel(monthKey)}</span>
-          <h2 className="print-schedule-sheet__title">Shift {schedule.name}</h2>
-        </div>
-      </header>
-
-      <div className="print-schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
-        <div className="employee-header print-cell">
-          <span>{formatMonthLabel(monthKey)}</span>
-          <strong>Employees</strong>
-        </div>
-
-        {monthDays.map((day) => (
-          <div
-            key={`print-header-${schedule.id}-${day.date}`}
-            className={`day-header print-cell ${day.isWeekend ? "day-header--weekend" : ""}`}
-          >
-            <span>{day.dayName.slice(0, 1)}</span>
-            <strong>{day.dayNumber}</strong>
-          </div>
-        ))}
-
-        {employees.map((employee) => {
-          const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
-
-          return (
-            <Fragment key={`print-${schedule.id}-${employee.rowId}`}>
-              <div className="employee-cell print-cell">
-                <div className="employee-cell__main">
-                  <strong>{employee.name}</strong>
-                  <span>{employee.role}</span>
-                </div>
-              </div>
-
-              {monthDays.map((day) => {
-                const isOvertimeCell = !overtimeDateSet || overtimeDateSet.has(day.date);
-                const shiftKind = isOvertimeCell ? shiftForDate(schedule, day.date) : "OFF";
-                const selection = isOvertimeCell
-                  ? getSelectionForCell(employee.sourceEmployeeId, day.date, shiftKind, assignments, timeCodes)
-                  : {
-                      competencyId: null,
-                      timeCodeId: null,
-                    };
-                const overtimeClaimCompetencyId =
-                  !selection.competencyId && !selection.timeCodeId
-                    ? employee.overtimeCompetencyByDate?.[day.date] ?? null
-                    : null;
-                const effectiveSelection = overtimeClaimCompetencyId
-                  ? { competencyId: overtimeClaimCompetencyId, timeCodeId: null }
-                  : selection;
-                const activeCompetency = effectiveSelection.competencyId
-                  ? competencyMap[effectiveSelection.competencyId]
-                  : null;
-                const activeTimeCode = effectiveSelection.timeCodeId
-                  ? timeCodeMap[effectiveSelection.timeCodeId]
-                  : null;
-                const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
-
-                return (
-                  <div
-                    key={`print-cell-${schedule.id}-${employee.rowId}-${day.date}`}
-                    className={`shift-cell print-cell shift-cell--${getShiftTone(shiftKind)} ${
-                      day.isWeekend ? "shift-cell--weekend" : ""
-                    } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
-                      activeColorToken ? "shift-cell--coded" : ""
-                    }`}
-                  >
-                    <span className="shift-cell-button">
-                      {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
-                    </span>
-                  </div>
-                );
-              })}
-            </Fragment>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 export function MonthlyScheduler({
   initialSnapshot,
   initialPinnedEmployeesBySchedule,
@@ -792,21 +686,6 @@ export function MonthlyScheduler({
       }),
     [activeSchedule, currentMonth, employeeMap, pinnedEmployeesBySchedule, snapshot],
   );
-  const printSchedules = useMemo(
-    () =>
-      snapshot.schedules.map((schedule) => ({
-        schedule,
-        employees: buildDisplayEmployeesForSchedule({
-          schedule,
-          snapshot,
-          employeeMap,
-          currentMonth,
-          pinnedEmployeesBySchedule,
-        }),
-      })),
-    [currentMonth, employeeMap, pinnedEmployeesBySchedule, snapshot],
-  );
-
   if (!activeSchedule) {
     return (
       <section className="panel-frame">
@@ -1639,22 +1518,6 @@ export function MonthlyScheduler({
             </div>
           ) : null}
         </div>
-      </section>
-
-      <section className="print-schedule-stack" aria-hidden="true">
-        {printSchedules.map(({ schedule, employees }) => (
-          <PrintScheduleSheet
-            key={`print-sheet-${schedule.id}`}
-            schedule={schedule}
-            monthKey={currentMonth}
-            monthDays={monthDays}
-            assignments={draftAssignments}
-            competencyMap={competencyMap}
-            timeCodeMap={timeCodeMap}
-            timeCodes={snapshot.timeCodes}
-            employees={employees}
-          />
-        ))}
       </section>
 
       {canEdit ? (

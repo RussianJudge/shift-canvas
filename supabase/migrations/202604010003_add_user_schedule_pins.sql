@@ -11,11 +11,21 @@ create table if not exists public.user_schedule_pins (
 create index if not exists user_schedule_pins_user_schedule_idx
   on public.user_schedule_pins (user_id, schedule_id, sort_order);
 
+create or replace function public.update_user_schedule_pin_timestamp()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
 drop trigger if exists user_schedule_pins_updated_at on public.user_schedule_pins;
 
 create trigger user_schedule_pins_updated_at
 before update on public.user_schedule_pins
-for each row execute function public.set_current_timestamp_updated_at();
+for each row execute function public.update_user_schedule_pin_timestamp();
 
 alter table public.user_schedule_pins enable row level security;
 

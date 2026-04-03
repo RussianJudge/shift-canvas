@@ -169,6 +169,10 @@ function getClaimStatus(
     return { canClaim: false, reason: "Select an employee first." };
   }
 
+  if (posting.claimedEmployeeId === employee.id) {
+    return { canClaim: true, reason: "You already claimed this posting." };
+  }
+
   if (!employee.competencyIds.includes(posting.competencyId)) {
     return { canClaim: false, reason: "Employee is not qualified for this post." };
   }
@@ -176,14 +180,14 @@ function getClaimStatus(
   const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
 
   for (const date of posting.dates) {
-    if (shiftForDate(employeeSchedule, date) !== "OFF") {
-      return { canClaim: false, reason: "Posting falls on this employee's regular shift." };
-    }
-
     const selection = getCellSelection(employee, date, assignments);
 
     if (selection.competencyId || selection.timeCodeId) {
       return { canClaim: false, reason: "Employee already has an assignment on one or more posting dates." };
+    }
+
+    if (shiftForDate(employeeSchedule, date) !== "OFF") {
+      return { canClaim: false, reason: "Posting falls on this employee's regular shift." };
     }
   }
 
