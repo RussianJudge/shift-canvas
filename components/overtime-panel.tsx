@@ -717,7 +717,7 @@ export function OvertimePanel({
                         <strong>{posting.competencyCode.replace("Post ", "")}</strong>
                         <span>
                           {posting.coverageCompetencyId !== posting.competencyId
-                            ? `covers ${posting.coverageCompetencyCode}`
+                            ? `fills ${posting.coverageCompetencyCode}`
                             : `${posting.openShifts} shift${posting.openShifts === 1 ? "" : "s"}`}
                         </span>
                       </button>
@@ -728,11 +728,21 @@ export function OvertimePanel({
                     <>
                       <div className="overtime-card-top">
                         <div>
-                          <p className="overtime-card-team">{selectedPosting.competencyCode}</p>
-                          <h3 className="overtime-card-title">{selectedPosting.competencyLabel}</h3>
+                          <p className="overtime-card-team">
+                            {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                              ? `Needed ${selectedPosting.coverageCompetencyCode}`
+                              : selectedPosting.competencyCode}
+                          </p>
+                          <h3 className="overtime-card-title">
+                            {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                              ? selectedPosting.coverageCompetencyLabel
+                              : selectedPosting.competencyLabel}
+                          </h3>
                         </div>
                         <span className={`legend-pill legend-pill--${selectedPosting.colorToken.toLowerCase()}`}>
-                          {selectedPosting.competencyCode.replace("Post ", "")}
+                          {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                            ? `${selectedPosting.competencyCode.replace("Post ", "")} -> ${selectedPosting.coverageCompetencyCode.replace("Post ", "")}`
+                            : selectedPosting.competencyCode.replace("Post ", "")}
                         </span>
                       </div>
 
@@ -746,7 +756,7 @@ export function OvertimePanel({
                       {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId ? (
                         <div className="overtime-card-meta">
                           <span>
-                            Resolves {selectedPosting.coverageCompetencyCode}
+                            Claim {selectedPosting.competencyCode} to fill {selectedPosting.coverageCompetencyCode}
                             {selectedPosting.swapEmployeeName ? ` via ${selectedPosting.swapEmployeeName}` : " via swap"}
                           </span>
                         </div>

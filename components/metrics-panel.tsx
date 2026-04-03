@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
   formatMonthLabel,
@@ -414,7 +415,8 @@ export function MetricsPanel({ snapshot }: { snapshot: SchedulerSnapshot }) {
         </section>
       </div>
 
-      {isTransferModalOpen ? (
+      {isTransferModalOpen && typeof document !== "undefined"
+        ? createPortal(
         <div className="assignment-modal-backdrop" onClick={() => setIsTransferModalOpen(false)}>
           <section
             className="assignment-modal metrics-transfer-modal"
@@ -548,7 +550,8 @@ export function MetricsPanel({ snapshot }: { snapshot: SchedulerSnapshot }) {
               </section>
             ) : null}
           </section>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </section>
   );

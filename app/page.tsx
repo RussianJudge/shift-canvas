@@ -13,9 +13,9 @@ export default async function HomePage() {
       <section className="auth-home__panel">
         <div className="auth-home__copy">
           <span className="auth-eyebrow">Shift Canvas</span>
-          <h1 className="auth-home__title">Log in to manage schedules and shift coverage.</h1>
+          <h1 className="auth-home__title">Turn your personnel data into clear staffing decisions.</h1>
           <p className="auth-home__subtitle">
-            A focused monthly planning workspace for admins, leaders, and workers.
+            Use workforce availability, competencies, and overtime coverage to plan smarter every month.
           </p>
         </div>
 
