@@ -347,6 +347,84 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   };
 }
 
+export async function saveSchedulePins(input: {
+  scheduleId: string;
+  pinnedEmployeeIds: string[];
+}) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to save pinned workers.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Pins could not be saved.",
+    };
+  }
+
+  const profileResult = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("email", session.email)
+    .maybeSingle();
+
+  const userId = (profileResult.data as { id: string } | null)?.id;
+
+  if (profileResult.error || !userId) {
+    return {
+      ok: false,
+      message: "Could not resolve the signed-in user profile for pinning.",
+    };
+  }
+
+  const { error: deleteError } = await supabase
+    .from("user_schedule_pins")
+    .delete()
+    .eq("user_id", userId)
+    .eq("schedule_id", input.scheduleId);
+
+  if (deleteError) {
+    return {
+      ok: false,
+      message: `Could not clear existing pins: ${deleteError.message}`,
+    };
+  }
+
+  if (input.pinnedEmployeeIds.length > 0) {
+    const rows = input.pinnedEmployeeIds.map((employeeId, index) => ({
+      user_id: userId,
+      schedule_id: input.scheduleId,
+      employee_id: employeeId,
+      sort_order: index,
+    }));
+
+    const { error: insertError } = await supabase
+      .from("user_schedule_pins")
+      .insert(rows);
+
+    if (insertError) {
+      return {
+        ok: false,
+        message: `Could not save pinned workers: ${insertError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/schedule");
+
+  return {
+    ok: true,
+    message: "Pinned workers saved.",
+  };
+}
+
 export async function setScheduleSetCompletion(input: SetScheduleCompletionInput) {
   const session = await requireActionRole(["admin", "leader"]);
 

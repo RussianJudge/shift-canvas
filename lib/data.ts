@@ -92,6 +92,16 @@ type CompletedSetRow = {
   end_date: string;
 };
 
+type ProfileRow = {
+  id: string;
+};
+
+type UserSchedulePinRow = {
+  schedule_id: string;
+  employee_id: string;
+  sort_order: number;
+};
+
 function getDataClient() {
   return getSupabaseAdminClient() ?? getSupabaseServerClient();
 }
@@ -564,4 +574,42 @@ export async function getOvertimeMonths(currentMonth: string) {
   return monthsWithPostings.length > 0
     ? monthsWithPostings
     : [currentMonth];
+}
+
+export async function getUserSchedulePins(email: string) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase || !email) {
+    return {};
+  }
+
+  const profileResult = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (profileResult.error || !(profileResult.data as ProfileRow | null)?.id) {
+    return {};
+  }
+
+  const pinsResult = await supabase
+    .from("user_schedule_pins")
+    .select("schedule_id, employee_id, sort_order")
+    .eq("user_id", (profileResult.data as ProfileRow).id)
+    .order("schedule_id")
+    .order("sort_order");
+
+  if (pinsResult.error) {
+    return {};
+  }
+
+  return ((pinsResult.data as UserSchedulePinRow[] | null) ?? []).reduce<Record<string, string[]>>(
+    (map, row) => {
+      map[row.schedule_id] ??= [];
+      map[row.schedule_id].push(row.employee_id);
+      return map;
+    },
+    {},
+  );
 }

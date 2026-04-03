@@ -1590,22 +1590,27 @@ select {
 
 .employee-pin-button {
   flex: 0 0 auto;
-  min-width: 2.7rem;
-  padding: 0.24rem 0.45rem;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(131, 110, 87, 0.22);
-  border-radius: 999px;
+  border-radius: 0.8rem;
   background: rgba(255, 255, 255, 0.76);
   color: var(--muted);
-  font-size: 0.58rem;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
   transition:
     background-color 140ms ease,
     border-color 140ms ease,
     color 140ms ease,
     box-shadow 140ms ease;
+}
+
+.employee-pin-button svg {
+  width: 0.88rem;
+  height: 0.88rem;
+  fill: currentColor;
 }
 
 .employee-pin-button:hover {

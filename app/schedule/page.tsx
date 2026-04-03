@@ -1,7 +1,7 @@
 import { MonthlyScheduler } from "@/components/monthly-scheduler";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { canManageWorkspace, requireAppSession } from "@/lib/auth";
-import { getSchedulerSnapshot } from "@/lib/data";
+import { getSchedulerSnapshot, getUserSchedulePins } from "@/lib/data";
 import { scopeScheduleSnapshot } from "@/lib/role-scopes";
 import { getCurrentMonthKey } from "@/lib/scheduling";
 
@@ -21,11 +21,13 @@ export default async function SchedulePage({
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
   const snapshot = scopeScheduleSnapshot(await getSchedulerSnapshot(month), session);
+  const initialPinnedEmployeesBySchedule = await getUserSchedulePins(session.email);
 
   return (
     <WorkspaceShell viewer={session}>
       <MonthlyScheduler
         initialSnapshot={snapshot}
+        initialPinnedEmployeesBySchedule={initialPinnedEmployeesBySchedule}
         canEdit={canManageWorkspace(session)}
         canManageSetBuilder={session.role !== "worker"}
         canSwitchSchedule={true}

@@ -6,7 +6,7 @@ import { useDeferredValue, useEffect, useMemo, useState, useTransition, startTra
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
-import { saveAssignments, setScheduleSetCompletion } from "@/app/actions";
+import { saveAssignments, saveSchedulePins, setScheduleSetCompletion } from "@/app/actions";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -27,7 +27,6 @@ import {
 import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
 
 const STORAGE_KEY = "shift-canvas-drafts";
-const PINNED_STORAGE_KEY = "shift-canvas-pinned-employees";
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
 type SelectedCell = { employeeId: string; date: string };
 type DragRange = {
@@ -228,12 +227,6 @@ function getScheduleAccent(scheduleId: string) {
 function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
   return Object.fromEntries(
     Object.entries(assignments).map(([key, selection]) => [key, { ...selection }]),
-  );
-}
-
-function clonePinnedEmployees(pinnedEmployees: Record<string, string[]>) {
-  return Object.fromEntries(
-    Object.entries(pinnedEmployees).map(([scheduleId, employeeIds]) => [scheduleId, [...employeeIds]]),
   );
 }
 
@@ -613,12 +606,14 @@ function PrintScheduleSheet({
 
 export function MonthlyScheduler({
   initialSnapshot,
+  initialPinnedEmployeesBySchedule,
   canEdit,
   canManageSetBuilder,
   canSwitchSchedule,
   forcedScheduleId,
 }: {
   initialSnapshot: SchedulerSnapshot;
+  initialPinnedEmployeesBySchedule: Record<string, string[]>;
   canEdit: boolean;
   canManageSetBuilder: boolean;
   canSwitchSchedule: boolean;
@@ -643,11 +638,14 @@ export function MonthlyScheduler({
   const [selectedSetAnchorDate, setSelectedSetAnchorDate] = useState<string | null>(null);
   const [selectedCoverageCompetencyId, setSelectedCoverageCompetencyId] = useState<string | null>(null);
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
-  const [pinnedEmployeesBySchedule, setPinnedEmployeesBySchedule] = useState<Record<string, string[]>>({});
+  const [pinnedEmployeesBySchedule, setPinnedEmployeesBySchedule] = useState<Record<string, string[]>>(
+    initialPinnedEmployeesBySchedule,
+  );
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
+  const [isSavingPins, startPinSaveTransition] = useTransition();
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
@@ -950,7 +948,6 @@ export function MonthlyScheduler({
 
   useEffect(() => {
     const savedDrafts = window.localStorage.getItem(STORAGE_KEY);
-    const savedPinnedEmployees = window.localStorage.getItem(PINNED_STORAGE_KEY);
 
     if (savedDrafts) {
       try {
@@ -961,17 +958,12 @@ export function MonthlyScheduler({
       }
     }
 
-    if (savedPinnedEmployees) {
-      try {
-        const parsed = JSON.parse(savedPinnedEmployees) as Record<string, string[]>;
-        setPinnedEmployeesBySchedule(parsed);
-      } catch {
-        window.localStorage.removeItem(PINNED_STORAGE_KEY);
-      }
-    }
-
     setIsDraftHydrated(true);
   }, []);
+
+  useEffect(() => {
+    setPinnedEmployeesBySchedule(initialPinnedEmployeesBySchedule);
+  }, [initialPinnedEmployeesBySchedule]);
 
   useEffect(() => {
     if (!isDraftHydrated) {
@@ -984,21 +976,6 @@ export function MonthlyScheduler({
 
     return () => window.clearTimeout(timer);
   }, [draftAssignments, isDraftHydrated]);
-
-  useEffect(() => {
-    if (!isDraftHydrated) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      window.localStorage.setItem(
-        PINNED_STORAGE_KEY,
-        JSON.stringify(clonePinnedEmployees(pinnedEmployeesBySchedule)),
-      );
-    }, 160);
-
-    return () => window.clearTimeout(timer);
-  }, [isDraftHydrated, pinnedEmployeesBySchedule]);
 
   useEffect(() => {
     function handlePointerUp() {
@@ -1228,24 +1205,42 @@ export function MonthlyScheduler({
   }
 
   function handlePinToggle(employeeId: string) {
+    const currentPins = pinnedEmployeesBySchedule[activeSchedule.id] ?? [];
+    const nextPins = currentPins.includes(employeeId)
+      ? currentPins.filter((pinnedEmployeeId) => pinnedEmployeeId !== employeeId)
+      : [...currentPins, employeeId];
+
     startTransition(() => {
       setPinnedEmployeesBySchedule((current) => {
-        const next = clonePinnedEmployees(current);
-        const currentPins = next[activeSchedule.id] ?? [];
+        const next = Object.fromEntries(
+          Object.entries(current).map(([scheduleId, employeeIds]) => [scheduleId, [...employeeIds]]),
+        ) as Record<string, string[]>;
+
+        if (nextPins.length === 0) {
+          delete next[activeSchedule.id];
+        } else {
+          next[activeSchedule.id] = nextPins;
+        }
 
         if (currentPins.includes(employeeId)) {
-          next[activeSchedule.id] = currentPins.filter((pinnedEmployeeId) => pinnedEmployeeId !== employeeId);
-          if (next[activeSchedule.id].length === 0) {
-            delete next[activeSchedule.id];
-          }
           setStatusMessage("Employee unpinned");
           return next;
         }
 
-        next[activeSchedule.id] = [...currentPins, employeeId];
         setStatusMessage("Employee pinned to top");
         return next;
       });
+    });
+
+    startPinSaveTransition(async () => {
+      const result = await saveSchedulePins({
+        scheduleId: activeSchedule.id,
+        pinnedEmployeeIds: nextPins,
+      });
+
+      if (!result.ok) {
+        setStatusMessage(result.message);
+      }
     });
   }
 
@@ -1751,7 +1746,9 @@ function EmployeeRow({
           aria-pressed={isPinned}
           title={isPinned ? "Unpin employee" : "Pin employee to top"}
         >
-          {isPinned ? "Pinned" : "Pin"}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 3h6l-1 5 4 4v2h-5v7l-1-1-1 1v-7H6v-2l4-4-1-5Z" />
+          </svg>
         </button>
       </div>
 
