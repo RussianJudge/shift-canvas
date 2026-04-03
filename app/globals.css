@@ -1643,9 +1643,10 @@ select {
   align-content: center;
   gap: 0;
   min-height: 3.6rem;
-  padding: 0.28rem 0.14rem;
+  padding: 0;
   content-visibility: auto;
   contain-intrinsic-size: 58px;
+  overflow: hidden;
 }
 
 .shift-cell--range {
@@ -1734,9 +1735,14 @@ select {
 }
 
 .shift-cell-button {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
-  min-height: 2.05rem;
-  padding: 0.1rem 0.2rem;
+  min-height: 100%;
+  padding: 0.28rem 0.14rem;
   border: 0;
   border-radius: 0;
   background: transparent;
