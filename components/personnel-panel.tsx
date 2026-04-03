@@ -274,6 +274,7 @@ export function PersonnelPanel({
   const [statusMessage, setStatusMessage] = useState("");
   const [search, setSearch] = useState("");
   const [selectedScheduleFilter, setSelectedScheduleFilter] = useState("all");
+  const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
   const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
   const [isSaving, startSaveTransition] = useTransition();
@@ -369,6 +370,13 @@ export function PersonnelPanel({
           return false;
         }
 
+        if (
+          selectedCompetencyFilter !== "all" &&
+          !employee.competencyIds.includes(selectedCompetencyFilter)
+        ) {
+          return false;
+        }
+
         if (!query) {
           return true;
         }
@@ -382,7 +390,7 @@ export function PersonnelPanel({
           (scheduleNameById[left.scheduleId] ?? "").localeCompare(scheduleNameById[right.scheduleId] ?? "") ||
           left.name.localeCompare(right.name),
       );
-  }, [employees, scheduleNameById, search, selectedScheduleFilter]);
+  }, [employees, scheduleNameById, search, selectedCompetencyFilter, selectedScheduleFilter]);
 
   const groupedEmployees = useMemo(() => {
     return visibleEmployees.reduce<Array<{ type: "group"; label: string } | { type: "employee"; value: EditableEmployee }>>(
@@ -694,6 +702,21 @@ export function PersonnelPanel({
           </select>
         </label>
 
+        <label className="field">
+          <span>Competency</span>
+          <select
+            value={selectedCompetencyFilter}
+            onChange={(event) => setSelectedCompetencyFilter(event.target.value)}
+          >
+            <option value="all">All competencies</option>
+            {snapshot.competencies.map((competency) => (
+              <option key={competency.id} value={competency.id}>
+                {competency.code}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div className="planner-actions">
           <button type="button" className="ghost-button" onClick={handleAddEmployee}>
             Add employee
@@ -985,7 +1008,7 @@ export function PersonnelPanel({
                 <td colSpan={5}>
                   <div className="empty-state">
                     <strong>No employees matched that filter.</strong>
-                    <span>Try a different search term or shift filter.</span>
+                    <span>Try a different search term, shift, or competency filter.</span>
                   </div>
                 </td>
               </tr>
