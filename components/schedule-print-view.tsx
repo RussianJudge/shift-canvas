@@ -227,7 +227,9 @@ function PrintScheduleSheet({
                     key={`print-cell-${schedule.id}-${employee.rowId}-${day.date}`}
                     className={`shift-cell print-cell shift-cell--${getShiftTone(shiftKind)} ${
                       day.isWeekend ? "shift-cell--weekend" : ""
-                    } ${activeColorToken ? "shift-cell--coded" : ""}`}
+                    } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
+                      activeColorToken ? "shift-cell--coded" : ""
+                    }`}
                   >
                     {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
                   </div>

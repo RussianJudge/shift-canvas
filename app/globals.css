@@ -2311,8 +2311,8 @@ select {
   }
 
   body {
-    -webkit-print-color-adjust: economy;
-    print-color-adjust: economy;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .workspace-sidebar,
@@ -2401,14 +2401,55 @@ select {
   .print-schedule-grid .shift-cell {
     color: #1f2937;
     font-weight: 700;
+    border: 1px solid rgba(148, 163, 184, 0.3);
   }
 
-  .print-schedule-grid .shift-cell--day,
-  .print-schedule-grid .shift-cell--night,
-  .print-schedule-grid .shift-cell--off,
-  .print-schedule-grid .shift-cell--weekend,
-  .print-schedule-grid .shift-cell--coded {
-    background: white !important;
+  .print-schedule-grid .shift-cell--day {
+    background: #fef3c7 !important;
+  }
+
+  .print-schedule-grid .shift-cell--night {
+    background: #dbeafe !important;
+  }
+
+  .print-schedule-grid .shift-cell--off {
+    background: #f3f4f6 !important;
+  }
+
+  .print-schedule-grid .shift-cell--weekend {
+    box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.12) !important;
+  }
+
+  .print-schedule-grid .shift-cell.legend-pill--amber {
+    background: #fde68a !important;
+  }
+
+  .print-schedule-grid .shift-cell.legend-pill--teal {
+    background: #99f6e4 !important;
+  }
+
+  .print-schedule-grid .shift-cell.legend-pill--violet {
+    background: #ddd6fe !important;
+  }
+
+  .print-schedule-grid .shift-cell.legend-pill--rose {
+    background: #fecdd3 !important;
+  }
+
+  .print-schedule-grid .shift-cell.legend-pill--blue {
+    background: #bfdbfe !important;
+  }
+
+  .print-schedule-grid .shift-cell.legend-pill--lime {
+    background: #d9f99d !important;
+  }
+
+  .print-schedule-grid .shift-cell.legend-pill--orange {
+    background: #fed7aa !important;
+  }
+
+  .print-schedule-grid .shift-cell.legend-pill--slate {
+    background: #e2e8f0 !important;
   }
 
   .print-schedule-grid .employee-cell__main span {
