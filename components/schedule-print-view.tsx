@@ -160,7 +160,7 @@ function PrintScheduleSheet({
   employees: DisplayEmployee[];
 }) {
   const monthDays = getMonthDays(monthKey);
-  const gridColumns = `10.5rem repeat(${monthDays.length}, minmax(2.5rem, 1fr))`;
+  const gridColumns = `9rem repeat(${monthDays.length}, minmax(2.2rem, 1fr))`;
 
   return (
     <section className="print-schedule-sheet">
@@ -195,7 +195,6 @@ function PrintScheduleSheet({
               <div className="employee-cell print-cell">
                 <div className="employee-cell__main">
                   <strong>{employee.name}</strong>
-                  <span>{employee.role}</span>
                 </div>
               </div>
 
@@ -228,9 +227,7 @@ function PrintScheduleSheet({
                     key={`print-cell-${schedule.id}-${employee.rowId}-${day.date}`}
                     className={`shift-cell print-cell shift-cell--${getShiftTone(shiftKind)} ${
                       day.isWeekend ? "shift-cell--weekend" : ""
-                    } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
-                      activeColorToken ? "shift-cell--coded" : ""
-                    }`}
+                    } ${activeColorToken ? "shift-cell--coded" : ""}`}
                   >
                     {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
                   </div>

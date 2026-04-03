@@ -2311,8 +2311,8 @@ select {
   }
 
   body {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    -webkit-print-color-adjust: economy;
+    print-color-adjust: economy;
   }
 
   .workspace-sidebar,
@@ -2369,6 +2369,7 @@ select {
     top: auto !important;
     min-height: 0;
     box-shadow: none !important;
+    background: white !important;
   }
 
   .print-schedule-grid .employee-header {
@@ -2395,5 +2396,22 @@ select {
     background: transparent;
     box-shadow: none;
     font-size: 0.68rem;
+  }
+
+  .print-schedule-grid .shift-cell {
+    color: #1f2937;
+    font-weight: 700;
+  }
+
+  .print-schedule-grid .shift-cell--day,
+  .print-schedule-grid .shift-cell--night,
+  .print-schedule-grid .shift-cell--off,
+  .print-schedule-grid .shift-cell--weekend,
+  .print-schedule-grid .shift-cell--coded {
+    background: white !important;
+  }
+
+  .print-schedule-grid .employee-cell__main span {
+    display: none;
   }
 }
