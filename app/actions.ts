@@ -129,6 +129,73 @@ async function restoreSwappedAssignmentsForClaims(
   return { ok: true as const };
 }
 
+async function clearClaimantAssignmentsForClaims(
+  supabase: SupabaseAdminClient,
+  claims: Array<{ employeeId: string; competencyId: string; date: string }>,
+) {
+  if (claims.length === 0) {
+    return { ok: true as const };
+  }
+
+  const groupedClaims = claims.reduce<Record<string, { employeeId: string; competencyId: string; dates: string[] }>>(
+    (map, claim) => {
+      const key = `${claim.employeeId}:${claim.competencyId}`;
+      map[key] ??= {
+        employeeId: claim.employeeId,
+        competencyId: claim.competencyId,
+        dates: [],
+      };
+      map[key].dates.push(claim.date);
+      return map;
+    },
+    {},
+  );
+
+  for (const group of Object.values(groupedClaims)) {
+    const notePrefix = `OT|claimant:${group.employeeId}|claim:${group.competencyId}|`;
+
+    const noteDeleteResults = await Promise.all(
+      group.dates.map((date) =>
+        supabase
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", group.employeeId)
+          .eq("assignment_date", date)
+          .like("notes", `${notePrefix}%`),
+      ),
+    );
+    const noteDeleteError = noteDeleteResults.find((result) => result.error)?.error;
+
+    if (noteDeleteError) {
+      return {
+        ok: false as const,
+        message: `Could not clear overtime assignments: ${noteDeleteError.message}`,
+      };
+    }
+
+    const fallbackDeleteResults = await Promise.all(
+      group.dates.map((date) =>
+        supabase
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", group.employeeId)
+          .eq("assignment_date", date)
+          .eq("competency_id", group.competencyId),
+      ),
+    );
+    const fallbackDeleteError = fallbackDeleteResults.find((result) => result.error)?.error;
+
+    if (fallbackDeleteError) {
+      return {
+        ok: false as const,
+        message: `Could not clear overtime assignments: ${fallbackDeleteError.message}`,
+      };
+    }
+  }
+
+  return { ok: true as const };
+}
+
 async function requireActionRole(allowedRoles: AppRole[]) {
   const session = await getAppSession();
 
@@ -239,22 +306,19 @@ async function removeStaleOvertimeClaims(
       };
     }
 
-    const assignmentDeleteResults = await Promise.all(
-      claimsToRemove.map((claim) =>
-        supabase
-          .from("schedule_assignments")
-          .delete()
-          .eq("employee_id", claim.employeeId)
-          .eq("assignment_date", claim.date)
-          .eq("competency_id", claim.competencyId),
-      ),
+    const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
+      supabase,
+      claimsToRemove.map((claim) => ({
+        employeeId: claim.employeeId,
+        competencyId: claim.competencyId,
+        date: claim.date,
+      })),
     );
-    const firstAssignmentDeleteError = assignmentDeleteResults.find((result) => result.error)?.error;
 
-    if (firstAssignmentDeleteError) {
+    if (!clearAssignmentsResult.ok) {
       return {
         ok: false as const,
-        message: `Assignments saved, but overtime cleanup failed: ${firstAssignmentDeleteError.message}`,
+        message: `Assignments saved, but overtime cleanup failed: ${clearAssignmentsResult.message}`,
         removedClaims,
       };
     }
@@ -809,23 +873,19 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     };
   }
 
-  const deleteResults = await Promise.all(
-    input.dates.map((date) =>
-      supabase
-        .from("schedule_assignments")
-        .delete()
-        .eq("employee_id", input.employeeId)
-        .eq("assignment_date", date)
-        .eq("competency_id", input.competencyId)
-    ),
+  const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
+    supabase,
+    input.dates.map((date) => ({
+      employeeId: input.employeeId,
+      competencyId: input.competencyId,
+      date,
+    })),
   );
 
-  const firstDeleteError = deleteResults.find((result) => result.error)?.error;
-
-  if (firstDeleteError) {
+  if (!clearAssignmentsResult.ok) {
     return {
       ok: false,
-      message: `Could not clear overtime assignments: ${firstDeleteError.message}`,
+      message: clearAssignmentsResult.message,
     };
   }
 

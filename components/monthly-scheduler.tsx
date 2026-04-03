@@ -260,6 +260,24 @@ function formatShortDate(isoDate: string) {
   }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
+function formatMonthDateRange(monthDays: Array<{ date: string; dayNumber: number }>) {
+  const firstDay = monthDays[0];
+  const lastDay = monthDays[monthDays.length - 1];
+
+  if (!firstDay || !lastDay) {
+    return "";
+  }
+
+  const firstDate = new Date(`${firstDay.date}T00:00:00Z`);
+  const monthLabel = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(firstDate);
+
+  return `${monthLabel} ${firstDay.dayNumber}-${lastDay.dayNumber}`;
+}
+
 function formatStaffCount(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
@@ -1324,11 +1342,8 @@ export function MonthlyScheduler({
       style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
     >
       <div className="panel-heading panel-heading--split">
-        <h1 className="panel-title">Schedule</h1>
+        <h1 className="panel-title">{formatMonthDateRange(monthDays)}</h1>
         <div className="planner-actions">
-          <div className="planner-actions__row planner-actions__row--month">
-            <span className="month-indicator">{formatMonthLabel(currentMonth)}</span>
-          </div>
           <div className="planner-actions__row planner-actions__row--nav">
             <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
               Previous month
@@ -1403,14 +1418,6 @@ export function MonthlyScheduler({
       {canManageSetBuilder ? (
       <section className="set-builder" aria-label="Set builder">
         <div className="set-builder-heading">
-          <div>
-            <h2 className="set-builder-title">Set Builder</h2>
-            <p className="set-builder-context">
-              {selectedSetDays.length > 0
-                ? `${activeSchedule.name} set · ${formatShortDate(selectedSetDays[0].date)} - ${formatShortDate(selectedSetDays[selectedSetDays.length - 1].date)}`
-                : "Click a worked day in the top row to inspect this set"}
-            </p>
-          </div>
           <div className="set-builder-actions">
             <button
               type="button"
