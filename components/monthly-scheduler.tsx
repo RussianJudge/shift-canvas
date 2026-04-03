@@ -25,8 +25,9 @@ import {
 } from "@/lib/scheduling";
 import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
 
-const STORAGE_KEY = "shift-canvas-drafts";
+const STORAGE_KEY = "shift-canvas-drafts-v2";
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
+type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
 type SelectedCell = { employeeId: string; date: string };
 type DragRange = {
   employeeId: string;
@@ -227,6 +228,28 @@ function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
   return Object.fromEntries(
     Object.entries(assignments).map(([key, selection]) => [key, { ...selection }]),
   );
+}
+
+function buildDraftDelta(
+  baselineAssignments: Record<string, AssignmentSelection>,
+  draftAssignments: Record<string, AssignmentSelection>,
+): PersistedDraftAssignments {
+  return Array.from(
+    new Set([...Object.keys(baselineAssignments), ...Object.keys(draftAssignments)]),
+  ).reduce<PersistedDraftAssignments>((delta, key) => {
+    const baseline = baselineAssignments[key] ?? null;
+    const draft = draftAssignments[key] ?? null;
+
+    if (
+      baseline?.competencyId === draft?.competencyId &&
+      baseline?.timeCodeId === draft?.timeCodeId
+    ) {
+      return delta;
+    }
+
+    delta[key] = draft ? { ...draft } : null;
+    return delta;
+  }, {});
 }
 
 function formatShortDate(isoDate: string) {
@@ -830,8 +853,20 @@ export function MonthlyScheduler({
 
     if (savedDrafts) {
       try {
-        const parsed = JSON.parse(savedDrafts) as Record<string, AssignmentSelection>;
-        setDraftAssignments((current) => ({ ...current, ...parsed }));
+        const parsed = JSON.parse(savedDrafts) as PersistedDraftAssignments;
+        setDraftAssignments((current) => {
+          const next = { ...current };
+
+          for (const [key, selection] of Object.entries(parsed)) {
+            if (selection) {
+              next[key] = selection;
+            } else {
+              delete next[key];
+            }
+          }
+
+          return next;
+        });
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
       }
@@ -850,11 +885,18 @@ export function MonthlyScheduler({
     }
 
     const timer = window.setTimeout(() => {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(draftAssignments));
+      const delta = buildDraftDelta(baselineAssignments, draftAssignments);
+
+      if (Object.keys(delta).length === 0) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(delta));
     }, 160);
 
     return () => window.clearTimeout(timer);
-  }, [draftAssignments, isDraftHydrated]);
+  }, [baselineAssignments, draftAssignments, isDraftHydrated]);
 
   useEffect(() => {
     function handlePointerUp() {

@@ -139,7 +139,11 @@ async function requireActionRole(allowedRoles: AppRole[]) {
   return session;
 }
 
-async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: string[]) {
+async function removeStaleOvertimeClaims(
+  supabase: SupabaseAdminClient,
+  months: string[],
+  forcedRanges: Array<{ scheduleId: string; startDate: string; endDate: string }> = [],
+) {
   const uniqueMonths = Array.from(new Set(months.filter(Boolean)));
   let removedClaims = 0;
 
@@ -181,7 +185,14 @@ async function removeStaleOvertimeClaims(supabase: SupabaseAdminClient, months: 
             return [];
           }
 
-          if (!completedDateKeys.has(`${schedule.id}:${day.date}`)) {
+          const isForceEvaluated = forcedRanges.some(
+            (range) =>
+              range.scheduleId === schedule.id &&
+              day.date >= range.startDate &&
+              day.date <= range.endDate,
+          );
+
+          if (!isForceEvaluated && !completedDateKeys.has(`${schedule.id}:${day.date}`)) {
             return [];
           }
 
@@ -514,15 +525,27 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
         message: `Could not unmark that set: ${error.message}`,
       };
     }
+
+    const cleanupResult = await removeStaleOvertimeClaims(supabase, touchedMonths, [
+      {
+        scheduleId: input.scheduleId,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      },
+    ]);
+
+    revalidatePath("/schedule");
+    revalidatePath("/overtime");
+
+    return {
+      ok: true,
+      message: cleanupResult.ok
+        ? cleanupResult.removedClaims > 0
+          ? `Set reopened for edits. Removed ${cleanupResult.removedClaims} overtime claim${cleanupResult.removedClaims === 1 ? "" : "s"} that were no longer needed.`
+          : "Set reopened for edits. Existing valid overtime claims were kept."
+        : cleanupResult.message,
+    };
   }
-
-  revalidatePath("/schedule");
-  revalidatePath("/overtime");
-
-  return {
-    ok: true,
-    message: "Set reopened for edits. Existing overtime claims were left in place.",
-  };
 }
 
 export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
