@@ -2401,19 +2401,20 @@ select {
   .print-schedule-grid .shift-cell {
     color: #1f2937;
     font-weight: 700;
+    font-size: 0.62rem;
     border: 1px solid rgba(148, 163, 184, 0.3);
   }
 
   .print-schedule-grid .shift-cell--day {
-    background: #fef3c7 !important;
+    background: #f9f1d9 !important;
   }
 
   .print-schedule-grid .shift-cell--night {
-    background: #dbeafe !important;
+    background: #e7eef9 !important;
   }
 
   .print-schedule-grid .shift-cell--off {
-    background: #f3f4f6 !important;
+    background: #f2f1ef !important;
   }
 
   .print-schedule-grid .shift-cell--weekend {
@@ -2421,35 +2422,35 @@ select {
   }
 
   .print-schedule-grid .shift-cell.legend-pill--amber {
-    background: #fde68a !important;
+    background: #f7e7b3 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--teal {
-    background: #99f6e4 !important;
+    background: #c6ece6 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--violet {
-    background: #ddd6fe !important;
+    background: #e6def4 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--rose {
-    background: #fecdd3 !important;
+    background: #f4d8de !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--blue {
-    background: #bfdbfe !important;
+    background: #d7e4f6 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--lime {
-    background: #d9f99d !important;
+    background: #dceab8 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--orange {
-    background: #fed7aa !important;
+    background: #f2debf !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--slate {
-    background: #e2e8f0 !important;
+    background: #e5e8ec !important;
   }
 
   .print-schedule-grid .employee-cell__main span {
