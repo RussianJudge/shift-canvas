@@ -56,6 +56,13 @@ type CoverageSummary = {
   missingDates: string[];
 };
 
+type CopiedSetTemplate = {
+  scheduleId: string;
+  sourceStartDate: string;
+  setLength: number;
+  selectionsByEmployeeId: Record<string, AssignmentSelection[]>;
+};
+
 function buildDisplayEmployeesForSchedule({
   schedule,
   snapshot,
@@ -262,20 +269,17 @@ function formatShortDate(isoDate: string) {
 
 function formatMonthDateRange(monthDays: Array<{ date: string; dayNumber: number }>) {
   const firstDay = monthDays[0];
-  const lastDay = monthDays[monthDays.length - 1];
 
-  if (!firstDay || !lastDay) {
+  if (!firstDay) {
     return "";
   }
 
   const firstDate = new Date(`${firstDay.date}T00:00:00Z`);
-  const monthLabel = new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "long",
     year: "numeric",
     timeZone: "UTC",
   }).format(firstDate);
-
-  return `${monthLabel} ${firstDay.dayNumber}-${lastDay.dayNumber}`;
 }
 
 function formatStaffCount(value: number) {
@@ -572,6 +576,7 @@ export function MonthlyScheduler({
   const [editorCell, setEditorCell] = useState<SelectedCell | null>(null);
   const [selectedSetAnchorDate, setSelectedSetAnchorDate] = useState<string | null>(null);
   const [selectedCoverageCompetencyId, setSelectedCoverageCompetencyId] = useState<string | null>(null);
+  const [copiedSetTemplate, setCopiedSetTemplate] = useState<CopiedSetTemplate | null>(null);
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
   const [pinnedEmployeesBySchedule, setPinnedEmployeesBySchedule] = useState<Record<string, string[]>>(
     initialPinnedEmployeesBySchedule,
@@ -606,6 +611,13 @@ export function MonthlyScheduler({
           selectedSetDays[selectedSetDays.length - 1].date,
         )
       : false;
+  const canPasteSet =
+    copiedSetTemplate !== null &&
+    copiedSetTemplate.scheduleId === activeSchedule.id &&
+    copiedSetTemplate.setLength === selectedSetDays.length &&
+    selectedSetDays.length > 0 &&
+    !isSelectedSetComplete &&
+    copiedSetTemplate.sourceStartDate !== selectedSetDays[0]?.date;
   const competencyCoverage = useMemo(() => {
     return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
@@ -1302,6 +1314,75 @@ export function MonthlyScheduler({
     });
   }
 
+  function handleCopySet() {
+    if (!canManageSetBuilder || selectedSetDays.length === 0 || !isSelectedSetComplete) {
+      return;
+    }
+
+    const selectionsByEmployeeId = Object.fromEntries(
+      activeSchedule.employees.map((employee) => [
+        employee.id,
+        selectedSetDays.map((day) =>
+          getSelectionForCell(
+            employee.id,
+            day.date,
+            shiftForDate(activeSchedule, day.date),
+            draftAssignments,
+            snapshot.timeCodes,
+          ),
+        ),
+      ]),
+    );
+
+    setCopiedSetTemplate({
+      scheduleId: activeSchedule.id,
+      sourceStartDate: selectedSetDays[0].date,
+      setLength: selectedSetDays.length,
+      selectionsByEmployeeId,
+    });
+    setStatusMessage("Set copied. Select another set on this shift to paste it.");
+  }
+
+  function handlePasteSet() {
+    if (!canEdit || !canManageSetBuilder || !copiedSetTemplate || !canPasteSet) {
+      return;
+    }
+
+    startTransition(() => {
+      setDraftAssignments((current) => {
+        const nextAssignments = { ...current };
+
+        for (const employee of activeSchedule.employees) {
+          const copiedSelections = copiedSetTemplate.selectionsByEmployeeId[employee.id];
+
+          if (!copiedSelections) {
+            continue;
+          }
+
+          selectedSetDays.forEach((day, index) => {
+            const copiedSelection = copiedSelections[index] ?? getDefaultSelection(shiftForDate(activeSchedule, day.date), snapshot.timeCodes);
+            const key = createAssignmentKey(employee.id, day.date);
+
+            if (!copiedSelection.competencyId && !copiedSelection.timeCodeId) {
+              delete nextAssignments[key];
+              return;
+            }
+
+            nextAssignments[key] = { ...copiedSelection };
+          });
+        }
+
+        return nextAssignments;
+      });
+
+      setStatusMessage(
+        `Pasted set onto ${formatShortDate(selectedSetDays[0].date)}-${formatShortDate(
+          selectedSetDays[selectedSetDays.length - 1].date,
+        )}.`,
+      );
+    });
+  }
+
   function handleClearSet() {
     if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
       return;
@@ -1419,6 +1500,22 @@ export function MonthlyScheduler({
       <section className="set-builder" aria-label="Set builder">
         <div className="set-builder-heading">
           <div className="set-builder-actions">
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={handleCopySet}
+              disabled={selectedSetDays.length === 0 || !isSelectedSetComplete}
+            >
+              Copy set
+            </button>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={handlePasteSet}
+              disabled={!canPasteSet}
+            >
+              Paste set
+            </button>
             <button
               type="button"
               className="ghost-button"
