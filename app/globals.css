@@ -1225,6 +1225,17 @@ select {
   gap: 0.75rem;
 }
 
+.print-preview-launcher {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.print-preview-launcher .toolbar-status {
+  margin: 0;
+  white-space: nowrap;
+}
+
 .print-preview-stack {
   display: grid;
   gap: 1rem;

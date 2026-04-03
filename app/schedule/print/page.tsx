@@ -26,13 +26,13 @@ export default async function SchedulePrintPage({
 
   return (
     <main className="print-preview-page">
-      <PrintDialogLauncher />
       <header className="print-preview-toolbar">
         <div>
           <span className="panel-eyebrow">Print Preview</span>
           <h1 className="panel-title">Schedule · {formatMonthLabel(month)}</h1>
         </div>
         <div className="print-preview-toolbar__actions">
+          <PrintDialogLauncher />
           <Link href={`/schedule?month=${month}`} className="ghost-button">
             Back to schedule
           </Link>
