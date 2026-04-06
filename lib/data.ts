@@ -171,6 +171,10 @@ function getMonthBounds(month: string) {
   };
 }
 
+function getYearStart(dateKey: string) {
+  return `${dateKey.slice(0, 4)}-01-01`;
+}
+
 /** Expands a month into the previous/current/next query window for cross-month sets. */
 function getExtendedMonthBounds(month: string) {
   const previousMonth = shiftMonthKey(month, -1);
@@ -521,6 +525,26 @@ export async function getPersonnelSnapshot(month: string) {
   };
 }
 
+export async function getMetricsOvertimeHistory(today: string) {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    return [];
+  }
+
+  const result = await supabase
+    .from("overtime_claims")
+    .select("id, schedule_id, employee_id, competency_id, assignment_date")
+    .gte("assignment_date", getYearStart(today))
+    .lte("assignment_date", today);
+
+  if (result.error) {
+    return [];
+  }
+
+  return mapOvertimeClaims((result.data as OvertimeClaimRow[] | null) ?? []);
+}
+
 export async function getSchedulesSnapshot(month: string) {
   const supabase = getDataClient();
 
@@ -689,19 +713,40 @@ export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot
     };
   }
 
+  const { monthStart, monthEnd } = getMonthBounds(month);
+  const postingIdsForMonthResult = await supabase
+    .from("mutual_shift_posting_dates")
+    .select("posting_id, swap_date, shift_kind")
+    .gte("swap_date", monthStart)
+    .lte("swap_date", monthEnd)
+    .order("swap_date");
+
+  const postingIds = Array.from(
+    new Set(
+      ((postingIdsForMonthResult.data as MutualShiftPostingDateRow[] | null) ?? []).map((row) => row.posting_id),
+    ),
+  );
+
+  if (postingIds.length === 0) {
+    return {
+      month,
+      schedules: schedulerSnapshot.schedules,
+      postings: [],
+    };
+  }
+
   const [postingsResult, applicationsResult] = await Promise.all([
     supabase
       .from("mutual_shift_postings")
       .select("id, owner_employee_id, owner_schedule_id, status, month_key, accepted_application_id, created_at")
-      .eq("month_key", month)
+      .in("id", postingIds)
       .order("created_at"),
     supabase
       .from("mutual_shift_applications")
       .select("id, posting_id, applicant_employee_id, applicant_schedule_id, status, created_at")
+      .in("posting_id", postingIds)
       .order("created_at"),
   ]);
-
-  const postingIds = ((postingsResult.data as MutualShiftPostingRow[] | null) ?? []).map((row) => row.id);
   const applicationIds = ((applicationsResult.data as MutualShiftApplicationRow[] | null) ?? []).map((row) => row.id);
 
   const [postingDatesResult, applicationDatesResult] = await Promise.all([

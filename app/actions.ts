@@ -28,7 +28,7 @@ import {
   type OvertimeAssignmentRow,
 } from "@/lib/overtime";
 import {
-  buildMutualAssignmentNote,
+  buildAcceptedMutualAssignmentRows,
   parseMutualAssignmentNote,
   type MutualAssignmentRow,
 } from "@/lib/mutuals";
@@ -1356,71 +1356,17 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     }> | null) ?? [])).map((row) => [`${row.employee_id}:${row.assignment_date}`, row]),
   );
 
-  const buildRow = ({
-    employeeId,
-    date,
-    shiftKind,
-    targetScheduleId,
-    partnerEmployeeId,
-  }: {
-    employeeId: string;
-    date: string;
-    shiftKind: ShiftKind;
-    targetScheduleId: string;
-    partnerEmployeeId: string;
-  }) => {
-    const original = existingAssignments.get(`${employeeId}:${date}`);
-
-    return {
-      employee_id: employeeId,
-      assignment_date: date,
-      competency_id: null,
-      time_code_id: mutualTimeCodeId,
-      notes: buildMutualAssignmentNote({
-        postingId: input.postingId,
-        targetScheduleId,
-        partnerEmployeeId,
-        originalCompetencyId: original?.competency_id ?? null,
-        originalTimeCodeId: original?.time_code_id ?? null,
-      }),
-      shift_kind: shiftKind,
-    } satisfies MutualAssignmentRow;
-  };
-
-  const mutualRows: MutualAssignmentRow[] = [
-    ...postingDates.flatMap((row) => [
-      buildRow({
-        employeeId: posting.owner_employee_id,
-        date: row.swap_date,
-        shiftKind: row.shift_kind,
-        targetScheduleId: posting.owner_schedule_id,
-        partnerEmployeeId: application.applicant_employee_id,
-      }),
-      buildRow({
-        employeeId: application.applicant_employee_id,
-        date: row.swap_date,
-        shiftKind: row.shift_kind,
-        targetScheduleId: posting.owner_schedule_id,
-        partnerEmployeeId: posting.owner_employee_id,
-      }),
-    ]),
-    ...applicationDates.flatMap((row) => [
-      buildRow({
-        employeeId: application.applicant_employee_id,
-        date: row.swap_date,
-        shiftKind: row.shift_kind,
-        targetScheduleId: application.applicant_schedule_id,
-        partnerEmployeeId: posting.owner_employee_id,
-      }),
-      buildRow({
-        employeeId: posting.owner_employee_id,
-        date: row.swap_date,
-        shiftKind: row.shift_kind,
-        targetScheduleId: application.applicant_schedule_id,
-        partnerEmployeeId: application.applicant_employee_id,
-      }),
-    ]),
-  ];
+  const mutualRows: MutualAssignmentRow[] = buildAcceptedMutualAssignmentRows({
+    postingId: input.postingId,
+    mutualTimeCodeId,
+    originalWorkerId: posting.owner_employee_id,
+    originalWorkerScheduleId: posting.owner_schedule_id,
+    originalDates: postingDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
+    applicantEmployeeId: application.applicant_employee_id,
+    applicantScheduleId: application.applicant_schedule_id,
+    applicantDates: applicationDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
+    existingAssignments,
+  });
 
   const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
     onConflict: "employee_id,assignment_date",

@@ -1018,6 +1018,16 @@ select {
   gap: 1rem;
 }
 
+.metrics-window-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.metrics-field-inline {
+  min-width: 15rem;
+}
+
 .metrics-section__title {
   margin: 0;
   font-family: var(--font-display), sans-serif;
@@ -1191,6 +1201,12 @@ select {
 .metrics-transfer-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.metrics-transfer-actions--split {
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
 }
 
 .mutual-card {

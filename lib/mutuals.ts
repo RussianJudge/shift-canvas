@@ -25,6 +25,11 @@ export type ParsedMutualAssignmentNote = {
   originalTimeCodeId: string | null;
 };
 
+type ExistingMutualAssignmentState = {
+  competency_id: string | null;
+  time_code_id: string | null;
+};
+
 export function buildMutualAssignmentNote({
   postingId,
   targetScheduleId,
@@ -84,4 +89,100 @@ export function parseMutualAssignmentNote(note: string | null | undefined): Pars
     originalCompetencyId: values.get("origc") || null,
     originalTimeCodeId: values.get("origt") || null,
   };
+}
+
+/**
+ * Builds the schedule-assignment rows created when a mutual is accepted.
+ *
+ * Each worker keeps a row on their own dates and also gets a mirrored borrowed
+ * row on the partner schedule for the dates they are covering. All involved
+ * rows use time code `M`, while the note payload preserves the cell's original
+ * state so leader cancellation can restore it later.
+ */
+export function buildAcceptedMutualAssignmentRows({
+  postingId,
+  mutualTimeCodeId,
+  originalWorkerId,
+  originalWorkerScheduleId,
+  originalDates,
+  applicantEmployeeId,
+  applicantScheduleId,
+  applicantDates,
+  existingAssignments,
+}: {
+  postingId: string;
+  mutualTimeCodeId: string;
+  originalWorkerId: string;
+  originalWorkerScheduleId: string;
+  originalDates: Array<{ date: string; shiftKind: ShiftKind }>;
+  applicantEmployeeId: string;
+  applicantScheduleId: string;
+  applicantDates: Array<{ date: string; shiftKind: ShiftKind }>;
+  existingAssignments: Map<string, ExistingMutualAssignmentState>;
+}) {
+  const buildRow = ({
+    employeeId,
+    date,
+    shiftKind,
+    targetScheduleId,
+    partnerEmployeeId,
+  }: {
+    employeeId: string;
+    date: string;
+    shiftKind: ShiftKind;
+    targetScheduleId: string;
+    partnerEmployeeId: string;
+  }) => {
+    const original = existingAssignments.get(`${employeeId}:${date}`);
+
+    return {
+      employee_id: employeeId,
+      assignment_date: date,
+      competency_id: null,
+      time_code_id: mutualTimeCodeId,
+      notes: buildMutualAssignmentNote({
+        postingId,
+        targetScheduleId,
+        partnerEmployeeId,
+        originalCompetencyId: original?.competency_id ?? null,
+        originalTimeCodeId: original?.time_code_id ?? null,
+      }),
+      shift_kind: shiftKind,
+    } satisfies MutualAssignmentRow;
+  };
+
+  return [
+    ...originalDates.flatMap((row) => [
+      buildRow({
+        employeeId: originalWorkerId,
+        date: row.date,
+        shiftKind: row.shiftKind,
+        targetScheduleId: originalWorkerScheduleId,
+        partnerEmployeeId: applicantEmployeeId,
+      }),
+      buildRow({
+        employeeId: applicantEmployeeId,
+        date: row.date,
+        shiftKind: row.shiftKind,
+        targetScheduleId: originalWorkerScheduleId,
+        partnerEmployeeId: originalWorkerId,
+      }),
+    ]),
+    ...applicantDates.flatMap((row) => [
+      buildRow({
+        employeeId: applicantEmployeeId,
+        date: row.date,
+        shiftKind: row.shiftKind,
+        targetScheduleId: applicantScheduleId,
+        partnerEmployeeId: originalWorkerId,
+      }),
+      buildRow({
+        employeeId: originalWorkerId,
+        date: row.date,
+        shiftKind: row.shiftKind,
+        targetScheduleId: applicantScheduleId,
+        partnerEmployeeId: applicantEmployeeId,
+      }),
+    ]),
+  ];
 }
