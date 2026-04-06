@@ -1197,6 +1197,17 @@ select {
   gap: 1rem;
 }
 
+.mutuals-month-nav {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.mutuals-month-nav__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
 .mutual-card--closed {
   opacity: 0.84;
 }

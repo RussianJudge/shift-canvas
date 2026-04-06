@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 
 import {
   acceptMutualApplication,
@@ -15,6 +16,7 @@ import {
   formatMonthLabel,
   getEmployeeMap,
   getMonthDays,
+  shiftMonthKey,
   shiftForDate,
 } from "@/lib/scheduling";
 import type { AppSession, MutualShiftPosting, MutualsSnapshot, ShiftKind } from "@/lib/types";
@@ -114,10 +116,18 @@ function MutualApplyModal({
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[selectedEmployeeId];
   const schedule = employee ? snapshot.schedules.find((entry) => entry.id === employee.scheduleId) ?? null : null;
+  const postingOwner = employeeMap[posting.ownerEmployeeId];
+  const postingOwnerSchedule = postingOwner
+    ? snapshot.schedules.find((entry) => entry.id === postingOwner.scheduleId) ?? null
+    : null;
   const availableDates =
-    employee && schedule
+    employee && schedule && postingOwnerSchedule
       ? getMonthDays(snapshot.month)
-          .filter((day) => shiftForDate(schedule, day.date) !== "OFF")
+          .filter(
+            (day) =>
+              shiftForDate(schedule, day.date) !== "OFF" &&
+              shiftForDate(postingOwnerSchedule, day.date) === "OFF",
+          )
           .map((day) => ({ date: day.date, shiftKind: shiftForDate(schedule, day.date) }))
       : [];
 
@@ -163,7 +173,7 @@ function MutualApplyModal({
           dates={availableDates}
           selectedDates={selectedDates}
           onToggle={onToggleDate}
-          helper={`${selectedDates.length}/${posting.dates.length} selected`}
+          helper={`${selectedDates.length}/${posting.dates.length} selected · only dates ${posting.ownerEmployeeName} is off`}
         />
 
         <div className="metrics-transfer-actions">
@@ -184,6 +194,7 @@ export function MutualsPanel({
   snapshot: MutualsSnapshot;
   viewer: AppSession;
 }) {
+  const router = useRouter();
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const allEmployees = useMemo(
     () =>
@@ -309,7 +320,25 @@ export function MutualsPanel({
       <div className="workspace-toolbar workspace-toolbar--personnel-page">
         <div className="field field--static">
           <span>Month</span>
-          <strong>{formatMonthLabel(snapshot.month)}</strong>
+          <div className="mutuals-month-nav">
+            <strong>{formatMonthLabel(snapshot.month)}</strong>
+            <div className="mutuals-month-nav__buttons">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => router.push(`/mutuals?month=${shiftMonthKey(snapshot.month, -1)}`)}
+              >
+                Prev month
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => router.push(`/mutuals?month=${shiftMonthKey(snapshot.month, 1)}`)}
+              >
+                Next month
+              </button>
+            </div>
+          </div>
         </div>
         <div className="toolbar-status-wrap">
           {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}

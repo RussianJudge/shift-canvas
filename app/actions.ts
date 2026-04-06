@@ -247,10 +247,6 @@ function getWorkedShiftKindsForDates(
   return dates.map((date) => shiftForDate(schedule, date));
 }
 
-function areShiftKindListsEqual(left: ShiftKind[], right: ShiftKind[]) {
-  return left.length === right.length && left.every((shiftKind, index) => shiftKind === right[index]);
-}
-
 /**
  * Recalculates OT claims after a scheduling change.
  *
@@ -1126,7 +1122,6 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
 
   const postingDates = ((postingDatesResult.data as Array<{ swap_date: string; shift_kind: ShiftKind }> | null) ?? []);
   const requestedDates = postingDates.map((row) => row.swap_date);
-  const requestedShiftKinds = postingDates.map((row) => row.shift_kind);
   const dates = uniqueSortedDates(input.dates);
 
   if (dates.length === 0 || dates.length !== requestedDates.length) {
@@ -1147,6 +1142,8 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+  const postingOwner = employeeMap[posting.owner_employee_id];
+  const postingOwnerSchedule = postingOwner ? getScheduleById(snapshot, posting.owner_schedule_id) : null;
 
   if (!employee || !employeeSchedule) {
     return {
@@ -1164,10 +1161,17 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     };
   }
 
-  if (!areShiftKindListsEqual(offeredShiftKinds, requestedShiftKinds)) {
+  if (!postingOwner || !postingOwnerSchedule) {
     return {
       ok: false,
-      message: "The offered shifts need to match the day/night pattern of the original posting.",
+      message: "Could not validate the original mutual worker for this posting.",
+    };
+  }
+
+  if (dates.some((date) => shiftForDate(postingOwnerSchedule, date) !== "OFF")) {
+    return {
+      ok: false,
+      message: "Offered shifts must be on dates the original worker is off.",
     };
   }
 
