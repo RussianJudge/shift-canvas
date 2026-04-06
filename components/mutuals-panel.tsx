@@ -417,6 +417,7 @@ export function MutualsPanel({
             openPostings.map((posting) => {
               const canCancelPosting =
                 viewer.role !== "worker" || viewer.employeeId === posting.ownerEmployeeId;
+              const canApplyToPosting = viewer.employeeId !== posting.ownerEmployeeId;
 
               return (
                 <article key={posting.id} className="metrics-card mutual-card">
@@ -446,7 +447,9 @@ export function MutualsPanel({
                       >
                         Cancel mutual
                       </button>
-                    ) : (
+                    ) : null}
+
+                    {canApplyToPosting ? (
                       <button
                         type="button"
                         className="primary-button"
@@ -455,7 +458,7 @@ export function MutualsPanel({
                       >
                         Apply
                       </button>
-                    )}
+                    ) : null}
                   </div>
 
                   <div className="mutual-applications">
