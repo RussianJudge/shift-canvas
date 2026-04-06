@@ -122,7 +122,7 @@ function MutualApplyModal({
     ? snapshot.schedules.find((entry) => entry.id === postingOwner.scheduleId) ?? null
     : null;
   const monthOptions = useMemo(
-    () => Array.from({ length: 7 }, (_, index) => shiftMonthKey(snapshot.month, index - 3)),
+    () => Array.from({ length: 6 }, (_, index) => shiftMonthKey(snapshot.month, index)),
     [snapshot.month],
   );
   const availableDates =
@@ -443,7 +443,7 @@ export function MutualsPanel({
                         onClick={() => runAction(() => withdrawMutualPosting({ postingId: posting.id }))}
                         disabled={isSubmitting}
                       >
-                        Withdraw
+                        Cancel mutual
                       </button>
                     ) : (
                       <button
@@ -506,7 +506,7 @@ export function MutualsPanel({
                                   }
                                   disabled={isSubmitting}
                                 >
-                                  Withdraw
+                                  Delete offer
                                 </button>
                               ) : null}
                             </div>
@@ -630,7 +630,7 @@ export function MutualsPanel({
           ) : (
             <div className="empty-state">
               <strong>No closed mutuals.</strong>
-              <span>Withdrawn and cancelled swaps will stay visible here for reference.</span>
+              <span>Leader-cancelled swaps will stay visible here for reference.</span>
             </div>
           )}
         </div>

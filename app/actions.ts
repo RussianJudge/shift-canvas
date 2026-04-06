@@ -1359,13 +1359,13 @@ export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
 
   const { error } = await supabase
     .from("mutual_shift_postings")
-    .update({ status: "withdrawn" })
+    .delete()
     .eq("id", input.postingId);
 
   if (error) {
     return {
       ok: false,
-      message: `Could not withdraw mutual posting: ${error.message}`,
+      message: `Could not cancel mutual posting: ${error.message}`,
     };
   }
 
@@ -1374,7 +1374,7 @@ export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
 
   return {
     ok: true,
-    message: "Mutual posting withdrawn.",
+    message: "Mutual posting cancelled.",
   };
 }
 
@@ -1429,13 +1429,13 @@ export async function withdrawMutualApplication(input: WithdrawMutualApplication
 
   const { error } = await supabase
     .from("mutual_shift_applications")
-    .update({ status: "withdrawn" })
+    .delete()
     .eq("id", input.applicationId);
 
   if (error) {
     return {
       ok: false,
-      message: `Could not withdraw mutual application: ${error.message}`,
+      message: `Could not delete mutual offer: ${error.message}`,
     };
   }
 
@@ -1444,7 +1444,7 @@ export async function withdrawMutualApplication(input: WithdrawMutualApplication
 
   return {
     ok: true,
-    message: "Mutual application withdrawn.",
+    message: "Mutual offer deleted.",
   };
 }
 
