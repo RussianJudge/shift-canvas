@@ -318,7 +318,14 @@ function getTransferSuggestions({
     });
   }
 
-  return suggestions.sort(
+  const topMatchCount = suggestions.reduce(
+    (best, suggestion) => Math.max(best, suggestion.matchedCompetencyIds.length),
+    0,
+  );
+
+  return suggestions
+    .filter((suggestion) => suggestion.matchedCompetencyIds.length === topMatchCount)
+    .sort(
     (left, right) =>
       right.score - left.score ||
       right.matchedCompetencyIds.length - left.matchedCompetencyIds.length ||
