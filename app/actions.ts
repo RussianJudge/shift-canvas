@@ -1343,10 +1343,10 @@ export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
     };
   }
 
-  if (posting.owner_employee_id !== session.employeeId) {
+  if (session.role === "worker" && posting.owner_employee_id !== session.employeeId) {
     return {
       ok: false,
-      message: "Only the original worker can withdraw an open mutual posting.",
+      message: "Only the original worker can cancel this open mutual posting.",
     };
   }
 

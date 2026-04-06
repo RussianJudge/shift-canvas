@@ -415,7 +415,8 @@ export function MutualsPanel({
         <div className="metrics-team-list">
           {openPostings.length > 0 ? (
             openPostings.map((posting) => {
-              const isOwner = viewer.employeeId === posting.ownerEmployeeId;
+              const canCancelPosting =
+                viewer.role !== "worker" || viewer.employeeId === posting.ownerEmployeeId;
 
               return (
                 <article key={posting.id} className="metrics-card mutual-card">
@@ -436,7 +437,7 @@ export function MutualsPanel({
                   </div>
 
                   <div className="mutual-card__actions">
-                    {isOwner ? (
+                    {canCancelPosting ? (
                       <button
                         type="button"
                         className="ghost-button"
