@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 
+import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -30,6 +31,7 @@ type DisplayEmployee = {
   competencyIds: string[];
   overtimeDates?: string[];
   overtimeCompetencyByDate?: Record<string, string>;
+  mutualDates?: string[];
 };
 
 function getShiftTone(shift: ShiftKind) {
@@ -141,7 +143,41 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  return [...baseRows, ...overtimeRows];
+  const mutualRows = Object.values(
+    snapshot.assignments
+      .filter((assignment) => assignment.date.slice(0, 7) === currentMonth)
+      .reduce<Record<string, DisplayEmployee>>((rows, assignment) => {
+        const parsed = parseMutualAssignmentNote(assignment.notes);
+
+        if (parsed.targetScheduleId !== schedule.id) {
+          return rows;
+        }
+
+        const employee = employeeMap[assignment.employeeId];
+
+        if (!employee || employee.scheduleId === schedule.id) {
+          return rows;
+        }
+
+        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+        const existingDates = rows[employee.id]?.mutualDates ?? [];
+
+        rows[employee.id] = {
+          rowId: `mut:${schedule.id}:${employee.id}`,
+          sourceEmployeeId: employee.id,
+          name: employee.name,
+          role: `${employee.role} · Mutual from ${homeSchedule.name}`,
+          competencyIds: employee.competencyIds,
+          mutualDates: existingDates.includes(assignment.date)
+            ? existingDates
+            : [...existingDates, assignment.date].sort(),
+        };
+
+        return rows;
+      }, {}),
+  ).sort((left, right) => left.name.localeCompare(right.name));
+
+  return [...baseRows, ...overtimeRows, ...mutualRows];
 }
 
 function PrintScheduleSheet({
@@ -189,6 +225,7 @@ function PrintScheduleSheet({
 
         {employees.map((employee) => {
           const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
+          const mutualDateSet = employee.mutualDates ? new Set(employee.mutualDates) : null;
 
           return (
             <Fragment key={`print-${schedule.id}-${employee.rowId}`}>
@@ -199,9 +236,11 @@ function PrintScheduleSheet({
               </div>
 
               {monthDays.map((day) => {
-                const isOvertimeCell = !overtimeDateSet || overtimeDateSet.has(day.date);
-                const shiftKind = isOvertimeCell ? shiftForDate(schedule, day.date) : "OFF";
-                const selection = isOvertimeCell
+                const isBorrowedCellVisible =
+                  (!overtimeDateSet || overtimeDateSet.has(day.date)) &&
+                  (!mutualDateSet || mutualDateSet.has(day.date));
+                const shiftKind = isBorrowedCellVisible ? shiftForDate(schedule, day.date) : "OFF";
+                const selection = isBorrowedCellVisible
                   ? getSelectionForCell(employee.sourceEmployeeId, day.date, assignments)
                   : {
                       competencyId: null,
@@ -225,13 +264,13 @@ function PrintScheduleSheet({
                 return (
                   <div
                     key={`print-cell-${schedule.id}-${employee.rowId}-${day.date}`}
-                    className={`shift-cell print-cell shift-cell--${getShiftTone(shiftKind)} ${
-                      day.isWeekend ? "shift-cell--weekend" : ""
-                    } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
-                      activeColorToken ? "shift-cell--coded" : ""
-                    }`}
-                  >
-                    {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
+                  className={`shift-cell print-cell shift-cell--${getShiftTone(shiftKind)} ${
+                    day.isWeekend ? "shift-cell--weekend" : ""
+                  } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
+                    activeColorToken ? "shift-cell--coded" : ""
+                  }`}
+                >
+                    {isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""}
                   </div>
                 );
               })}

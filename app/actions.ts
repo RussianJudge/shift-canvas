@@ -28,6 +28,11 @@ import {
   type OvertimeAssignmentRow,
 } from "@/lib/overtime";
 import {
+  buildMutualAssignmentNote,
+  parseMutualAssignmentNote,
+  type MutualAssignmentRow,
+} from "@/lib/mutuals";
+import {
   buildAssignmentIndex,
   createSetRangeKey,
   getEmployeeMap,
@@ -983,13 +988,6 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
 
   const month = dates[0].slice(0, 7);
 
-  if (dates.some((date) => date.slice(0, 7) !== month)) {
-    return {
-      ok: false,
-      message: "Mutual postings must stay within a single month.",
-    };
-  }
-
   const snapshot = await getSchedulerSnapshot(month);
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
@@ -1230,11 +1228,16 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
 
   const postingResult = await supabase
     .from("mutual_shift_postings")
-    .select("id, owner_employee_id, status")
+    .select("id, owner_employee_id, owner_schedule_id, status")
     .eq("id", input.postingId)
     .maybeSingle();
 
-  const posting = postingResult.data as { id: string; owner_employee_id: string; status: string } | null;
+  const posting = postingResult.data as {
+    id: string;
+    owner_employee_id: string;
+    owner_schedule_id: string;
+    status: string;
+  } | null;
 
   if (postingResult.error || !posting) {
     return {
@@ -1259,17 +1262,174 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
 
   const applicationResult = await supabase
     .from("mutual_shift_applications")
-    .select("id, status")
+    .select("id, status, applicant_employee_id, applicant_schedule_id")
     .eq("id", input.applicationId)
     .eq("posting_id", input.postingId)
     .maybeSingle();
 
-  const application = applicationResult.data as { id: string; status: string } | null;
+  const application = applicationResult.data as {
+    id: string;
+    status: string;
+    applicant_employee_id: string;
+    applicant_schedule_id: string;
+  } | null;
 
   if (applicationResult.error || !application || application.status !== "open") {
     return {
       ok: false,
       message: "Could not find that mutual application.",
+    };
+  }
+
+  const mutualTimeCodeResult = await supabase
+    .from("time_codes")
+    .select("id")
+    .eq("code", "M")
+    .maybeSingle();
+  const mutualTimeCodeId = (mutualTimeCodeResult.data as { id: string } | null)?.id ?? null;
+
+  if (mutualTimeCodeResult.error || !mutualTimeCodeId) {
+    return {
+      ok: false,
+      message: 'Time code "M" was not found. Add it before accepting mutuals.',
+    };
+  }
+
+  const [postingDatesResult, applicationDatesResult] = await Promise.all([
+    supabase
+      .from("mutual_shift_posting_dates")
+      .select("swap_date, shift_kind")
+      .eq("posting_id", input.postingId)
+      .order("swap_date"),
+    supabase
+      .from("mutual_shift_application_dates")
+      .select("swap_date, shift_kind")
+      .eq("application_id", input.applicationId)
+      .order("swap_date"),
+  ]);
+
+  const postingDates = ((postingDatesResult.data as Array<{
+    swap_date: string;
+    shift_kind: ShiftKind;
+  }> | null) ?? []);
+  const applicationDates = ((applicationDatesResult.data as Array<{
+    swap_date: string;
+    shift_kind: ShiftKind;
+  }> | null) ?? []);
+
+  if (postingDatesResult.error || postingDates.length === 0) {
+    return {
+      ok: false,
+      message: "Could not load the original mutual dates.",
+    };
+  }
+
+  if (applicationDatesResult.error || applicationDates.length === 0) {
+    return {
+      ok: false,
+      message: "Could not load the offered mutual dates.",
+    };
+  }
+
+  const allMutualDates = Array.from(
+    new Set([...postingDates.map((row) => row.swap_date), ...applicationDates.map((row) => row.swap_date)]),
+  );
+  const existingAssignmentsResult = await supabase
+    .from("schedule_assignments")
+    .select("employee_id, assignment_date, competency_id, time_code_id")
+    .in("employee_id", [posting.owner_employee_id, application.applicant_employee_id])
+    .in("assignment_date", allMutualDates);
+
+  if (existingAssignmentsResult.error) {
+    return {
+      ok: false,
+      message: `Could not prepare mutual schedule updates: ${existingAssignmentsResult.error.message}`,
+    };
+  }
+
+  const existingAssignments = new Map(
+    (((existingAssignmentsResult.data as Array<{
+      employee_id: string;
+      assignment_date: string;
+      competency_id: string | null;
+      time_code_id: string | null;
+    }> | null) ?? [])).map((row) => [`${row.employee_id}:${row.assignment_date}`, row]),
+  );
+
+  const buildRow = ({
+    employeeId,
+    date,
+    shiftKind,
+    targetScheduleId,
+    partnerEmployeeId,
+  }: {
+    employeeId: string;
+    date: string;
+    shiftKind: ShiftKind;
+    targetScheduleId: string;
+    partnerEmployeeId: string;
+  }) => {
+    const original = existingAssignments.get(`${employeeId}:${date}`);
+
+    return {
+      employee_id: employeeId,
+      assignment_date: date,
+      competency_id: null,
+      time_code_id: mutualTimeCodeId,
+      notes: buildMutualAssignmentNote({
+        postingId: input.postingId,
+        targetScheduleId,
+        partnerEmployeeId,
+        originalCompetencyId: original?.competency_id ?? null,
+        originalTimeCodeId: original?.time_code_id ?? null,
+      }),
+      shift_kind: shiftKind,
+    } satisfies MutualAssignmentRow;
+  };
+
+  const mutualRows: MutualAssignmentRow[] = [
+    ...postingDates.flatMap((row) => [
+      buildRow({
+        employeeId: posting.owner_employee_id,
+        date: row.swap_date,
+        shiftKind: row.shift_kind,
+        targetScheduleId: posting.owner_schedule_id,
+        partnerEmployeeId: application.applicant_employee_id,
+      }),
+      buildRow({
+        employeeId: application.applicant_employee_id,
+        date: row.swap_date,
+        shiftKind: row.shift_kind,
+        targetScheduleId: posting.owner_schedule_id,
+        partnerEmployeeId: posting.owner_employee_id,
+      }),
+    ]),
+    ...applicationDates.flatMap((row) => [
+      buildRow({
+        employeeId: application.applicant_employee_id,
+        date: row.swap_date,
+        shiftKind: row.shift_kind,
+        targetScheduleId: application.applicant_schedule_id,
+        partnerEmployeeId: posting.owner_employee_id,
+      }),
+      buildRow({
+        employeeId: posting.owner_employee_id,
+        date: row.swap_date,
+        shiftKind: row.shift_kind,
+        targetScheduleId: application.applicant_schedule_id,
+        partnerEmployeeId: application.applicant_employee_id,
+      }),
+    ]),
+  ];
+
+  const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
+    onConflict: "employee_id,assignment_date",
+  });
+
+  if (mutualRowsError) {
+    return {
+      ok: false,
+      message: `Could not apply accepted mutual to the schedule: ${mutualRowsError.message}`,
     };
   }
 
@@ -1302,6 +1462,8 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
 
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
 
   return {
     ok: true,
@@ -1489,6 +1651,82 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
     };
   }
 
+  const mutualAssignmentsResult = await supabase
+    .from("schedule_assignments")
+    .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
+    .like("notes", `MUT|posting:${input.postingId}|%`);
+
+  if (mutualAssignmentsResult.error) {
+    return {
+      ok: false,
+      message: `Could not load accepted mutual schedule rows: ${mutualAssignmentsResult.error.message}`,
+    };
+  }
+
+  const mutualAssignments = ((mutualAssignmentsResult.data as Array<{
+    employee_id: string;
+    assignment_date: string;
+    competency_id: string | null;
+    time_code_id: string | null;
+    notes: string | null;
+    shift_kind: ShiftKind;
+  }> | null) ?? []);
+
+  const restoreRows = mutualAssignments.flatMap((row) => {
+    const parsed = parseMutualAssignmentNote(row.notes);
+
+    if (!parsed.originalCompetencyId && !parsed.originalTimeCodeId) {
+      return [];
+    }
+
+    return [
+      {
+        employee_id: row.employee_id,
+        assignment_date: row.assignment_date,
+        competency_id: parsed.originalCompetencyId,
+        time_code_id: parsed.originalTimeCodeId,
+        notes: null,
+        shift_kind: row.shift_kind,
+      } satisfies MutualAssignmentRow,
+    ];
+  });
+
+  const deleteRows = mutualAssignments.filter((row) => {
+    const parsed = parseMutualAssignmentNote(row.notes);
+    return !parsed.originalCompetencyId && !parsed.originalTimeCodeId;
+  });
+
+  if (restoreRows.length > 0) {
+    const { error: restoreError } = await supabase.from("schedule_assignments").upsert(restoreRows, {
+      onConflict: "employee_id,assignment_date",
+    });
+
+    if (restoreError) {
+      return {
+        ok: false,
+        message: `Could not restore cancelled mutual schedule rows: ${restoreError.message}`,
+      };
+    }
+  }
+
+  if (deleteRows.length > 0) {
+    for (const row of deleteRows) {
+      const { error: deleteError } = await supabase
+        .from("schedule_assignments")
+        .delete()
+        .eq("employee_id", row.employee_id)
+        .eq("assignment_date", row.assignment_date)
+        .like("notes", `MUT|posting:${input.postingId}|%`);
+
+      if (deleteError) {
+        return {
+          ok: false,
+          message: `Could not clear cancelled mutual schedule rows: ${deleteError.message}`,
+        };
+      }
+    }
+  }
+
   const { error } = await supabase
     .from("mutual_shift_postings")
     .update({ status: "cancelled" })
@@ -1503,6 +1741,8 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
 
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
 
   return {
     ok: true,

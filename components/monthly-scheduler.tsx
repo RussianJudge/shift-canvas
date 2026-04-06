@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
 import { saveAssignments, saveSchedulePins, setScheduleSetCompletion } from "@/app/actions";
+import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -58,6 +59,7 @@ type DisplayEmployee = {
   competencyIds: string[];
   overtimeDates?: string[];
   overtimeCompetencyByDate?: Record<string, string>;
+  mutualDates?: string[];
 };
 
 type CoverageSummary = {
@@ -77,7 +79,7 @@ type CopiedSetTemplate = {
   selectionsByEmployeeId: Record<string, AssignmentSelection[]>;
 };
 
-/** Builds the visible roster, including borrowed overtime rows for the month. */
+/** Builds the visible roster, including borrowed overtime and mutual rows for the month. */
 function buildDisplayEmployeesForSchedule({
   schedule,
   snapshot,
@@ -132,7 +134,41 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  const rows = [...baseRows, ...overtimeRows];
+  const mutualRows = Object.values(
+    snapshot.assignments
+      .filter((assignment) => assignment.date.slice(0, 7) === currentMonth)
+      .reduce<Record<string, DisplayEmployee>>((rows, assignment) => {
+        const parsed = parseMutualAssignmentNote(assignment.notes);
+
+        if (parsed.targetScheduleId !== schedule.id) {
+          return rows;
+        }
+
+        const employee = employeeMap[assignment.employeeId];
+
+        if (!employee || employee.scheduleId === schedule.id) {
+          return rows;
+        }
+
+        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+        const existingDates = rows[employee.id]?.mutualDates ?? [];
+
+        rows[employee.id] = {
+          rowId: `mut:${schedule.id}:${employee.id}`,
+          sourceEmployeeId: employee.id,
+          name: employee.name,
+          role: `${employee.role} · Mutual from ${homeSchedule.name}`,
+          competencyIds: employee.competencyIds,
+          mutualDates: existingDates.includes(assignment.date)
+            ? existingDates
+            : [...existingDates, assignment.date].sort(),
+        };
+
+        return rows;
+      }, {}),
+  ).sort((left, right) => left.name.localeCompare(right.name));
+
+  const rows = [...baseRows, ...overtimeRows, ...mutualRows];
   const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
   const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
 
@@ -1759,6 +1795,7 @@ function EmployeeRow({
 }) {
   const setDates = new Set(selectedSetDays.map((day) => day.date));
   const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
+  const mutualDateSet = employee.mutualDates ? new Set(employee.mutualDates) : null;
 
   return (
     <>
@@ -1784,10 +1821,12 @@ function EmployeeRow({
       </div>
 
       {monthDays.map((day, dayIndex) => {
-        const isOvertimeCell = !overtimeDateSet || overtimeDateSet.has(day.date);
+        const isBorrowedCellVisible =
+          (!overtimeDateSet || overtimeDateSet.has(day.date)) &&
+          (!mutualDateSet || mutualDateSet.has(day.date));
         const isLockedCell = completedSetDates.has(day.date);
-        const shiftKind = isOvertimeCell ? shiftForDate(schedule, day.date) : "OFF";
-        const selection = isOvertimeCell
+        const shiftKind = isBorrowedCellVisible ? shiftForDate(schedule, day.date) : "OFF";
+        const selection = isBorrowedCellVisible
           ? getSelectionForCell(
               employee.sourceEmployeeId,
               day.date,
@@ -1840,14 +1879,14 @@ function EmployeeRow({
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
             }`}
             onPointerDown={(event) => {
-              if (event.button !== 0 || !canEdit || !isOvertimeCell || isLockedCell) {
+              if (event.button !== 0 || !canEdit || !isBorrowedCellVisible || isLockedCell) {
                 return;
               }
 
               onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, effectiveSelection);
             }}
             onPointerEnter={(event) => {
-              if (canEdit && isOvertimeCell && !isLockedCell && dragRange && event.buttons === 1) {
+              if (canEdit && isBorrowedCellVisible && !isLockedCell && dragRange && event.buttons === 1) {
                 onDragHover(employee.sourceEmployeeId, dayIndex);
               }
             }}
@@ -1858,16 +1897,16 @@ function EmployeeRow({
                 activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
               }`}
               onClick={() => {
-                if (!canEdit || !isOvertimeCell || isLockedCell) {
+                if (!canEdit || !isBorrowedCellVisible || isLockedCell) {
                   return;
                 }
 
                 onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date });
               }}
-              disabled={!canEdit || !isOvertimeCell || isLockedCell}
+              disabled={!canEdit || !isBorrowedCellVisible || isLockedCell}
               aria-label={`${employee.name} ${day.date} assignment`}
             >
-              {getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)}
+              {isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""}
             </button>
           </div>
         );
