@@ -25,6 +25,20 @@ import {
 } from "@/lib/scheduling";
 import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
 
+/**
+ * The scheduler is the most interaction-heavy screen in the app.
+ *
+ * It combines:
+ * - month loading
+ * - unsaved draft persistence
+ * - set-builder workflows
+ * - per-user row pinning
+ * - cell editing + drag-copy
+ * - borrowed overtime rows
+ *
+ * Comments here focus on the major interaction models rather than every small
+ * render detail.
+ */
 const STORAGE_KEY = "shift-canvas-drafts-v2";
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
 type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
@@ -63,6 +77,7 @@ type CopiedSetTemplate = {
   selectionsByEmployeeId: Record<string, AssignmentSelection[]>;
 };
 
+/** Builds the visible roster, including borrowed overtime rows for the month. */
 function buildDisplayEmployeesForSchedule({
   schedule,
   snapshot,
@@ -210,6 +225,7 @@ function getCompactCode(code: string) {
   return code.replace(/\s+/g, "");
 }
 
+/** Shortens names on narrow screens while keeping the first name intact. */
 function getCompactEmployeeName(name: string) {
   const segments = name.trim().split(/\s+/).filter(Boolean);
 
@@ -259,6 +275,7 @@ function buildDraftDelta(
   }, {});
 }
 
+/** Small display helper for schedule header and set messages. */
 function formatShortDate(isoDate: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -342,6 +359,8 @@ function buildSetAutofillPlan({
   competencies: Competency[];
   timeCodes: TimeCode[];
 }) {
+  // The auto-fill helper only touches fully blank workers so it never rewrites
+  // a planner's partially curated set.
   const nextAssignments = { ...assignments };
   const setLength = setDays.length;
 
@@ -434,6 +453,7 @@ function buildSetAutofillPlan({
   };
 }
 
+/** Window-centered assignment picker used for individual cell edits. */
 function AssignmentModal({
   selectedEmployee,
   selectedDate,
@@ -558,6 +578,8 @@ export function MonthlyScheduler({
   canSwitchSchedule: boolean;
   forcedScheduleId: string | null;
 }) {
+  // `baselineAssignments` tracks the last server-confirmed state. `draftAssignments`
+  // layers in unsaved edits and local set actions until the user saves or reverts.
   const router = useRouter();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [currentMonth, setCurrentMonth] = useState(initialSnapshot.month);

@@ -6,6 +6,13 @@ import { clearAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
 import type { AppSession } from "@/lib/types";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
+/**
+ * Server actions for the current email-only sign-in flow.
+ *
+ * The sign-in form looks up a row in `public.profiles`, derives the
+ * application-scoped role information from that record, and then persists it
+ * into the signed app cookie handled by `lib/auth.ts`.
+ */
 type ProfileRow = {
   email: string;
   display_name: string;
@@ -19,6 +26,7 @@ type ScheduleRow = {
   name: string;
 };
 
+/** Signs a user in by email using the app profile table as the source of truth. */
 export async function signIn(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
 
@@ -75,6 +83,7 @@ export async function signIn(formData: FormData) {
   redirect("/sign-in?error=unknown-email");
 }
 
+/** Clears the app session cookie and returns the user to the sign-in screen. */
 export async function signOut() {
   await clearAppSession();
   redirect("/sign-in");

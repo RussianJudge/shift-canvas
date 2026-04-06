@@ -6,6 +6,12 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { savePersonnel } from "@/app/actions";
 import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
 
+/**
+ * Personnel editor with inline row editing and CSV import.
+ *
+ * This screen is intentionally stateful because admins often stage multiple row
+ * edits, imports, adds, and removals before committing everything in one save.
+ */
 type EditableEmployee = {
   id: string;
   name: string;
@@ -33,6 +39,7 @@ type PendingCsvImport = {
   summary: string;
 };
 
+/** Creates the unsaved row shown at the top of the table before add/save. */
 function createDraftEmployee() {
   return {
     id: `emp-${crypto.randomUUID().slice(0, 8)}`,
@@ -44,6 +51,7 @@ function createDraftEmployee() {
   };
 }
 
+/** Normalizes CSV headers so import accepts a wide range of spreadsheet exports. */
 function normalizeCsvHeader(value: string) {
   return value
     .trim()
@@ -110,6 +118,7 @@ function createCompetencyLookupKeys(competency: SchedulerSnapshot["competencies"
   return [...variants];
 }
 
+/** Minimal CSV parser that supports quoted cells for spreadsheet imports. */
 function parseCsvText(text: string) {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -218,6 +227,7 @@ function cloneEmployees(employees: EditableEmployee[]) {
   }));
 }
 
+/** Normalizes UI row state into the payload expected by the save action. */
 function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   return {
     employeeId: employee.id,
@@ -229,6 +239,7 @@ function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   };
 }
 
+/** Returns the required-field issues that block save/add for a row. */
 function getEmployeeIssues(employee: EditableEmployee) {
   const issues: string[] = [];
 

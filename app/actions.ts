@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 
 import type {
   AppRole,
+  ApplyToMutualPostingInput,
+  CancelAcceptedMutualInput,
   ClaimOvertimePostingInput,
+  CreateMutualPostingInput,
+  AcceptMutualApplicationInput,
   ReleaseOvertimePostingInput,
   SaveAssignmentsInput,
   SaveCompetenciesInput,
@@ -13,6 +17,8 @@ import type {
   SaveTimeCodesInput,
   SetScheduleCompletionInput,
   ShiftKind,
+  WithdrawMutualApplicationInput,
+  WithdrawMutualPostingInput,
 } from "@/lib/types";
 import { getSchedulerSnapshot } from "@/lib/data";
 import {
@@ -36,15 +42,33 @@ import { getAppSession } from "@/lib/auth";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
 
+/**
+ * Main server action layer for the app.
+ *
+ * This file owns every persisted edit path:
+ * - schedule cell updates
+ * - completed-set toggles
+ * - overtime claim / release
+ * - admin maintenance screens
+ * - per-user schedule pin storage
+ *
+ * The actions deliberately centralize validation and side effects so the client
+ * components can stay focused on interaction state.
+ */
 function isBlank(value: string) {
   return value.trim().length === 0;
 }
 
+/** Reusable shift-pattern validation shared by schedule editing actions. */
 function hasValidShiftPattern(dayShiftDays: number, nightShiftDays: number, offDays: number) {
   return [dayShiftDays, nightShiftDays, offDays].every((value) => Number.isInteger(value) && value >= 0) &&
     dayShiftDays + nightShiftDays + offDays > 0;
 }
 
+/**
+ * When an overtime claim is removed, this restores any on-team worker who had
+ * been moved as part of a swap workflow back to their original competency.
+ */
 async function restoreSwappedAssignmentsForClaims(
   supabase: SupabaseAdminClient,
   claims: Array<{ employeeId: string; competencyId: string; date: string }>,
@@ -129,6 +153,11 @@ async function restoreSwappedAssignmentsForClaims(
   return { ok: true as const };
 }
 
+/**
+ * Clears the claimant's overtime-generated rows. We remove by note metadata
+ * first so releases still work even if the visible competency changed as part
+ * of a swap path.
+ */
 async function clearClaimantAssignmentsForClaims(
   supabase: SupabaseAdminClient,
   claims: Array<{ employeeId: string; competencyId: string; date: string }>,
@@ -196,6 +225,7 @@ async function clearClaimantAssignmentsForClaims(
   return { ok: true as const };
 }
 
+/** Shared role gate for server actions. Returns null instead of redirecting. */
 async function requireActionRole(allowedRoles: AppRole[]) {
   const session = await getAppSession();
 
@@ -206,6 +236,28 @@ async function requireActionRole(allowedRoles: AppRole[]) {
   return session;
 }
 
+function uniqueSortedDates(dates: string[]) {
+  return Array.from(new Set(dates.filter(Boolean))).sort();
+}
+
+function getWorkedShiftKindsForDates(
+  schedule: NonNullable<ReturnType<typeof getScheduleById>>,
+  dates: string[],
+) {
+  return dates.map((date) => shiftForDate(schedule, date));
+}
+
+function areShiftKindListsEqual(left: ShiftKind[], right: ShiftKind[]) {
+  return left.length === right.length && left.every((shiftKind, index) => shiftKind === right[index]);
+}
+
+/**
+ * Recalculates OT claims after a scheduling change.
+ *
+ * Claims that still fit the staffing requirements are kept. Claims that no
+ * longer represent a real shortage are released and their derived schedule rows
+ * are removed/restored.
+ */
 async function removeStaleOvertimeClaims(
   supabase: SupabaseAdminClient,
   months: string[],
@@ -895,6 +947,569 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
   return {
     ok: true,
     message: "Overtime claim released.",
+  };
+}
+
+export async function createMutualPosting(input: CreateMutualPostingInput) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to create mutual postings.",
+    };
+  }
+
+  if (session.role === "worker" && session.employeeId !== input.employeeId) {
+    return {
+      ok: false,
+      message: "Workers can only post their own shifts to mutuals.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual postings are unavailable.",
+    };
+  }
+
+  const dates = uniqueSortedDates(input.dates);
+
+  if (dates.length === 0) {
+    return {
+      ok: false,
+      message: "Select at least one shift date to post.",
+    };
+  }
+
+  const month = dates[0].slice(0, 7);
+
+  if (dates.some((date) => date.slice(0, 7) !== month)) {
+    return {
+      ok: false,
+      message: "Mutual postings must stay within a single month.",
+    };
+  }
+
+  const snapshot = await getSchedulerSnapshot(month);
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const employee = employeeMap[input.employeeId];
+  const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+
+  if (!employee || !employeeSchedule) {
+    return {
+      ok: false,
+      message: "Could not find the selected employee for this mutual posting.",
+    };
+  }
+
+  const shiftKinds = getWorkedShiftKindsForDates(employeeSchedule, dates);
+
+  if (shiftKinds.some((shiftKind) => shiftKind === "OFF")) {
+    return {
+      ok: false,
+      message: "Mutual postings can only include shifts the employee is scheduled to work.",
+    };
+  }
+
+  const postingId = `mutual-post-${crypto.randomUUID()}`;
+  const { error: postingError } = await supabase.from("mutual_shift_postings").insert({
+    id: postingId,
+    owner_employee_id: employee.id,
+    owner_schedule_id: employee.scheduleId,
+    status: "open",
+    month_key: month,
+    accepted_application_id: null,
+  });
+
+  if (postingError) {
+    return {
+      ok: false,
+      message: `Could not create mutual posting: ${postingError.message}`,
+    };
+  }
+
+  const { error: datesError } = await supabase.from("mutual_shift_posting_dates").insert(
+    dates.map((date, index) => ({
+      posting_id: postingId,
+      swap_date: date,
+      shift_kind: shiftKinds[index],
+    })),
+  );
+
+  if (datesError) {
+    await supabase.from("mutual_shift_postings").delete().eq("id", postingId);
+    return {
+      ok: false,
+      message: `Could not save mutual posting dates: ${datesError.message}`,
+    };
+  }
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  return {
+    ok: true,
+    message: `${employee.name} posted ${dates.length} shift${dates.length === 1 ? "" : "s"} to mutuals.`,
+  };
+}
+
+export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to apply to mutual postings.",
+    };
+  }
+
+  if (session.role === "worker" && session.employeeId !== input.employeeId) {
+    return {
+      ok: false,
+      message: "Workers can only apply using their own shifts.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual applications are unavailable.",
+    };
+  }
+
+  const postingResult = await supabase
+    .from("mutual_shift_postings")
+    .select("id, owner_employee_id, owner_schedule_id, status, month_key")
+    .eq("id", input.postingId)
+    .maybeSingle();
+
+  const posting = postingResult.data as {
+    id: string;
+    owner_employee_id: string;
+    owner_schedule_id: string;
+    status: string;
+    month_key: string;
+  } | null;
+
+  if (postingResult.error || !posting) {
+    return {
+      ok: false,
+      message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (posting.status !== "open") {
+    return {
+      ok: false,
+      message: "That mutual posting is no longer open.",
+    };
+  }
+
+  if (posting.owner_employee_id === input.employeeId) {
+    return {
+      ok: false,
+      message: "You cannot apply to your own mutual posting.",
+    };
+  }
+
+  const postingDatesResult = await supabase
+    .from("mutual_shift_posting_dates")
+    .select("swap_date, shift_kind")
+    .eq("posting_id", input.postingId)
+    .order("swap_date");
+
+  const postingDates = ((postingDatesResult.data as Array<{ swap_date: string; shift_kind: ShiftKind }> | null) ?? []);
+  const requestedDates = postingDates.map((row) => row.swap_date);
+  const requestedShiftKinds = postingDates.map((row) => row.shift_kind);
+  const dates = uniqueSortedDates(input.dates);
+
+  if (dates.length === 0 || dates.length !== requestedDates.length) {
+    return {
+      ok: false,
+      message: "Your application must offer the same number of shifts as the original posting.",
+    };
+  }
+
+  if (dates.some((date) => date.slice(0, 7) !== posting.month_key)) {
+    return {
+      ok: false,
+      message: "Mutual applications must stay within the same month as the posting.",
+    };
+  }
+
+  const snapshot = await getSchedulerSnapshot(posting.month_key);
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const employee = employeeMap[input.employeeId];
+  const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+
+  if (!employee || !employeeSchedule) {
+    return {
+      ok: false,
+      message: "Could not find the selected employee for this mutual application.",
+    };
+  }
+
+  const offeredShiftKinds = getWorkedShiftKindsForDates(employeeSchedule, dates);
+
+  if (offeredShiftKinds.some((shiftKind) => shiftKind === "OFF")) {
+    return {
+      ok: false,
+      message: "Mutual applications can only offer shifts the employee is scheduled to work.",
+    };
+  }
+
+  if (!areShiftKindListsEqual(offeredShiftKinds, requestedShiftKinds)) {
+    return {
+      ok: false,
+      message: "The offered shifts need to match the day/night pattern of the original posting.",
+    };
+  }
+
+  const applicationId = `mutual-app-${crypto.randomUUID()}`;
+  const { error: applicationError } = await supabase.from("mutual_shift_applications").insert({
+    id: applicationId,
+    posting_id: input.postingId,
+    applicant_employee_id: employee.id,
+    applicant_schedule_id: employee.scheduleId,
+    status: "open",
+  });
+
+  if (applicationError) {
+    return {
+      ok: false,
+      message: `Could not create mutual application: ${applicationError.message}`,
+    };
+  }
+
+  const { error: datesError } = await supabase.from("mutual_shift_application_dates").insert(
+    dates.map((date, index) => ({
+      application_id: applicationId,
+      swap_date: date,
+      shift_kind: offeredShiftKinds[index],
+    })),
+  );
+
+  if (datesError) {
+    await supabase.from("mutual_shift_applications").delete().eq("id", applicationId);
+    return {
+      ok: false,
+      message: `Could not save mutual application dates: ${datesError.message}`,
+    };
+  }
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  return {
+    ok: true,
+    message: `${employee.name} applied to that mutual posting.`,
+  };
+}
+
+export async function acceptMutualApplication(input: AcceptMutualApplicationInput) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session || !session.employeeId) {
+    return {
+      ok: false,
+      message: "You do not have permission to accept mutual applications.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual applications are unavailable.",
+    };
+  }
+
+  const postingResult = await supabase
+    .from("mutual_shift_postings")
+    .select("id, owner_employee_id, status")
+    .eq("id", input.postingId)
+    .maybeSingle();
+
+  const posting = postingResult.data as { id: string; owner_employee_id: string; status: string } | null;
+
+  if (postingResult.error || !posting) {
+    return {
+      ok: false,
+      message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (posting.owner_employee_id !== session.employeeId) {
+    return {
+      ok: false,
+      message: "Only the original worker can accept a mutual application.",
+    };
+  }
+
+  if (posting.status !== "open") {
+    return {
+      ok: false,
+      message: "That mutual posting is no longer open.",
+    };
+  }
+
+  const applicationResult = await supabase
+    .from("mutual_shift_applications")
+    .select("id, status")
+    .eq("id", input.applicationId)
+    .eq("posting_id", input.postingId)
+    .maybeSingle();
+
+  const application = applicationResult.data as { id: string; status: string } | null;
+
+  if (applicationResult.error || !application || application.status !== "open") {
+    return {
+      ok: false,
+      message: "Could not find that mutual application.",
+    };
+  }
+
+  const { error: postingError } = await supabase
+    .from("mutual_shift_postings")
+    .update({
+      status: "accepted",
+      accepted_application_id: input.applicationId,
+    })
+    .eq("id", input.postingId);
+
+  if (postingError) {
+    return {
+      ok: false,
+      message: `Could not accept mutual application: ${postingError.message}`,
+    };
+  }
+
+  await supabase
+    .from("mutual_shift_applications")
+    .update({ status: "accepted" })
+    .eq("id", input.applicationId);
+
+  await supabase
+    .from("mutual_shift_applications")
+    .update({ status: "rejected" })
+    .eq("posting_id", input.postingId)
+    .eq("status", "open")
+    .neq("id", input.applicationId);
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  return {
+    ok: true,
+    message: "Mutual application accepted.",
+  };
+}
+
+export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session || !session.employeeId) {
+    return {
+      ok: false,
+      message: "You do not have permission to withdraw mutual postings.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual postings are unavailable.",
+    };
+  }
+
+  const postingResult = await supabase
+    .from("mutual_shift_postings")
+    .select("id, owner_employee_id, status")
+    .eq("id", input.postingId)
+    .maybeSingle();
+
+  const posting = postingResult.data as { id: string; owner_employee_id: string; status: string } | null;
+
+  if (postingResult.error || !posting) {
+    return {
+      ok: false,
+      message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (posting.owner_employee_id !== session.employeeId) {
+    return {
+      ok: false,
+      message: "Only the original worker can withdraw an open mutual posting.",
+    };
+  }
+
+  if (posting.status !== "open") {
+    return {
+      ok: false,
+      message: "Only open mutual postings can be withdrawn.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("mutual_shift_postings")
+    .update({ status: "withdrawn" })
+    .eq("id", input.postingId);
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not withdraw mutual posting: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  return {
+    ok: true,
+    message: "Mutual posting withdrawn.",
+  };
+}
+
+export async function withdrawMutualApplication(input: WithdrawMutualApplicationInput) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session || !session.employeeId) {
+    return {
+      ok: false,
+      message: "You do not have permission to withdraw mutual applications.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual applications are unavailable.",
+    };
+  }
+
+  const applicationResult = await supabase
+    .from("mutual_shift_applications")
+    .select("id, applicant_employee_id, status")
+    .eq("id", input.applicationId)
+    .eq("posting_id", input.postingId)
+    .maybeSingle();
+
+  const application = applicationResult.data as { id: string; applicant_employee_id: string; status: string } | null;
+
+  if (applicationResult.error || !application) {
+    return {
+      ok: false,
+      message: "Could not find that mutual application.",
+    };
+  }
+
+  if (application.applicant_employee_id !== session.employeeId) {
+    return {
+      ok: false,
+      message: "Only the applicant can withdraw this offer.",
+    };
+  }
+
+  if (application.status !== "open") {
+    return {
+      ok: false,
+      message: "Only open applications can be withdrawn.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("mutual_shift_applications")
+    .update({ status: "withdrawn" })
+    .eq("id", input.applicationId);
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not withdraw mutual application: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  return {
+    ok: true,
+    message: "Mutual application withdrawn.",
+  };
+}
+
+export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
+  const session = await requireActionRole(["leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only leaders can cancel accepted mutuals.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutuals are unavailable.",
+    };
+  }
+
+  const postingResult = await supabase
+    .from("mutual_shift_postings")
+    .select("id, status")
+    .eq("id", input.postingId)
+    .maybeSingle();
+
+  const posting = postingResult.data as { id: string; status: string } | null;
+
+  if (postingResult.error || !posting) {
+    return {
+      ok: false,
+      message: "Could not find that mutual.",
+    };
+  }
+
+  if (posting.status !== "accepted") {
+    return {
+      ok: false,
+      message: "Only accepted mutuals can be cancelled.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("mutual_shift_postings")
+    .update({ status: "cancelled" })
+    .eq("id", input.postingId);
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not cancel mutual: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  return {
+    ok: true,
+    message: "Accepted mutual cancelled.",
   };
 }
 

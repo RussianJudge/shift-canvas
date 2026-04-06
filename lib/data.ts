@@ -15,6 +15,9 @@ import type {
   CompletedSet,
   Competency,
   Employee,
+  MutualShiftApplication,
+  MutualShiftPosting,
+  MutualsSnapshot,
   OvertimeClaim,
   ProductionUnit,
   Schedule,
@@ -23,6 +26,13 @@ import type {
   TimeCode,
 } from "@/lib/types";
 
+/**
+ * Server-only data loaders for the scheduling workspace.
+ *
+ * These helpers pull a month snapshot from Supabase and shape it into the
+ * in-memory structure used by the rest of the app. The central goal is to keep
+ * the UI mostly unaware of table layouts and row naming conventions.
+ */
 type DataClient = NonNullable<ReturnType<typeof getSupabaseAdminClient> | ReturnType<typeof getSupabaseServerClient>>;
 
 type ScheduleRow = {
@@ -102,10 +112,43 @@ type UserSchedulePinRow = {
   sort_order: number;
 };
 
+type MutualShiftPostingRow = {
+  id: string;
+  owner_employee_id: string;
+  owner_schedule_id: string;
+  status: MutualShiftPosting["status"];
+  month_key: string;
+  accepted_application_id: string | null;
+  created_at: string;
+};
+
+type MutualShiftPostingDateRow = {
+  posting_id: string;
+  swap_date: string;
+  shift_kind: Exclude<StoredAssignment["shiftKind"], "OFF">;
+};
+
+type MutualShiftApplicationRow = {
+  id: string;
+  posting_id: string;
+  applicant_employee_id: string;
+  applicant_schedule_id: string;
+  status: MutualShiftApplication["status"];
+  created_at: string;
+};
+
+type MutualShiftApplicationDateRow = {
+  application_id: string;
+  swap_date: string;
+  shift_kind: Exclude<StoredAssignment["shiftKind"], "OFF">;
+};
+
+/** Prefers the admin client, but can fall back to a server-scoped client. */
 function getDataClient() {
   return getSupabaseAdminClient() ?? getSupabaseServerClient();
 }
 
+/** Empty snapshot shape used when data is unavailable or a page is unconfigured. */
 function emptySnapshot(month: string, overrides: Partial<SchedulerSnapshot> = {}): SchedulerSnapshot {
   return {
     month,
@@ -128,6 +171,7 @@ function getMonthBounds(month: string) {
   };
 }
 
+/** Expands a month into the previous/current/next query window for cross-month sets. */
 function getExtendedMonthBounds(month: string) {
   const previousMonth = shiftMonthKey(month, -1);
   const nextMonth = shiftMonthKey(month, 1);
@@ -149,6 +193,7 @@ function mapProductionUnits(rows: ProductionUnitRow[]) {
   }));
 }
 
+/** Maps competency rows and enforces safe defaults for UI rendering. */
 function mapCompetencies(rows: CompetencyRow[]) {
   return rows.map<Competency>((row) => ({
     id: row.id,
@@ -168,6 +213,7 @@ function mapTimeCodes(rows: TimeCodeRow[]) {
   }));
 }
 
+/** Joins employees with their competency links and groups them by shift/schedule. */
 function buildEmployeesBySchedule(
   employeeRows: EmployeeRow[],
   employeeCompetencyRows: EmployeeCompetencyRow[],
@@ -234,6 +280,12 @@ function mapCompletedSets(rows: CompletedSetRow[]) {
   }));
 }
 
+/**
+ * Determines whether a month should appear in the overtime month filter.
+ *
+ * A month is considered relevant when it still has a staffing shortfall or when
+ * claims already exist for that month's overtime postings.
+ */
 function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
   const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
   const employeeMap = getEmployeeMap(snapshot.schedules);
@@ -342,6 +394,17 @@ function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
   return false;
 }
 
+/**
+ * Loads the full scheduler snapshot for a month.
+ *
+ * The schedule screen and several downstream pages rely on one consistent shape
+ * that includes:
+ * - reference data (competencies/time codes/units)
+ * - schedules with employees attached
+ * - assignments for the extended month window
+ * - overtime claims
+ * - completed-set state
+ */
 export async function getSchedulerSnapshot(month: string) {
   const supabase = getDataClient();
 
@@ -612,4 +675,117 @@ export async function getUserSchedulePins(email: string) {
     },
     {},
   );
+}
+
+export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot> {
+  const schedulerSnapshot = await getSchedulerSnapshot(month);
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    return {
+      month,
+      schedules: schedulerSnapshot.schedules,
+      postings: [],
+    };
+  }
+
+  const [
+    postingsResult,
+    postingDatesResult,
+    applicationsResult,
+    applicationDatesResult,
+  ] = await Promise.all([
+    supabase
+      .from("mutual_shift_postings")
+      .select("id, owner_employee_id, owner_schedule_id, status, month_key, accepted_application_id, created_at")
+      .eq("month_key", month)
+      .order("created_at"),
+    supabase
+      .from("mutual_shift_posting_dates")
+      .select("posting_id, swap_date, shift_kind")
+      .gte("swap_date", `${month}-01`)
+      .lt("swap_date", `${shiftMonthKey(month, 1)}-01`)
+      .order("swap_date"),
+    supabase
+      .from("mutual_shift_applications")
+      .select("id, posting_id, applicant_employee_id, applicant_schedule_id, status, created_at")
+      .order("created_at"),
+    supabase
+      .from("mutual_shift_application_dates")
+      .select("application_id, swap_date, shift_kind")
+      .gte("swap_date", `${month}-01`)
+      .lt("swap_date", `${shiftMonthKey(month, 1)}-01`)
+      .order("swap_date"),
+  ]);
+
+  const employeeMap = getEmployeeMap(schedulerSnapshot.schedules);
+  const scheduleMap = Object.fromEntries(
+    schedulerSnapshot.schedules.map((schedule) => [schedule.id, schedule]),
+  );
+
+  const postingDatesById = ((postingDatesResult.data as MutualShiftPostingDateRow[] | null) ?? []).reduce<
+    Record<string, MutualShiftPostingDateRow[]>
+  >((map, row) => {
+    map[row.posting_id] ??= [];
+    map[row.posting_id].push(row);
+    return map;
+  }, {});
+
+  const applicationDatesById = ((applicationDatesResult.data as MutualShiftApplicationDateRow[] | null) ?? []).reduce<
+    Record<string, MutualShiftApplicationDateRow[]>
+  >((map, row) => {
+    map[row.application_id] ??= [];
+    map[row.application_id].push(row);
+    return map;
+  }, {});
+
+  const applicationsByPostingId = ((applicationsResult.data as MutualShiftApplicationRow[] | null) ?? []).reduce<
+    Record<string, MutualShiftApplication[]>
+  >((map, row) => {
+    const applicant = employeeMap[row.applicant_employee_id];
+    const applicantSchedule = scheduleMap[row.applicant_schedule_id];
+
+    map[row.posting_id] ??= [];
+    map[row.posting_id].push({
+      id: row.id,
+      postingId: row.posting_id,
+      applicantEmployeeId: row.applicant_employee_id,
+      applicantEmployeeName: applicant?.name ?? "Unknown worker",
+      applicantScheduleId: row.applicant_schedule_id,
+      applicantScheduleName: applicantSchedule?.name ?? "Unknown shift",
+      status: row.status,
+      dates: (applicationDatesById[row.id] ?? []).map((entry) => entry.swap_date),
+      shiftKinds: (applicationDatesById[row.id] ?? []).map((entry) => entry.shift_kind),
+      createdAt: row.created_at,
+    });
+    return map;
+  }, {});
+
+  const postings = ((postingsResult.data as MutualShiftPostingRow[] | null) ?? []).map<MutualShiftPosting>((row) => {
+    const owner = employeeMap[row.owner_employee_id];
+    const ownerSchedule = scheduleMap[row.owner_schedule_id];
+
+    return {
+      id: row.id,
+      ownerEmployeeId: row.owner_employee_id,
+      ownerEmployeeName: owner?.name ?? "Unknown worker",
+      ownerScheduleId: row.owner_schedule_id,
+      ownerScheduleName: ownerSchedule?.name ?? "Unknown shift",
+      status: row.status,
+      dates: (postingDatesById[row.id] ?? []).map((entry) => entry.swap_date),
+      shiftKinds: (postingDatesById[row.id] ?? []).map((entry) => entry.shift_kind),
+      month: row.month_key,
+      createdAt: row.created_at,
+      acceptedApplicationId: row.accepted_application_id,
+      applications: (applicationsByPostingId[row.id] ?? []).sort(
+        (left, right) => left.createdAt.localeCompare(right.createdAt),
+      ),
+    };
+  });
+
+  return {
+    month,
+    schedules: schedulerSnapshot.schedules,
+    postings,
+  };
 }

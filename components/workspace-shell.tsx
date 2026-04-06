@@ -7,6 +7,13 @@ import { usePathname } from "next/navigation";
 import { signOut } from "@/app/auth-actions";
 import type { AppSession } from "@/lib/types";
 
+/**
+ * Shared application shell for every authenticated page.
+ *
+ * The sidebar is role-aware, so this component is effectively the UI boundary
+ * for "who can navigate where" once the session has already been validated on
+ * the server.
+ */
 function ScheduleIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -74,6 +81,17 @@ function ProfileIcon() {
   );
 }
 
+function MutualsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7.5 7.5a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 0 0 0-4.5Z" />
+      <path d="M16.5 7.5a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 0 0 0-4.5Z" />
+      <path d="M4.5 18a4.5 4.5 0 0 1 6-4.243A4.5 4.5 0 0 1 13.5 18" />
+      <path d="M10.5 18a4.5 4.5 0 0 1 9 0" />
+    </svg>
+  );
+}
+
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -85,6 +103,7 @@ function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+/** Small presentational wrapper so nav link semantics stay consistent everywhere. */
 function NavLink({
   href,
   label,
@@ -110,6 +129,7 @@ function NavLink({
   );
 }
 
+/** Responsive shell with a collapsible toolbar and role-scoped nav. */
 export function WorkspaceShell({
   children,
   viewer,
@@ -123,6 +143,7 @@ export function WorkspaceShell({
       ? [
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
+          { href: "/mutuals", label: "Mutuals", icon: <MutualsIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
           { href: "/schedules", label: "Shifts", icon: <PatternsIcon /> },
           { href: "/competencies", label: "Competencies", icon: <CompetenciesIcon /> },
@@ -133,11 +154,13 @@ export function WorkspaceShell({
       ? [
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
+          { href: "/mutuals", label: "Mutuals", icon: <MutualsIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
         ]
       : [
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
+          { href: "/mutuals", label: "Mutuals", icon: <MutualsIcon /> },
           { href: "/profile", label: "My Profile", icon: <ProfileIcon /> },
         ];
 

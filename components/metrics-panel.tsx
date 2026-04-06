@@ -9,6 +9,13 @@ import {
 } from "@/lib/scheduling";
 import type { Competency, SchedulerSnapshot } from "@/lib/types";
 
+/**
+ * Metrics dashboard and planning sandbox.
+ *
+ * The charts are read-only summaries built from the current month snapshot.
+ * The "Shift Transfer" tool is also intentionally read-only: it calculates a
+ * best-fit single-person move without mutating live schedule or personnel data.
+ */
 type TeamCompetencyMetric = {
   competencyId: string;
   code: string;
@@ -53,6 +60,7 @@ type TransferSuggestion = {
   projections: TransferProjection[];
 };
 
+/** Builds the two main dashboard summaries shown on the metrics screen. */
 function getTeamMetrics(snapshot: SchedulerSnapshot): TeamMetric[] {
   const employeeMap = getEmployeeMap(snapshot.schedules);
 
@@ -119,6 +127,7 @@ function getTeamMetrics(snapshot: SchedulerSnapshot): TeamMetric[] {
   });
 }
 
+/** Precomputes per-team qualified staff counts for transfer planning. */
 function buildQualifiedCountMap(snapshot: SchedulerSnapshot) {
   return Object.fromEntries(
     snapshot.schedules.map((schedule) => [
@@ -133,6 +142,11 @@ function buildQualifiedCountMap(snapshot: SchedulerSnapshot) {
   ) as Record<string, Record<string, number>>;
 }
 
+/**
+ * Scores the best single-person move from one shift to another for a selected
+ * set of competencies. Higher scores favor teams that gain scarce coverage
+ * without overly hollowing out the source shift.
+ */
 function getBestTransferSuggestion({
   snapshot,
   sourceScheduleId,

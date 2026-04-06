@@ -17,6 +17,14 @@ import {
 } from "@/lib/scheduling";
 import type { AppSession, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
 
+/**
+ * Overtime board for packaging shortages into claimable postings.
+ *
+ * The board works from completed sets only. Each posting can either represent:
+ * - a direct claim for the missing competency, or
+ * - a swap path where the claimant takes one post and an on-team worker slides
+ *   into the originally missing post.
+ */
 type OvertimePosting = {
   id: string;
   scheduleId: string;
@@ -45,6 +53,7 @@ type AssignmentMeta = {
   originalCompetencyId: string | null;
 };
 
+/** Parses overtime note metadata off assignment rows for claimed postings. */
 function parseAssignmentMeta(note: string | null | undefined): AssignmentMeta {
   if (!note?.startsWith("OT|")) {
     return {
@@ -85,6 +94,7 @@ function getShiftLabel(shiftKind: Exclude<ShiftKind, "OFF">, count: number) {
   return `${count} ${shiftKind === "DAY" ? "day" : "night"} shift${count === 1 ? "" : "s"}`;
 }
 
+/** Groups a schedule's month into worked sets and their day/night segments. */
 function getWorkedSets(
   schedule: SchedulerSnapshot["schedules"][number],
   monthDays: Array<{ date: string }>,
@@ -165,6 +175,8 @@ function getClaimStatus(
   snapshot: SchedulerSnapshot,
   assignments: Record<string, { competencyId: string | null; timeCodeId: string | null }>,
 ) {
+  // Workers can only claim OT that sits on their scheduled days off and does not
+  // conflict with any existing assignment already on the calendar.
   if (!employee) {
     return { canClaim: false, reason: "Select an employee first." };
   }
@@ -203,6 +215,8 @@ export function OvertimePanel({
   availableMonths: string[];
   viewer: AppSession;
 }) {
+  // The board is built from snapshot state only; claiming/releasing triggers a
+  // server refresh instead of trying to locally simulate every OT side effect.
   const router = useRouter();
   const [claimingEmployeeId, setClaimingEmployeeId] = useState(
     viewer.role === "worker"
@@ -429,29 +443,27 @@ export function OvertimePanel({
 
               const candidateEntries = Object.values(swapCandidates);
 
-              if (candidateEntries.length === 0) {
-                nextPostings.push({
-                  id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
-                  scheduleId: schedule.id,
-                  scheduleName: schedule.name,
-                  shiftKind: segment.shiftKind,
-                  competencyId: competency.id,
-                  competencyCode: competency.code,
-                  competencyLabel: competency.label,
-                  coverageCompetencyId: competency.id,
-                  coverageCompetencyCode: competency.code,
-                  coverageCompetencyLabel: competency.label,
-                  colorToken: competency.colorToken,
-                  dates: postingDates,
-                  staffedPeople,
-                  requiredStaff: competency.requiredStaff,
-                  openShifts: postingDates.length,
-                  claimedEmployeeId: null,
-                  claimedByName: null,
-                  swapEmployeeId: null,
-                  swapEmployeeName: null,
-                });
-              }
+              nextPostings.push({
+                id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
+                scheduleId: schedule.id,
+                scheduleName: schedule.name,
+                shiftKind: segment.shiftKind,
+                competencyId: competency.id,
+                competencyCode: competency.code,
+                competencyLabel: competency.label,
+                coverageCompetencyId: competency.id,
+                coverageCompetencyCode: competency.code,
+                coverageCompetencyLabel: competency.label,
+                colorToken: competency.colorToken,
+                dates: postingDates,
+                staffedPeople,
+                requiredStaff: competency.requiredStaff,
+                openShifts: postingDates.length,
+                claimedEmployeeId: null,
+                claimedByName: null,
+                swapEmployeeId: null,
+                swapEmployeeName: null,
+              });
 
               for (const candidate of candidateEntries) {
                 const offeredCompetency = snapshot.competencies.find((entry) => entry.id === candidate.competencyId);

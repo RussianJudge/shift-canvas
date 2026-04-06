@@ -1,5 +1,6 @@
 export type ShiftKind = "DAY" | "NIGHT" | "OFF";
 export type AppRole = "admin" | "leader" | "worker";
+export type MutualStatus = "open" | "accepted" | "withdrawn" | "cancelled" | "rejected";
 
 export type ScheduleCode = "601" | "602" | "603" | "604";
 
@@ -62,6 +63,34 @@ export interface OvertimeClaim {
   date: string;
 }
 
+export interface MutualShiftApplication {
+  id: string;
+  postingId: string;
+  applicantEmployeeId: string;
+  applicantEmployeeName: string;
+  applicantScheduleId: string;
+  applicantScheduleName: string;
+  status: MutualStatus;
+  dates: string[];
+  shiftKinds: ShiftKind[];
+  createdAt: string;
+}
+
+export interface MutualShiftPosting {
+  id: string;
+  ownerEmployeeId: string;
+  ownerEmployeeName: string;
+  ownerScheduleId: string;
+  ownerScheduleName: string;
+  status: MutualStatus;
+  dates: string[];
+  shiftKinds: ShiftKind[];
+  month: string;
+  createdAt: string;
+  acceptedApplicationId: string | null;
+  applications: MutualShiftApplication[];
+}
+
 export interface CompletedSet {
   scheduleId: string;
   month: string;
@@ -89,6 +118,12 @@ export interface SchedulerSnapshot {
   completedSets: CompletedSet[];
 }
 
+export interface MutualsSnapshot {
+  month: string;
+  schedules: Schedule[];
+  postings: MutualShiftPosting[];
+}
+
 export interface SaveAssignmentsInput {
   scheduleId: string;
   updates: StoredAssignment[];
@@ -108,6 +143,35 @@ export interface ReleaseOvertimePostingInput {
   employeeId: string;
   competencyId: string;
   dates: string[];
+}
+
+export interface CreateMutualPostingInput {
+  employeeId: string;
+  dates: string[];
+}
+
+export interface ApplyToMutualPostingInput {
+  postingId: string;
+  employeeId: string;
+  dates: string[];
+}
+
+export interface AcceptMutualApplicationInput {
+  postingId: string;
+  applicationId: string;
+}
+
+export interface WithdrawMutualPostingInput {
+  postingId: string;
+}
+
+export interface WithdrawMutualApplicationInput {
+  postingId: string;
+  applicationId: string;
+}
+
+export interface CancelAcceptedMutualInput {
+  postingId: string;
 }
 
 export interface SetScheduleCompletionInput {

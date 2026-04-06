@@ -1,5 +1,12 @@
 import type { ShiftKind } from "@/lib/types";
 
+/**
+ * Helpers for encoding overtime-specific schedule rows.
+ *
+ * Overtime writes are stored in the same `schedule_assignments` table as normal
+ * coverage, so the `notes` field carries extra metadata that explains how a
+ * claim should be interpreted, restored, or released later on.
+ */
 export type OvertimeAssignmentRow = {
   employee_id: string;
   assignment_date: string;
@@ -17,6 +24,7 @@ export type ParsedOvertimeNote = {
   originalCompetencyId: string | null;
 };
 
+/** Builds a compact metadata note for overtime-created assignment rows. */
 export function buildOvertimeAssignmentNote({
   claimantEmployeeId,
   claimedCompetencyId,
@@ -51,6 +59,7 @@ export function buildOvertimeAssignmentNote({
   return parts.join("|");
 }
 
+/** Parses an overtime note back into structured metadata for cleanup/restore. */
 export function parseOvertimeAssignmentNote(note: string | null | undefined): ParsedOvertimeNote {
   if (!note?.startsWith("OT|")) {
     return {
@@ -81,6 +90,11 @@ export function parseOvertimeAssignmentNote(note: string | null | undefined): Pa
   };
 }
 
+/**
+ * Creates the companion assignment rows for the "swap" half of an overtime
+ * claim, moving an on-team employee from their current post onto the originally
+ * missing coverage post for the same dates.
+ */
 export function buildSwapOvertimeAssignmentRows({
   claimantEmployeeId,
   claimedCompetencyId,

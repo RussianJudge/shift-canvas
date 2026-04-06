@@ -6,6 +6,15 @@ import { redirect } from "next/navigation";
 
 import type { AppRole, AppSession } from "@/lib/types";
 
+/**
+ * Lightweight signed-cookie session layer for the app.
+ *
+ * The product does not yet use a full hosted auth session in the UI, so we
+ * persist the already-resolved application profile (role, linked schedule, and
+ * worker id) inside an HMAC-signed cookie. Server pages and actions can then
+ * read one object and make authorization decisions without repeating profile
+ * lookups on every request.
+ */
 const SESSION_COOKIE = "shift-canvas-session";
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 14;
 const SESSION_SECRET =
@@ -22,6 +31,7 @@ function sign(value: string) {
   return createHmac("sha256", SESSION_SECRET).update(value).digest("base64url");
 }
 
+/** Serializes and signs the complete app session payload for cookie storage. */
 function encodeSession(session: AppSession) {
   const payload = Buffer.from(
     JSON.stringify({
@@ -33,6 +43,7 @@ function encodeSession(session: AppSession) {
   return `${payload}.${sign(payload)}`;
 }
 
+/** Verifies the HMAC signature and returns a trusted session payload. */
 function decodeSession(value: string | undefined): AppSession | null {
   if (!value) {
     return null;
@@ -66,11 +77,13 @@ function decodeSession(value: string | undefined): AppSession | null {
   }
 }
 
+/** Reads the current signed session cookie, if one exists. */
 export async function getAppSession() {
   const cookieStore = await cookies();
   return decodeSession(cookieStore.get(SESSION_COOKIE)?.value);
 }
 
+/** Writes a fresh signed session cookie after sign-in. */
 export async function setAppSession(session: AppSession) {
   const cookieStore = await cookies();
 
@@ -83,15 +96,18 @@ export async function setAppSession(session: AppSession) {
   });
 }
 
+/** Clears the session cookie during sign-out. */
 export async function clearAppSession() {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
 }
 
+/** Chooses the first page a role should see after authentication. */
 export function getSessionHomePath(session: AppSession) {
   return session.role === "worker" ? "/profile" : "/schedule";
 }
 
+/** Guards a server route and redirects users who are missing or under-scoped. */
 export async function requireAppSession(allowedRoles?: AppRole[]) {
   const session = await getAppSession();
 
@@ -106,10 +122,12 @@ export async function requireAppSession(allowedRoles?: AppRole[]) {
   return session;
 }
 
+/** Shared role helper for pages/actions that can edit scheduling data. */
 export function canManageWorkspace(session: AppSession) {
   return session.role === "admin" || session.role === "leader";
 }
 
+/** Shared role helper for admin-only reference data pages. */
 export function canManageAdminData(session: AppSession) {
   return session.role === "admin";
 }
