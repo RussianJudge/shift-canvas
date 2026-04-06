@@ -1210,7 +1210,7 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
 export async function acceptMutualApplication(input: AcceptMutualApplicationInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
-  if (!session || !session.employeeId) {
+  if (!session) {
     return {
       ok: false,
       message: "You do not have permission to accept mutual applications.",
