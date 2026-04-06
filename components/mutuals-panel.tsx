@@ -328,7 +328,7 @@ export function MutualsPanel({
   }
 
   return (
-    <section className="panel-frame">
+    <section className="panel-frame mutuals-page">
       <div className="panel-heading panel-heading--simple">
         <h1 className="panel-title">Mutuals</h1>
       </div>
@@ -361,7 +361,7 @@ export function MutualsPanel({
         </div>
       </div>
 
-      <section className="metrics-section">
+      <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
           <h2 className="metrics-section__title">Post Mutual Shifts</h2>
         </div>
@@ -407,7 +407,7 @@ export function MutualsPanel({
         </div>
       </section>
 
-      <section className="metrics-section">
+      <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
           <h2 className="metrics-section__title">Open Mutuals</h2>
         </div>
@@ -530,7 +530,7 @@ export function MutualsPanel({
         </div>
       </section>
 
-      <section className="metrics-section">
+      <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
           <h2 className="metrics-section__title">Accepted Mutuals</h2>
         </div>
@@ -602,7 +602,7 @@ export function MutualsPanel({
         </div>
       </section>
 
-      <section className="metrics-section">
+      <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
           <h2 className="metrics-section__title">Closed Mutuals</h2>
         </div>

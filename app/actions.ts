@@ -1312,7 +1312,7 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
 export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
-  if (!session || !session.employeeId) {
+  if (!session) {
     return {
       ok: false,
       message: "You do not have permission to withdraw mutual postings.",

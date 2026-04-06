@@ -1197,6 +1197,14 @@ select {
   gap: 1rem;
 }
 
+.mutuals-page {
+  padding-bottom: 1.5rem;
+}
+
+.mutuals-section {
+  padding: 0 1.5rem;
+}
+
 .mutuals-month-nav {
   display: grid;
   gap: 0.6rem;
