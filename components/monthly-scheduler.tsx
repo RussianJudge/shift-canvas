@@ -1518,7 +1518,7 @@ export function MonthlyScheduler({
         </div>
       </div>
 
-      {canManageSetBuilder ? (
+      {canManageSetBuilder && selectedSetDays.length > 0 ? (
       <section className="set-builder" aria-label="Set builder">
         <div className="set-builder-heading">
           <div className="set-builder-actions">
