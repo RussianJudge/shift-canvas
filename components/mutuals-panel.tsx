@@ -115,14 +115,19 @@ function MutualApplyModal({
 
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[selectedEmployeeId];
+  const [offerMonth, setOfferMonth] = useState(snapshot.month);
   const schedule = employee ? snapshot.schedules.find((entry) => entry.id === employee.scheduleId) ?? null : null;
   const postingOwner = employeeMap[posting.ownerEmployeeId];
   const postingOwnerSchedule = postingOwner
     ? snapshot.schedules.find((entry) => entry.id === postingOwner.scheduleId) ?? null
     : null;
+  const monthOptions = useMemo(
+    () => Array.from({ length: 7 }, (_, index) => shiftMonthKey(snapshot.month, index - 3)),
+    [snapshot.month],
+  );
   const availableDates =
     employee && schedule && postingOwnerSchedule
-      ? getMonthDays(snapshot.month)
+      ? getMonthDays(offerMonth)
           .filter(
             (day) =>
               shiftForDate(schedule, day.date) !== "OFF" &&
@@ -167,6 +172,17 @@ function MutualApplyModal({
             </select>
           </label>
         )}
+
+        <label className="field">
+          <span>Offer Month</span>
+          <select value={offerMonth} onChange={(event) => setOfferMonth(event.target.value)}>
+            {monthOptions.map((month) => (
+              <option key={month} value={month}>
+                {formatMonthLabel(month)}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <MutualDatePicker
           title="Offered shifts"

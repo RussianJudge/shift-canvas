@@ -1131,13 +1131,6 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     };
   }
 
-  if (dates.some((date) => date.slice(0, 7) !== posting.month_key)) {
-    return {
-      ok: false,
-      message: "Mutual applications must stay within the same month as the posting.",
-    };
-  }
-
   const snapshot = await getSchedulerSnapshot(posting.month_key);
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];

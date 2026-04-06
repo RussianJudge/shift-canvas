@@ -689,33 +689,36 @@ export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot
     };
   }
 
-  const [
-    postingsResult,
-    postingDatesResult,
-    applicationsResult,
-    applicationDatesResult,
-  ] = await Promise.all([
+  const [postingsResult, applicationsResult] = await Promise.all([
     supabase
       .from("mutual_shift_postings")
       .select("id, owner_employee_id, owner_schedule_id, status, month_key, accepted_application_id, created_at")
       .eq("month_key", month)
       .order("created_at"),
     supabase
-      .from("mutual_shift_posting_dates")
-      .select("posting_id, swap_date, shift_kind")
-      .gte("swap_date", `${month}-01`)
-      .lt("swap_date", `${shiftMonthKey(month, 1)}-01`)
-      .order("swap_date"),
-    supabase
       .from("mutual_shift_applications")
       .select("id, posting_id, applicant_employee_id, applicant_schedule_id, status, created_at")
       .order("created_at"),
-    supabase
-      .from("mutual_shift_application_dates")
-      .select("application_id, swap_date, shift_kind")
-      .gte("swap_date", `${month}-01`)
-      .lt("swap_date", `${shiftMonthKey(month, 1)}-01`)
-      .order("swap_date"),
+  ]);
+
+  const postingIds = ((postingsResult.data as MutualShiftPostingRow[] | null) ?? []).map((row) => row.id);
+  const applicationIds = ((applicationsResult.data as MutualShiftApplicationRow[] | null) ?? []).map((row) => row.id);
+
+  const [postingDatesResult, applicationDatesResult] = await Promise.all([
+    postingIds.length > 0
+      ? supabase
+          .from("mutual_shift_posting_dates")
+          .select("posting_id, swap_date, shift_kind")
+          .in("posting_id", postingIds)
+          .order("swap_date")
+      : Promise.resolve({ data: [], error: null }),
+    applicationIds.length > 0
+      ? supabase
+          .from("mutual_shift_application_dates")
+          .select("application_id, swap_date, shift_kind")
+          .in("application_id", applicationIds)
+          .order("swap_date")
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   const employeeMap = getEmployeeMap(schedulerSnapshot.schedules);
