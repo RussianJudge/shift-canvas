@@ -223,6 +223,7 @@ export function MutualsPanel({
   const [selectedPostingEmployeeId, setSelectedPostingEmployeeId] = useState(
     viewer.role === "worker" ? viewer.employeeId ?? "" : allEmployees[0]?.id ?? "",
   );
+  const [postingMonth, setPostingMonth] = useState(snapshot.month);
   const [postingDates, setPostingDates] = useState<string[]>([]);
   const [applyPostingId, setApplyPostingId] = useState<string | null>(null);
   const [applicationEmployeeId, setApplicationEmployeeId] = useState(
@@ -235,9 +236,13 @@ export function MutualsPanel({
   const selectedPostingSchedule = selectedPostingEmployee
     ? snapshot.schedules.find((entry) => entry.id === selectedPostingEmployee.scheduleId) ?? null
     : null;
+  const postingMonthOptions = useMemo(
+    () => Array.from({ length: 6 }, (_, index) => shiftMonthKey(snapshot.month, index)),
+    [snapshot.month],
+  );
   const postingShiftDates =
     selectedPostingEmployee && selectedPostingSchedule
-      ? getMonthDays(snapshot.month)
+      ? getMonthDays(postingMonth)
           .filter((day) => shiftForDate(selectedPostingSchedule, day.date) !== "OFF")
           .map((day) => ({ date: day.date, shiftKind: shiftForDate(selectedPostingSchedule, day.date) }))
       : [];
@@ -391,12 +396,27 @@ export function MutualsPanel({
             </label>
           )}
 
+          <label className="field">
+            <span>Post Month</span>
+            <select value={postingMonth} onChange={(event) => setPostingMonth(event.target.value)}>
+              {postingMonthOptions.map((month) => (
+                <option key={month} value={month}>
+                  {formatMonthLabel(month)}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <MutualDatePicker
             title="Shifts to swap"
             dates={postingShiftDates}
             selectedDates={postingDates}
             onToggle={togglePostingDate}
-            helper={selectedPostingSchedule ? `Posting from Shift ${selectedPostingSchedule.name}` : undefined}
+            helper={
+              selectedPostingSchedule
+                ? `${postingDates.length} selected across months · posting from Shift ${selectedPostingSchedule.name}`
+                : undefined
+            }
           />
 
           <div className="metrics-transfer-actions">
@@ -465,7 +485,9 @@ export function MutualsPanel({
                     <strong className="metrics-top-list__title">Applications</strong>
                     {posting.applications.length > 0 ? (
                       posting.applications.map((application) => {
-                        const canAccept = viewer.employeeId === posting.ownerEmployeeId && application.status === "open";
+                        const canAccept =
+                          application.status === "open" &&
+                          (viewer.role === "admin" || viewer.employeeId === posting.ownerEmployeeId);
                         const canWithdraw = viewer.employeeId === application.applicantEmployeeId && application.status === "open";
 
                         return (

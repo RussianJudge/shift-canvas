@@ -1246,10 +1246,10 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     };
   }
 
-  if (posting.owner_employee_id !== session.employeeId) {
+  if (session.role !== "admin" && posting.owner_employee_id !== session.employeeId) {
     return {
       ok: false,
-      message: "Only the original worker can accept a mutual application.",
+      message: "Only the original worker or an admin can accept a mutual application.",
     };
   }
 
