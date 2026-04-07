@@ -1341,7 +1341,7 @@ export function MonthlyScheduler({
   }
 
   function handleAutofillSet() {
-    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
     }
 
@@ -1442,7 +1442,7 @@ export function MonthlyScheduler({
   }
 
   function handleClearSet() {
-    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
     }
 
@@ -1579,7 +1579,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleClearSet}
-                  disabled={selectedSetDays.length === 0}
+                  disabled={selectedSetDays.length === 0 || isSelectedSetComplete}
                 >
                   Clear set
                 </button>
@@ -1587,7 +1587,9 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleAutofillSet}
-                  disabled={selectedSetDays.length === 0 || fullyBlankSetWorkers.length === 0}
+                  disabled={
+                    selectedSetDays.length === 0 || isSelectedSetComplete || fullyBlankSetWorkers.length === 0
+                  }
                 >
                   Auto-fill set
                 </button>

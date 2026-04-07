@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
 
 import {
   acceptMutualApplication,
@@ -230,7 +229,13 @@ export function MutualsPanel({
   snapshot: MutualsSnapshot;
   viewer: AppSession;
 }) {
-  const router = useRouter();
+  /**
+   * The server provides the initial month snapshot, then the panel owns later
+   * month switches so the postings board can refresh without remounting the
+   * whole page or resetting the posting builder.
+   */
+  const [viewSnapshot, setViewSnapshot] = useState(snapshot);
+  const [viewMonth, setViewMonth] = useState(snapshot.month);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const allEmployees = useMemo(
     () =>
@@ -251,6 +256,7 @@ export function MutualsPanel({
   );
   const [applicationDates, setApplicationDates] = useState<string[]>([]);
   const [isSubmitting, startTransition] = useTransition();
+  const [isMonthLoading, startMonthTransition] = useTransition();
 
   const selectedPostingEmployee = selectedPostingEmployeeId ? employeeMap[selectedPostingEmployeeId] ?? null : null;
   const selectedPostingSchedule = selectedPostingEmployee
@@ -266,11 +272,43 @@ export function MutualsPanel({
           .filter((day) => shiftForDate(selectedPostingSchedule, day.date) !== "OFF")
           .map((day) => ({ date: day.date, shiftKind: shiftForDate(selectedPostingSchedule, day.date) }))
       : [];
-  const applyPosting = applyPostingId ? snapshot.postings.find((posting) => posting.id === applyPostingId) ?? null : null;
+  const applyPosting = applyPostingId ? viewSnapshot.postings.find((posting) => posting.id === applyPostingId) ?? null : null;
 
-  const openPostings = snapshot.postings.filter((posting) => posting.status === "open");
-  const acceptedPostings = snapshot.postings.filter((posting) => posting.status === "accepted");
-  const closedPostings = snapshot.postings.filter((posting) => posting.status !== "open" && posting.status !== "accepted");
+  const openPostings = viewSnapshot.postings.filter((posting) => posting.status === "open");
+  const acceptedPostings = viewSnapshot.postings.filter((posting) => posting.status === "accepted");
+  const closedPostings = viewSnapshot.postings.filter((posting) => posting.status !== "open" && posting.status !== "accepted");
+
+  useEffect(() => {
+    setViewSnapshot(snapshot);
+    setViewMonth(snapshot.month);
+  }, [snapshot]);
+
+  function loadMutualsMonth(nextMonth: string) {
+    startMonthTransition(async () => {
+      setStatusMessage(`Loading ${formatMonthLabel(nextMonth)}`);
+
+      try {
+        const response = await fetch(`/api/mutuals?month=${nextMonth}`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error("Unable to load mutuals.");
+        }
+
+        const nextSnapshot = (await response.json()) as MutualsSnapshot;
+
+        setViewSnapshot(nextSnapshot);
+        setViewMonth(nextSnapshot.month);
+        setApplyPostingId((current) =>
+          current && nextSnapshot.postings.some((posting) => posting.id === current) ? current : null,
+        );
+        setStatusMessage(`Loaded ${formatMonthLabel(nextSnapshot.month)}`);
+      } catch {
+        setStatusMessage("Could not load that month. Staying on your current mutuals view.");
+      }
+    });
+  }
 
   function togglePostingDate(date: string) {
     setPostingDates((current) =>
@@ -314,7 +352,7 @@ export function MutualsPanel({
 
       if (result.ok) {
         setPostingDates([]);
-        window.location.reload();
+        loadMutualsMonth(viewMonth);
       }
     });
   }
@@ -336,7 +374,7 @@ export function MutualsPanel({
 
       if (result.ok) {
         resetApplication(null);
-        window.location.reload();
+        loadMutualsMonth(viewMonth);
       }
     });
   }
@@ -347,7 +385,7 @@ export function MutualsPanel({
       setStatusMessage(result.message);
 
       if (result.ok) {
-        window.location.reload();
+        loadMutualsMonth(viewMonth);
       }
     });
   }
@@ -433,19 +471,21 @@ export function MutualsPanel({
           <div className="field field--static">
             <span>Month</span>
             <div className="mutuals-month-nav">
-              <strong>{formatMonthLabel(snapshot.month)}</strong>
+              <strong>{formatMonthLabel(viewMonth)}</strong>
               <div className="mutuals-month-nav__buttons">
                 <button
                   type="button"
                   className="ghost-button"
-                  onClick={() => router.push(`/mutuals?month=${shiftMonthKey(snapshot.month, -1)}`)}
+                  onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, -1))}
+                  disabled={isMonthLoading}
                 >
                   Prev month
                 </button>
                 <button
                   type="button"
                   className="ghost-button"
-                  onClick={() => router.push(`/mutuals?month=${shiftMonthKey(snapshot.month, 1)}`)}
+                  onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, 1))}
+                  disabled={isMonthLoading}
                 >
                   Next month
                 </button>
@@ -687,7 +727,7 @@ export function MutualsPanel({
       {applyPosting ? (
         <MutualApplyModal
           viewer={viewer}
-          snapshot={snapshot}
+          snapshot={viewSnapshot}
           posting={applyPosting}
           selectedEmployeeId={applicationEmployeeId}
           selectedDates={applicationDates}
