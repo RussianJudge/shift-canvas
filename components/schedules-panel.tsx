@@ -15,10 +15,12 @@ type EditableSchedule = {
   employeeCount: number;
 };
 
+/** Clones editable shift rows so the save baseline stays immutable. */
 function cloneSchedules(schedules: EditableSchedule[]) {
   return schedules.map((schedule) => ({ ...schedule }));
 }
 
+/** Converts one editable shift row into the backend save payload shape. */
 function normalizeSchedule(schedule: EditableSchedule): ScheduleUpdate {
   return {
     scheduleId: schedule.id,
@@ -30,6 +32,7 @@ function normalizeSchedule(schedule: EditableSchedule): ScheduleUpdate {
   };
 }
 
+/** Returns any validation issues that make a shift pattern invalid to save. */
 function getScheduleIssues(schedule: EditableSchedule) {
   const issues: string[] = [];
 
@@ -48,10 +51,12 @@ function getScheduleIssues(schedule: EditableSchedule) {
   return issues;
 }
 
+/** Compact summary string used to read the pattern at a glance in the table. */
 function formatCycleSummary(schedule: EditableSchedule) {
   return `${schedule.dayShiftDays}D / ${schedule.nightShiftDays}N / ${schedule.offDays}O`;
 }
 
+/** Editor for the reusable shift patterns that drive the entire scheduler. */
 export function SchedulesPanel({
   snapshot,
 }: {

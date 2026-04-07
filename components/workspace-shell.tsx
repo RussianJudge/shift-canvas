@@ -14,6 +14,7 @@ import type { AppSession } from "@/lib/types";
  * for "who can navigate where" once the session has already been validated on
  * the server.
  */
+/** Navigation icon for the main schedule workspace. */
 function ScheduleIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -23,6 +24,7 @@ function ScheduleIcon() {
   );
 }
 
+/** Navigation icon for shift-pattern management. */
 function PatternsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -31,6 +33,7 @@ function PatternsIcon() {
   );
 }
 
+/** Navigation icon for the competencies reference page. */
 function CompetenciesIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -39,6 +42,7 @@ function CompetenciesIcon() {
   );
 }
 
+/** Navigation icon for time-code reference data. */
 function TimeCodesIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -47,6 +51,7 @@ function TimeCodesIcon() {
   );
 }
 
+/** Navigation icon for overtime review and claiming. */
 function OvertimeIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -55,6 +60,7 @@ function OvertimeIcon() {
   );
 }
 
+/** Navigation icon for the personnel workspace. */
 function PersonnelIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -63,6 +69,7 @@ function PersonnelIcon() {
   );
 }
 
+/** Navigation icon for the admin metrics dashboard. */
 function MetricsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -72,6 +79,7 @@ function MetricsIcon() {
   );
 }
 
+/** Navigation icon for the worker self-service profile page. */
 function ProfileIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -81,6 +89,7 @@ function ProfileIcon() {
   );
 }
 
+/** Navigation icon for the mutual shift swap workflow. */
 function MutualsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -92,6 +101,7 @@ function MutualsIcon() {
   );
 }
 
+/** Toggle icon that visually flips when the sidebar is collapsed. */
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -138,6 +148,10 @@ export function WorkspaceShell({
   viewer: AppSession;
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  /**
+   * Navigation is derived directly from the resolved app role so page
+   * visibility stays centralized here instead of being scattered through the UI.
+   */
   const navItems =
     viewer.role === "admin"
       ? [

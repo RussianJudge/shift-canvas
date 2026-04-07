@@ -25,6 +25,7 @@ export interface MonthDay {
   isWeekend: boolean;
 }
 
+/** Converts a calendar day into a UTC day number so date math stays timezone-safe. */
 function toUtcDayNumber(isoDate: string) {
   const [year, month, day] = isoDate.split("-").map(Number);
   return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
@@ -292,10 +293,12 @@ export function createAssignmentKey(employeeId: string, date: string) {
   return `${employeeId}:${date}`;
 }
 
+/** Finds one schedule from the current snapshot, falling back to the first entry. */
 export function getScheduleById(snapshot: SchedulerSnapshot, scheduleId: string) {
   return snapshot.schedules.find((schedule) => schedule.id === scheduleId) ?? snapshot.schedules[0];
 }
 
+/** Builds an id lookup so UI code can resolve competency metadata quickly. */
 export function getCompetencyMap(competencies: Competency[]) {
   return competencies.reduce<Record<string, Competency>>((map, competency) => {
     map[competency.id] = competency;
@@ -303,6 +306,7 @@ export function getCompetencyMap(competencies: Competency[]) {
   }, {});
 }
 
+/** Builds an id lookup for time codes used throughout scheduler and metrics UIs. */
 export function getTimeCodeMap(timeCodes: TimeCode[]) {
   return timeCodes.reduce<Record<string, TimeCode>>((map, timeCode) => {
     map[timeCode.id] = timeCode;
@@ -310,6 +314,7 @@ export function getTimeCodeMap(timeCodes: TimeCode[]) {
   }, {});
 }
 
+/** Flattens all shift rosters into a single employee lookup keyed by employee id. */
 export function getEmployeeMap(schedules: Schedule[]) {
   return schedules.flatMap((schedule) => schedule.employees).reduce<Record<string, Employee>>((map, employee) => {
     map[employee.id] = employee;

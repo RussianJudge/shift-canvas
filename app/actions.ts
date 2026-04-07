@@ -60,6 +60,7 @@ type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>
  * The actions deliberately centralize validation and side effects so the client
  * components can stay focused on interaction state.
  */
+/** Small normalization helper used by many validation checks in this file. */
 function isBlank(value: string) {
   return value.trim().length === 0;
 }
@@ -241,10 +242,12 @@ async function requireActionRole(allowedRoles: AppRole[]) {
   return session;
 }
 
+/** Removes blanks, de-duplicates dates, and sorts them into stable order. */
 function uniqueSortedDates(dates: string[]) {
   return Array.from(new Set(dates.filter(Boolean))).sort();
 }
 
+/** Resolves what kind of worked shift a schedule has on each requested date. */
 function getWorkedShiftKindsForDates(
   schedule: NonNullable<ReturnType<typeof getScheduleById>>,
   dates: string[],
@@ -385,6 +388,13 @@ async function removeStaleOvertimeClaims(
   };
 }
 
+/**
+ * Persists scheduler cell edits for a month window.
+ *
+ * The action upserts non-empty cells, deletes cleared cells, and then
+ * immediately re-evaluates overtime so the downstream overtime board does not
+ * drift from the new staffing picture.
+ */
 export async function saveAssignments(input: SaveAssignmentsInput) {
   const session = await requireActionRole(["admin", "leader"]);
 
@@ -475,6 +485,10 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   };
 }
 
+/**
+ * Stores the current user's pinned rows for one shift in Supabase so the
+ * preference survives refreshes and device changes.
+ */
 export async function saveSchedulePins(input: {
   scheduleId: string;
   pinnedEmployeeIds: string[];
@@ -553,6 +567,13 @@ export async function saveSchedulePins(input: {
   };
 }
 
+/**
+ * Marks a worked set complete or reopens it for edits.
+ *
+ * Completion state drives overtime publishing, so this action also triggers the
+ * overtime recalculation and cleanup flow that keeps the overtime board aligned
+ * with the schedule.
+ */
 export async function setScheduleSetCompletion(input: SetScheduleCompletionInput) {
   const session = await requireActionRole(["admin", "leader"]);
 
@@ -665,6 +686,10 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
   }
 }
 
+/**
+ * Claims an overtime posting for an employee and writes the mirrored schedule
+ * rows needed for the target team to see that borrowed worker.
+ */
 export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
@@ -862,6 +887,10 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   };
 }
 
+/**
+ * Releases a previously claimed overtime posting and removes the derived
+ * schedule rows that were created for that claim.
+ */
 export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
@@ -951,6 +980,7 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
   };
 }
 
+/** Creates a new open mutual swap posting for a selected worker and date set. */
 export async function createMutualPosting(input: CreateMutualPostingInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
@@ -1051,6 +1081,7 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
   };
 }
 
+/** Submits an application against an existing mutual posting. */
 export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
@@ -1207,6 +1238,10 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
   };
 }
 
+/**
+ * Accepts one mutual application, marks it as the winning offer, and writes the
+ * `M` time-code schedule rows that make the swap visible on both schedules.
+ */
 export async function acceptMutualApplication(input: AcceptMutualApplicationInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
@@ -1417,6 +1452,7 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
   };
 }
 
+/** Cancels an open mutual posting before any application has been accepted. */
 export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
@@ -1486,6 +1522,7 @@ export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
   };
 }
 
+/** Removes one open mutual application while leaving the parent posting alive. */
 export async function withdrawMutualApplication(input: WithdrawMutualApplicationInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
@@ -1556,6 +1593,10 @@ export async function withdrawMutualApplication(input: WithdrawMutualApplication
   };
 }
 
+/**
+ * Cancels an already-accepted mutual and restores the workers' original cell
+ * values using the metadata captured when the swap was accepted.
+ */
 export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
   const session = await requireActionRole(["admin", "leader"]);
 
@@ -1696,6 +1737,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
   };
 }
 
+/** Persists add/edit/remove operations from the Personnel admin workspace. */
 export async function savePersonnel(input: SavePersonnelInput) {
   const session = await requireActionRole(["admin", "leader"]);
 
@@ -1808,6 +1850,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
   };
 }
 
+/** Persists shift-pattern changes from the Shifts admin page. */
 export async function saveSchedules(input: SaveSchedulesInput) {
   const session = await requireActionRole(["admin"]);
 
@@ -1893,6 +1936,7 @@ export async function saveSchedules(input: SaveSchedulesInput) {
   };
 }
 
+/** Persists competency catalog changes from the Competencies admin page. */
 export async function saveCompetencies(input: SaveCompetenciesInput) {
   const session = await requireActionRole(["admin"]);
 
@@ -1978,6 +2022,7 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
   };
 }
 
+/** Persists time-code reference data changes from the Time Codes admin page. */
 export async function saveTimeCodes(input: SaveTimeCodesInput) {
   const session = await requireActionRole(["admin"]);
 

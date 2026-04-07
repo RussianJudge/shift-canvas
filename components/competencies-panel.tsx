@@ -16,10 +16,12 @@ type EditableCompetency = {
   qualifiedEmployeeCount: number;
 };
 
+/** Clones editable rows so revert/save operations do not mutate the baseline. */
 function cloneCompetencies(competencies: EditableCompetency[]) {
   return competencies.map((competency) => ({ ...competency }));
 }
 
+/** Converts a UI competency row into the payload shape used by the save action. */
 function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
   return {
     competencyId: competency.id,
@@ -30,6 +32,7 @@ function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
   };
 }
 
+/** Returns the field-level issues that prevent a competency from saving. */
 function getCompetencyIssues(competency: EditableCompetency) {
   const issues: string[] = [];
   const trimmedCode = competency.code.trim();
@@ -53,6 +56,7 @@ function getCompetencyIssues(competency: EditableCompetency) {
   return issues;
 }
 
+/** Admin editor for competency codes, labels, colors, and staffing targets. */
 export function CompetenciesPanel({
   snapshot,
 }: {

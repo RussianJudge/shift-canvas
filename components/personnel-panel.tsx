@@ -60,14 +60,17 @@ function normalizeCsvHeader(value: string) {
     .replace(/^_+|_+$/g, "");
 }
 
+/** Normalizes a human-readable lookup value while keeping spaces intact. */
 function normalizeLookupValue(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/** Normalizes a lookup value into a compact punctuation-free token. */
 function normalizeCompactLookupValue(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+/** Generates several equivalent lookup keys so CSV imports are forgiving. */
 function createLookupVariants(value: string) {
   const variants = new Set<string>();
   const normalized = normalizeLookupValue(value);
@@ -84,6 +87,7 @@ function createLookupVariants(value: string) {
   return variants;
 }
 
+/** Builds all schedule aliases that a CSV import is allowed to match. */
 function createScheduleLookupKeys(schedule: SchedulerSnapshot["schedules"][number]) {
   const variants = new Set<string>();
   const idSuffix = schedule.id.replace(/^schedule-/, "");
@@ -97,6 +101,7 @@ function createScheduleLookupKeys(schedule: SchedulerSnapshot["schedules"][numbe
   return [...variants];
 }
 
+/** Builds the accepted aliases for a competency during CSV import matching. */
 function createCompetencyLookupKeys(competency: SchedulerSnapshot["competencies"][number]) {
   const variants = new Set<string>();
   const numericCode = competency.code.match(/^\d+$/)?.[0] ?? "";
@@ -195,6 +200,7 @@ function buildCsvObjects(text: string): CsvImportRow[] {
   );
 }
 
+/** Returns the first non-empty CSV value from a set of possible header aliases. */
 function pickCsvValue(row: CsvImportRow, aliases: string[]) {
   for (const alias of aliases) {
     const value = row[alias];
@@ -207,6 +213,7 @@ function pickCsvValue(row: CsvImportRow, aliases: string[]) {
   return "";
 }
 
+/** Splits a combined competency cell like `Lead|1|12` into separate values. */
 function splitCompetencyValues(value: string) {
   return value
     .split(/[,;|/]+/)
@@ -214,12 +221,14 @@ function splitCompetencyValues(value: string) {
     .filter(Boolean);
 }
 
+/** Interprets spreadsheet-style truthy cells in matrix competency imports. */
 function isTruthyCsvCell(value: string) {
   const normalized = value.trim().toLowerCase();
 
   return normalized === "yes" || normalized === "y" || normalized === "true" || normalized === "1" || normalized === "x";
 }
 
+/** Deep-clones editable employees so baseline state can be restored safely. */
 function cloneEmployees(employees: EditableEmployee[]) {
   return employees.map((employee) => ({
     ...employee,

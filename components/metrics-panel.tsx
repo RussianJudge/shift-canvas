@@ -49,8 +49,8 @@ type TeamTimeCodeMetric = {
   }>;
 };
 
-type OvertimeWindow = "30d" | "90d" | "ytd";
-type TimeCodeWindow = "30d" | "90d" | "ytd";
+type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
+type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
 
 type TransferProjection = {
   competencyId: string;
@@ -75,38 +75,47 @@ type TransferSuggestion = {
   projections: TransferProjection[];
 };
 
+/** Pads "top 3" lists with blanks so metric cards keep a stable height. */
 function padMetricPeopleRows<T extends { employeeId: string; employeeName: string }>(rows: T[], size = 3) {
   return Array.from({ length: size }, (_, index) => rows[index] ?? null);
 }
 
+/** Shifts an ISO date string by whole days while keeping the result in UTC. */
 function shiftDateKey(dateKey: string, deltaDays: number) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, day + deltaDays));
   return shifted.toISOString().slice(0, 10);
 }
 
+/** Returns the first day included in the selected overtime time window. */
 function getWindowStart(today: string, window: OvertimeWindow) {
   switch (window) {
     case "30d":
       return shiftDateKey(today, -29);
     case "90d":
       return shiftDateKey(today, -89);
+    case "1y":
+      return shiftDateKey(today, -364);
     case "ytd":
       return `${today.slice(0, 4)}-01-01`;
   }
 }
 
+/** Returns the first day included in the selected time-code analytics window. */
 function getTimeCodeWindowStart(today: string, window: TimeCodeWindow) {
   switch (window) {
     case "30d":
       return shiftDateKey(today, -29);
     case "90d":
       return shiftDateKey(today, -89);
+    case "1y":
+      return shiftDateKey(today, -364);
     case "ytd":
       return `${today.slice(0, 4)}-01-01`;
   }
 }
 
+/** Summarizes one chosen time code across teams for the selected history window. */
 function getTeamTimeCodeMetrics(
   snapshot: SchedulerSnapshot,
   assignmentHistory: StoredAssignment[],
@@ -512,7 +521,7 @@ export function MetricsPanel({
           <div className="metrics-section__header">
             <h2 className="metrics-section__title">Overtime Incurred By Team</h2>
             <div className="metrics-window-toggle" aria-label="Overtime time window">
-              {(["30d", "90d", "ytd"] as OvertimeWindow[]).map((window) => (
+              {(["30d", "90d", "1y", "ytd"] as OvertimeWindow[]).map((window) => (
                 <button
                   key={window}
                   type="button"
@@ -591,7 +600,7 @@ export function MetricsPanel({
             </div>
             <div className="metrics-section__controls">
               <div className="metrics-window-toggle" aria-label="Time code time window">
-                {(["30d", "90d", "ytd"] as TimeCodeWindow[]).map((window) => (
+                {(["30d", "90d", "1y", "ytd"] as TimeCodeWindow[]).map((window) => (
                   <button
                     key={window}
                     type="button"

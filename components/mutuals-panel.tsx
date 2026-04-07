@@ -21,6 +21,7 @@ import {
 } from "@/lib/scheduling";
 import type { AppSession, MutualShiftPosting, MutualsSnapshot, ShiftKind } from "@/lib/types";
 
+/** Formats a mutual date chip using the short month/day style used throughout the app. */
 function formatShortDate(isoDate: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -29,10 +30,12 @@ function formatShortDate(isoDate: string) {
   }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
+/** Turns a shift kind into the one-letter badge shown in mutual date pills. */
 function getShiftBadgeLabel(shiftKind: ShiftKind) {
   return shiftKind === "DAY" ? "D" : shiftKind === "NIGHT" ? "N" : "O";
 }
 
+/** Human-friendly label used on mutual posting and application status pills. */
 function getStatusLabel(status: MutualShiftPosting["status"]) {
   switch (status) {
     case "accepted":
@@ -46,6 +49,7 @@ function getStatusLabel(status: MutualShiftPosting["status"]) {
   }
 }
 
+/** Reusable date grid used for both posting and applying to mutual swaps. */
 function MutualDatePicker({
   title,
   dates,
@@ -86,6 +90,13 @@ function MutualDatePicker({
   );
 }
 
+/**
+ * Modal used when a user offers their own shifts against an existing mutual.
+ *
+ * The available dates are already filtered to the ones the applicant is
+ * working while the original poster is off, so the picker only shows dates that
+ * could form a valid swap.
+ */
 function MutualApplyModal({
   viewer,
   snapshot,
@@ -203,6 +214,15 @@ function MutualApplyModal({
   );
 }
 
+/**
+ * Main mutual-shift workspace.
+ *
+ * This component renders the full swap lifecycle in one place:
+ * - create open mutual posts
+ * - browse and apply to existing posts
+ * - accept offers
+ * - review accepted and closed history
+ */
 export function MutualsPanel({
   snapshot,
   viewer,
@@ -338,33 +358,13 @@ export function MutualsPanel({
         <h1 className="panel-title">Mutuals</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--personnel-page">
-        <div className="field field--static">
-          <span>Month</span>
-          <div className="mutuals-month-nav">
-            <strong>{formatMonthLabel(snapshot.month)}</strong>
-            <div className="mutuals-month-nav__buttons">
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => router.push(`/mutuals?month=${shiftMonthKey(snapshot.month, -1)}`)}
-              >
-                Prev month
-              </button>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => router.push(`/mutuals?month=${shiftMonthKey(snapshot.month, 1)}`)}
-              >
-                Next month
-              </button>
-            </div>
+      {statusMessage ? (
+        <div className="workspace-toolbar workspace-toolbar--personnel-page">
+          <div className="toolbar-status-wrap">
+            <p className="toolbar-status">{statusMessage}</p>
           </div>
         </div>
-        <div className="toolbar-status-wrap">
-          {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
-        </div>
-      </div>
+      ) : null}
 
       <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
@@ -430,6 +430,28 @@ export function MutualsPanel({
       <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
           <h2 className="metrics-section__title">Open Mutuals</h2>
+          <div className="field field--static">
+            <span>Month</span>
+            <div className="mutuals-month-nav">
+              <strong>{formatMonthLabel(snapshot.month)}</strong>
+              <div className="mutuals-month-nav__buttons">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => router.push(`/mutuals?month=${shiftMonthKey(snapshot.month, -1)}`)}
+                >
+                  Prev month
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => router.push(`/mutuals?month=${shiftMonthKey(snapshot.month, 1)}`)}
+                >
+                  Next month
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="metrics-team-list">

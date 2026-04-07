@@ -14,10 +14,12 @@ type EditableTimeCode = {
   colorToken: string;
 };
 
+/** Clones editable rows so revert/save baselines are never mutated in place. */
 function cloneTimeCodes(timeCodes: EditableTimeCode[]) {
   return timeCodes.map((timeCode) => ({ ...timeCode }));
 }
 
+/** Converts local UI row state into the payload expected by persistence. */
 function normalizeTimeCode(timeCode: EditableTimeCode): TimeCodeUpdate {
   return {
     timeCodeId: timeCode.id,
@@ -27,6 +29,7 @@ function normalizeTimeCode(timeCode: EditableTimeCode): TimeCodeUpdate {
   };
 }
 
+/** Returns field-level validation issues that block a time code from saving. */
 function getTimeCodeIssues(timeCode: EditableTimeCode) {
   const issues: string[] = [];
 
@@ -45,6 +48,7 @@ function getTimeCodeIssues(timeCode: EditableTimeCode) {
   return issues;
 }
 
+/** CRUD editor for the time codes that can be assigned on the scheduler. */
 export function TimeCodesPanel({
   snapshot,
 }: {

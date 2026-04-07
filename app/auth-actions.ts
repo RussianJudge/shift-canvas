@@ -26,7 +26,14 @@ type ScheduleRow = {
   name: string;
 };
 
-/** Signs a user in by email using the app profile table as the source of truth. */
+/**
+ * Signs a user in by email using `public.profiles` as the application identity
+ * source of truth.
+ *
+ * The action resolves the profile row, builds the role-aware app session used
+ * by the workspace, stores that session in the signed cookie, and then sends
+ * the browser to the correct landing page for that role.
+ */
 export async function signIn(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
 
@@ -83,7 +90,7 @@ export async function signIn(formData: FormData) {
   redirect("/sign-in?error=unknown-email");
 }
 
-/** Clears the app session cookie and returns the user to the sign-in screen. */
+/** Ends the current app session and sends the browser back to sign-in. */
 export async function signOut() {
   await clearAppSession();
   redirect("/sign-in");

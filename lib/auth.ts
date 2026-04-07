@@ -27,6 +27,7 @@ type SessionEnvelope = {
   payload: AppSession;
 };
 
+/** Produces the signature used to detect tampering on the stored session cookie. */
 function sign(value: string) {
   return createHmac("sha256", SESSION_SECRET).update(value).digest("base64url");
 }
