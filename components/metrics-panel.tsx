@@ -75,6 +75,10 @@ type TransferSuggestion = {
   projections: TransferProjection[];
 };
 
+function padMetricPeopleRows<T extends { employeeId: string; employeeName: string }>(rows: T[], size = 3) {
+  return Array.from({ length: size }, (_, index) => rows[index] ?? null);
+}
+
 function shiftDateKey(dateKey: string, deltaDays: number) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, day + deltaDays));
@@ -548,18 +552,17 @@ export function MetricsPanel({
 
                 <div className="metrics-top-list">
                   <strong className="metrics-top-list__title">Top 3 overtime personnel</strong>
-                  {team.topOvertimePeople.length > 0 ? (
-                    <div className="metrics-top-list__rows">
-                      {team.topOvertimePeople.map((person) => (
-                        <div key={person.employeeId} className="metrics-top-list__row">
-                          <span>{person.employeeName}</span>
-                          <strong>{person.claimedShifts}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="metrics-top-list__empty">No overtime claims this month</span>
-                  )}
+                  <div className="metrics-top-list__rows">
+                    {padMetricPeopleRows(team.topOvertimePeople).map((person, index) => (
+                      <div
+                        key={person?.employeeId ?? `overtime-empty-${team.scheduleId}-${index}`}
+                        className={`metrics-top-list__row ${person ? "" : "metrics-top-list__row--empty"}`}
+                      >
+                        <span>{person?.employeeName ?? "\u00A0"}</span>
+                        <strong>{person ? person.claimedShifts : "\u00A0"}</strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </article>
             ))}
@@ -570,18 +573,6 @@ export function MetricsPanel({
           <div className="metrics-section__header">
             <h2 className="metrics-section__title">Time Code Usage By Team</h2>
             <div className="metrics-section__controls">
-              <div className="metrics-window-toggle" aria-label="Time code time window">
-                {(["30d", "60d", "ytd"] as TimeCodeWindow[]).map((window) => (
-                  <button
-                    key={window}
-                    type="button"
-                    className={`ghost-button ${timeCodeWindow === window ? "ghost-button--active" : ""}`}
-                    onClick={() => setTimeCodeWindow(window)}
-                  >
-                    {window.toUpperCase()}
-                  </button>
-                ))}
-              </div>
               {snapshot.timeCodes.length > 0 ? (
                 <label className="field metrics-field-inline">
                   <span>Time code</span>
@@ -597,6 +588,18 @@ export function MetricsPanel({
                   </select>
                 </label>
               ) : null}
+              <div className="metrics-window-toggle" aria-label="Time code time window">
+                {(["30d", "60d", "ytd"] as TimeCodeWindow[]).map((window) => (
+                  <button
+                    key={window}
+                    type="button"
+                    className={`ghost-button ${timeCodeWindow === window ? "ghost-button--active" : ""}`}
+                    onClick={() => setTimeCodeWindow(window)}
+                  >
+                    {window.toUpperCase()}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -632,18 +635,17 @@ export function MetricsPanel({
 
                   <div className="metrics-top-list">
                     <strong className="metrics-top-list__title">Top 3 personnel</strong>
-                    {team.topPeople.length > 0 ? (
-                      <div className="metrics-top-list__rows">
-                        {team.topPeople.map((person) => (
-                          <div key={person.employeeId} className="metrics-top-list__row">
-                            <span>{person.employeeName}</span>
-                            <strong>{person.codedShifts}</strong>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="metrics-top-list__empty">No one scheduled with this code</span>
-                    )}
+                    <div className="metrics-top-list__rows">
+                      {padMetricPeopleRows(team.topPeople).map((person, index) => (
+                        <div
+                          key={person?.employeeId ?? `time-code-empty-${team.scheduleId}-${index}`}
+                          className={`metrics-top-list__row ${person ? "" : "metrics-top-list__row--empty"}`}
+                        >
+                          <span>{person?.employeeName ?? "\u00A0"}</span>
+                          <strong>{person ? person.codedShifts : "\u00A0"}</strong>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </article>
               ))}
