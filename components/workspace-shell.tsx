@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { signOut } from "@/app/auth-actions";
 import type { AppSession } from "@/lib/types";
+
+const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 
 /**
  * Shared application shell for every authenticated page.
@@ -147,7 +149,31 @@ export function WorkspaceShell({
   children: React.ReactNode;
   viewer: AppSession;
 }) {
+  /**
+   * The sidebar remembers the user's last choice so a page navigation does not
+   * feel like the app is fighting their layout preference.
+   */
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storedPreference = window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY);
+
+    if (storedPreference === "true") {
+      setIsCollapsed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, String(isCollapsed));
+  }, [isCollapsed]);
   /**
    * Navigation is derived directly from the resolved app role so page
    * visibility stays centralized here instead of being scattered through the UI.

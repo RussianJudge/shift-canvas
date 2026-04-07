@@ -883,24 +883,35 @@ select {
   padding: 0 1.5rem 1rem;
 }
 
+.set-builder__surface {
+  display: grid;
+  gap: 0.95rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--team-accent) 16%, var(--line));
+  border-radius: 1rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--team-accent) 8%, white) 0%, rgba(255, 255, 255, 0.94) 100%);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.05);
+}
+
 .set-builder-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem;
+  display: grid;
+  gap: 0.8rem;
+  justify-items: center;
 }
 
 .set-builder-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 0.75rem;
 }
 
 .set-builder-legend {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 0.55rem;
 }
 
@@ -939,6 +950,7 @@ select {
 .set-builder-pills {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 0.65rem;
 }
 

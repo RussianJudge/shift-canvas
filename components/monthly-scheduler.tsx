@@ -1555,93 +1555,95 @@ export function MonthlyScheduler({
       </div>
 
       {canManageSetBuilder && selectedSetDays.length > 0 ? (
-      <section className="set-builder" aria-label="Set builder">
-        <div className="set-builder-heading">
-          <div className="set-builder-actions">
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={handleCopySet}
-              disabled={selectedSetDays.length === 0 || !isSelectedSetComplete}
-            >
-              Copy set
-            </button>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={handlePasteSet}
-              disabled={!canPasteSet}
-            >
-              Paste set
-            </button>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={handleClearSet}
-              disabled={selectedSetDays.length === 0}
-            >
-              Clear set
-            </button>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={handleAutofillSet}
-              disabled={selectedSetDays.length === 0 || fullyBlankSetWorkers.length === 0}
-            >
-              Auto-fill set
-            </button>
-            <button
-              type="button"
-              className={`ghost-button ${isSelectedSetComplete ? "ghost-button--active" : ""}`}
-              onClick={handleSetCompletion}
-              disabled={selectedSetDays.length === 0 || isUpdatingSetCompletion}
-            >
-              {isUpdatingSetCompletion
-                ? isSelectedSetComplete
-                  ? "Reopening..."
-                  : "Completing..."
-                : isSelectedSetComplete
-                ? "Set Complete"
-                : "Mark Set Complete"}
-            </button>
-            <div className="set-builder-legend">
-              <span className="set-builder-legend__item">Filled</span>
-              <span className="set-builder-legend__item set-builder-legend__item--under">Understaffed</span>
-              <span className="set-builder-legend__item set-builder-legend__item--ot">Overtime</span>
+        <section className="set-builder" aria-label="Set builder">
+          <div className="set-builder__surface">
+            <div className="set-builder-heading">
+              <div className="set-builder-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handleCopySet}
+                  disabled={selectedSetDays.length === 0 || !isSelectedSetComplete}
+                >
+                  Copy set
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handlePasteSet}
+                  disabled={!canPasteSet}
+                >
+                  Paste set
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handleClearSet}
+                  disabled={selectedSetDays.length === 0}
+                >
+                  Clear set
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handleAutofillSet}
+                  disabled={selectedSetDays.length === 0 || fullyBlankSetWorkers.length === 0}
+                >
+                  Auto-fill set
+                </button>
+                <button
+                  type="button"
+                  className={`ghost-button ${isSelectedSetComplete ? "ghost-button--active" : ""}`}
+                  onClick={handleSetCompletion}
+                  disabled={selectedSetDays.length === 0 || isUpdatingSetCompletion}
+                >
+                  {isUpdatingSetCompletion
+                    ? isSelectedSetComplete
+                      ? "Reopening..."
+                      : "Completing..."
+                    : isSelectedSetComplete
+                    ? "Set Complete"
+                    : "Mark Set Complete"}
+                </button>
+              </div>
+              <div className="set-builder-legend">
+                <span className="set-builder-legend__item">Filled</span>
+                <span className="set-builder-legend__item set-builder-legend__item--under">Understaffed</span>
+                <span className="set-builder-legend__item set-builder-legend__item--ot">Overtime</span>
+              </div>
+            </div>
+
+            <div className="set-builder-pills">
+              {snapshot.competencies.map((competency) => {
+                const coverage = competencyCoverage[competency.id];
+
+                return (
+                  <button
+                    key={competency.id}
+                    type="button"
+                    onClick={() =>
+                      setSelectedCoverageCompetencyId((current) =>
+                        current === competency.id ? null : competency.id,
+                      )
+                    }
+                    className={`set-builder-pill legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
+                      coverage?.isUnderstaffed ? "set-builder-pill--understaffed" : ""
+                    } ${coverage?.hasOvertime ? "set-builder-pill--overtime" : ""} ${
+                      !coverage?.isUnderstaffed && selectedSetDays.length > 0 ? "set-builder-pill--filled" : ""
+                    } ${
+                      selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
+                    } ${selectedCoverageCompetencyId === competency.id ? "set-builder-pill--active" : ""}`}
+                    title={`${competency.label} · ${coverage?.filledCells ?? 0}/${coverage?.requiredCells ?? 0} cells filled in this set`}
+                    disabled={selectedSetDays.length === 0}
+                  >
+                    <strong>{getCompactCode(competency.code)}</strong>
+                    <span>{formatStaffCount(coverage?.assignedPeople ?? 0)}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-        </div>
-
-        <div className="set-builder-pills">
-          {snapshot.competencies.map((competency) => {
-            const coverage = competencyCoverage[competency.id];
-
-            return (
-              <button
-                key={competency.id}
-                type="button"
-                onClick={() =>
-                  setSelectedCoverageCompetencyId((current) =>
-                    current === competency.id ? null : competency.id,
-                  )
-                }
-                className={`set-builder-pill legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
-                  coverage?.isUnderstaffed ? "set-builder-pill--understaffed" : ""
-                } ${coverage?.hasOvertime ? "set-builder-pill--overtime" : ""} ${
-                  !coverage?.isUnderstaffed && selectedSetDays.length > 0 ? "set-builder-pill--filled" : ""
-                } ${
-                  selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
-                } ${selectedCoverageCompetencyId === competency.id ? "set-builder-pill--active" : ""}`}
-                title={`${competency.label} · ${coverage?.filledCells ?? 0}/${coverage?.requiredCells ?? 0} cells filled in this set`}
-                disabled={selectedSetDays.length === 0}
-              >
-                <strong>{getCompactCode(competency.code)}</strong>
-                <span>{formatStaffCount(coverage?.assignedPeople ?? 0)}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+        </section>
       ) : null}
 
       <section className="schedule-wrap" aria-label="Monthly schedule grid">
