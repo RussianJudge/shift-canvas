@@ -1557,12 +1557,12 @@ export async function withdrawMutualApplication(input: WithdrawMutualApplication
 }
 
 export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
-  const session = await requireActionRole(["leader"]);
+  const session = await requireActionRole(["admin", "leader"]);
 
   if (!session) {
     return {
       ok: false,
-      message: "Only leaders can cancel accepted mutuals.",
+      message: "Only admins or leaders can cancel accepted mutuals.",
     };
   }
 

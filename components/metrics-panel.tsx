@@ -7,7 +7,7 @@ import {
   formatMonthLabel,
   getEmployeeMap,
 } from "@/lib/scheduling";
-import type { Competency, OvertimeClaim, SchedulerSnapshot } from "@/lib/types";
+import type { Competency, OvertimeClaim, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
 
 /**
  * Metrics dashboard and planning sandbox.
@@ -50,6 +50,7 @@ type TeamTimeCodeMetric = {
 };
 
 type OvertimeWindow = "30d" | "90d" | "ytd";
+type TimeCodeWindow = "30d" | "60d" | "ytd";
 
 type TransferProjection = {
   competencyId: string;
@@ -91,14 +92,29 @@ function getWindowStart(today: string, window: OvertimeWindow) {
   }
 }
 
-function getTeamTimeCodeMetrics(snapshot: SchedulerSnapshot, timeCodeId: string): TeamTimeCodeMetric[] {
+function getTimeCodeWindowStart(today: string, window: TimeCodeWindow) {
+  switch (window) {
+    case "30d":
+      return shiftDateKey(today, -29);
+    case "60d":
+      return shiftDateKey(today, -59);
+    case "ytd":
+      return `${today.slice(0, 4)}-01-01`;
+  }
+}
+
+function getTeamTimeCodeMetrics(
+  snapshot: SchedulerSnapshot,
+  assignmentHistory: StoredAssignment[],
+  timeCodeId: string,
+): TeamTimeCodeMetric[] {
   const employeeMap = getEmployeeMap(snapshot.schedules);
-  const monthAssignments = snapshot.assignments.filter(
-    (assignment) => assignment.date.slice(0, 7) === snapshot.month && assignment.timeCodeId === timeCodeId,
+  const matchingAssignments = assignmentHistory.filter(
+    (assignment) => assignment.timeCodeId === timeCodeId,
   );
 
   return snapshot.schedules.map((schedule) => {
-    const scheduleAssignments = monthAssignments.filter((assignment) => {
+    const scheduleAssignments = matchingAssignments.filter((assignment) => {
       const employee = employeeMap[assignment.employeeId];
       return employee?.scheduleId === schedule.id;
     });
@@ -336,18 +352,25 @@ function getTransferSuggestions({
 export function MetricsPanel({
   snapshot,
   overtimeHistory,
+  assignmentHistory,
   today,
 }: {
   snapshot: SchedulerSnapshot;
   overtimeHistory: OvertimeClaim[];
+  assignmentHistory: StoredAssignment[];
   today: string;
 }) {
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
+  const [timeCodeWindow, setTimeCodeWindow] = useState<TimeCodeWindow>("30d");
   const [selectedTimeCodeId, setSelectedTimeCodeId] = useState(snapshot.timeCodes[0]?.id ?? "");
   const filteredOvertimeHistory = useMemo(() => {
     const start = getWindowStart(today, overtimeWindow);
     return overtimeHistory.filter((claim) => claim.date >= start && claim.date <= today);
   }, [overtimeHistory, overtimeWindow, today]);
+  const filteredAssignmentHistory = useMemo(() => {
+    const start = getTimeCodeWindowStart(today, timeCodeWindow);
+    return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= today);
+  }, [assignmentHistory, timeCodeWindow, today]);
   const teamMetrics = useMemo(
     () => getTeamMetrics(snapshot, filteredOvertimeHistory),
     [snapshot, filteredOvertimeHistory],
@@ -358,8 +381,8 @@ export function MetricsPanel({
   );
   const maxOvertimeShifts = Math.max(1, ...teamMetrics.map((team) => team.overtimeShifts));
   const teamTimeCodeMetrics = useMemo(
-    () => getTeamTimeCodeMetrics(snapshot, selectedTimeCodeId),
-    [snapshot, selectedTimeCodeId],
+    () => getTeamTimeCodeMetrics(snapshot, filteredAssignmentHistory, selectedTimeCodeId),
+    [snapshot, filteredAssignmentHistory, selectedTimeCodeId],
   );
   const maxTimeCodeShifts = Math.max(1, ...teamTimeCodeMetrics.map((team) => team.shiftCount));
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
@@ -546,21 +569,35 @@ export function MetricsPanel({
         <section className="metrics-section">
           <div className="metrics-section__header">
             <h2 className="metrics-section__title">Time Code Usage By Team</h2>
-            {snapshot.timeCodes.length > 0 ? (
-              <label className="field metrics-field-inline">
-                <span>Time code</span>
-                <select
-                  value={selectedTimeCodeId}
-                  onChange={(event) => setSelectedTimeCodeId(event.target.value)}
-                >
-                  {snapshot.timeCodes.map((timeCode) => (
-                    <option key={timeCode.id} value={timeCode.id}>
-                      {timeCode.code} · {timeCode.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
+            <div className="metrics-section__controls">
+              <div className="metrics-window-toggle" aria-label="Time code time window">
+                {(["30d", "60d", "ytd"] as TimeCodeWindow[]).map((window) => (
+                  <button
+                    key={window}
+                    type="button"
+                    className={`ghost-button ${timeCodeWindow === window ? "ghost-button--active" : ""}`}
+                    onClick={() => setTimeCodeWindow(window)}
+                  >
+                    {window.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              {snapshot.timeCodes.length > 0 ? (
+                <label className="field metrics-field-inline">
+                  <span>Time code</span>
+                  <select
+                    value={selectedTimeCodeId}
+                    onChange={(event) => setSelectedTimeCodeId(event.target.value)}
+                  >
+                    {snapshot.timeCodes.map((timeCode) => (
+                      <option key={timeCode.id} value={timeCode.id}>
+                        {timeCode.code} · {timeCode.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
           </div>
 
           {snapshot.timeCodes.length === 0 ? (

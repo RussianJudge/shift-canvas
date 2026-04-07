@@ -545,6 +545,26 @@ export async function getMetricsOvertimeHistory(today: string) {
   return mapOvertimeClaims((result.data as OvertimeClaimRow[] | null) ?? []);
 }
 
+export async function getMetricsAssignmentHistory(today: string) {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    return [];
+  }
+
+  const result = await supabase
+    .from("schedule_assignments")
+    .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
+    .gte("assignment_date", getYearStart(today))
+    .lte("assignment_date", today);
+
+  if (result.error) {
+    return [];
+  }
+
+  return mapAssignments((result.data as AssignmentRow[] | null) ?? []);
+}
+
 export async function getSchedulesSnapshot(month: string) {
   const supabase = getDataClient();
 

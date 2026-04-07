@@ -1,7 +1,7 @@
 import { MetricsPanel } from "@/components/metrics-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { requireAppSession } from "@/lib/auth";
-import { getMetricsOvertimeHistory, getSchedulerSnapshot } from "@/lib/data";
+import { getMetricsAssignmentHistory, getMetricsOvertimeHistory, getSchedulerSnapshot } from "@/lib/data";
 import { getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +21,16 @@ export default async function MetricsPage() {
   const today = getCurrentDateKey("America/Edmonton");
   const snapshot = await getSchedulerSnapshot(month);
   const overtimeHistory = await getMetricsOvertimeHistory(today);
+  const assignmentHistory = await getMetricsAssignmentHistory(today);
 
   return (
     <WorkspaceShell viewer={session}>
-      <MetricsPanel snapshot={snapshot} overtimeHistory={overtimeHistory} today={today} />
+      <MetricsPanel
+        snapshot={snapshot}
+        overtimeHistory={overtimeHistory}
+        assignmentHistory={assignmentHistory}
+        today={today}
+      />
     </WorkspaceShell>
   );
 }

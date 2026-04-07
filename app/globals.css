@@ -1018,6 +1018,14 @@ select {
   gap: 1rem;
 }
 
+.metrics-section__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 .metrics-window-toggle {
   display: flex;
   flex-wrap: wrap;
