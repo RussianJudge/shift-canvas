@@ -50,7 +50,7 @@ type TeamTimeCodeMetric = {
 };
 
 type OvertimeWindow = "30d" | "90d" | "ytd";
-type TimeCodeWindow = "30d" | "60d" | "ytd";
+type TimeCodeWindow = "30d" | "90d" | "ytd";
 
 type TransferProjection = {
   competencyId: string;
@@ -100,8 +100,8 @@ function getTimeCodeWindowStart(today: string, window: TimeCodeWindow) {
   switch (window) {
     case "30d":
       return shiftDateKey(today, -29);
-    case "60d":
-      return shiftDateKey(today, -59);
+    case "90d":
+      return shiftDateKey(today, -89);
     case "ytd":
       return `${today.slice(0, 4)}-01-01`;
   }
@@ -589,7 +589,7 @@ export function MetricsPanel({
                 </label>
               ) : null}
               <div className="metrics-window-toggle" aria-label="Time code time window">
-                {(["30d", "60d", "ytd"] as TimeCodeWindow[]).map((window) => (
+                {(["30d", "90d", "ytd"] as TimeCodeWindow[]).map((window) => (
                   <button
                     key={window}
                     type="button"
