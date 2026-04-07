@@ -571,8 +571,8 @@ export function MetricsPanel({
 
         <section className="metrics-section">
           <div className="metrics-section__header">
-            <h2 className="metrics-section__title">Time Code Usage By Team</h2>
-            <div className="metrics-section__controls">
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Time Code Usage By Team</h2>
               {snapshot.timeCodes.length > 0 ? (
                 <label className="field metrics-field-inline">
                   <span>Time code</span>
@@ -588,6 +588,8 @@ export function MetricsPanel({
                   </select>
                 </label>
               ) : null}
+            </div>
+            <div className="metrics-section__controls">
               <div className="metrics-window-toggle" aria-label="Time code time window">
                 {(["30d", "90d", "ytd"] as TimeCodeWindow[]).map((window) => (
                   <button

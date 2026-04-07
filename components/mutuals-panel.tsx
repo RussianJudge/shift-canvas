@@ -603,7 +603,7 @@ export function MutualsPanel({
                     ) : null}
                   </div>
 
-                  {viewer.role === "leader" ? (
+                  {viewer.role === "leader" || viewer.role === "admin" ? (
                     <div className="mutual-card__actions">
                       <button
                         type="button"
