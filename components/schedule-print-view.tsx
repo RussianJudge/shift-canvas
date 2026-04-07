@@ -96,11 +96,13 @@ function buildDisplayEmployeesForSchedule({
   snapshot,
   employeeMap,
   currentMonth,
+  pinnedEmployeesBySchedule,
 }: {
   schedule: Schedule;
   snapshot: SchedulerSnapshot;
   employeeMap: Record<string, Employee>;
   currentMonth: string;
+  pinnedEmployeesBySchedule: Record<string, string[]>;
 }) {
   const baseRows: DisplayEmployee[] = schedule.employees.map((employee) => ({
     rowId: `base:${employee.id}`,
@@ -177,7 +179,33 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  return [...baseRows, ...overtimeRows, ...mutualRows];
+  const rows = [...baseRows, ...overtimeRows, ...mutualRows];
+  const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
+  const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
+
+  return rows
+    .map((employee, index) => ({ employee, index }))
+    .sort((left, right) => {
+      const leftPinned = pinnedIndex.get(left.employee.sourceEmployeeId);
+      const rightPinned = pinnedIndex.get(right.employee.sourceEmployeeId);
+
+      if (leftPinned !== undefined || rightPinned !== undefined) {
+        if (leftPinned === undefined) {
+          return 1;
+        }
+
+        if (rightPinned === undefined) {
+          return -1;
+        }
+
+        if (leftPinned !== rightPinned) {
+          return leftPinned - rightPinned;
+        }
+      }
+
+      return left.index - right.index;
+    })
+    .map((entry) => entry.employee);
 }
 
 function PrintScheduleSheet({
@@ -285,9 +313,11 @@ function PrintScheduleSheet({
 export function SchedulePrintView({
   snapshot,
   monthKey,
+  pinnedEmployeesBySchedule,
 }: {
   snapshot: SchedulerSnapshot;
   monthKey: string;
+  pinnedEmployeesBySchedule: Record<string, string[]>;
 }) {
   const assignments = buildAssignmentIndex(snapshot.assignments);
   const competencyMap = getCompetencyMap(snapshot.competencies);
@@ -309,6 +339,7 @@ export function SchedulePrintView({
             snapshot,
             employeeMap,
             currentMonth: monthKey,
+            pinnedEmployeesBySchedule,
           })}
         />
       ))}
