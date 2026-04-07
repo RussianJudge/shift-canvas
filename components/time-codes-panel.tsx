@@ -257,17 +257,19 @@ export function TimeCodesPanel({
                     {timeCode.code}
                   </span>
                 </td>
-                <td className="table-actions-cell">
-                  {invalidTimeCodeIds.has(timeCode.id) ? (
-                    <p className="row-issue">{getTimeCodeIssues(timeCode).join(" · ")}</p>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="table-action table-action--danger"
-                    onClick={() => handleRemoveTimeCode(timeCode.id)}
-                  >
-                    Remove
-                  </button>
+                <td>
+                  <div className="table-actions-cell">
+                    {invalidTimeCodeIds.has(timeCode.id) ? (
+                      <p className="row-issue">{getTimeCodeIssues(timeCode).join(" · ")}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="table-action table-action--danger"
+                      onClick={() => handleRemoveTimeCode(timeCode.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

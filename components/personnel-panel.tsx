@@ -909,26 +909,28 @@ export function PersonnelPanel({
                     })}
                   </div>
                 </td>
-                <td className="table-actions-cell">
-                  {draftEmployeeIssues.length > 0 ? (
-                    <p className="row-issue">{draftEmployeeIssues.join(" · ")}</p>
-                  ) : null}
-                  <div className="table-actions-inline">
-                    <button
-                      type="button"
-                      className="table-action"
-                      onClick={() => setDraftEmployee(null)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="table-action table-action--confirm"
-                      onClick={handleCreateEmployee}
-                      disabled={draftEmployeeIssues.length > 0}
-                    >
-                      Add
-                    </button>
+                <td>
+                  <div className="table-actions-cell">
+                    {draftEmployeeIssues.length > 0 ? (
+                      <p className="row-issue">{draftEmployeeIssues.join(" · ")}</p>
+                    ) : null}
+                    <div className="table-actions-inline">
+                      <button
+                        type="button"
+                        className="table-action"
+                        onClick={() => setDraftEmployee(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="table-action table-action--confirm"
+                        onClick={handleCreateEmployee}
+                        disabled={draftEmployeeIssues.length > 0}
+                      >
+                        Add
+                      </button>
+                    </div>
                   </div>
                 </td>
               </tr>
@@ -1008,17 +1010,19 @@ export function PersonnelPanel({
                       })}
                     </div>
                   </td>
-                  <td className="table-actions-cell">
-                    {invalidEmployeeIds.has(entry.value.id) ? (
-                      <p className="row-issue">{getEmployeeIssues(entry.value).join(" · ")}</p>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="table-action table-action--danger"
-                      onClick={() => handleRemoveEmployee(entry.value.id)}
-                    >
-                      Remove
-                    </button>
+                  <td>
+                    <div className="table-actions-cell">
+                      {invalidEmployeeIds.has(entry.value.id) ? (
+                        <p className="row-issue">{getEmployeeIssues(entry.value).join(" · ")}</p>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="table-action table-action--danger"
+                        onClick={() => handleRemoveEmployee(entry.value.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ),

@@ -292,17 +292,19 @@ export function CompetenciesPanel({
                     {competency.code}
                   </span>
                 </td>
-                <td className="table-actions-cell">
-                  {invalidCompetencyIds.has(competency.id) ? (
-                    <p className="row-issue">{getCompetencyIssues(competency).join(" · ")}</p>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="table-action table-action--danger"
-                    onClick={() => handleRemoveCompetency(competency.id)}
-                  >
-                    Remove
-                  </button>
+                <td>
+                  <div className="table-actions-cell">
+                    {invalidCompetencyIds.has(competency.id) ? (
+                      <p className="row-issue">{getCompetencyIssues(competency).join(" · ")}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="table-action table-action--danger"
+                      onClick={() => handleRemoveCompetency(competency.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
