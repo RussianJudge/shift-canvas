@@ -584,7 +584,6 @@ export function MetricsPanel({
               <h2 className="metrics-section__title">Time Code Usage By Team</h2>
               {snapshot.timeCodes.length > 0 ? (
                 <label className="field metrics-field-inline">
-                  <span>Time code</span>
                   <select
                     value={selectedTimeCodeId}
                     onChange={(event) => setSelectedTimeCodeId(event.target.value)}

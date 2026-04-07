@@ -316,23 +316,25 @@ export function SchedulesPanel({
                   </div>
                 </td>
                 <td>{schedule.employeeCount}</td>
-                <td className="table-actions-cell">
-                  {invalidScheduleIds.has(schedule.id) ? (
-                    <p className="row-issue">{getScheduleIssues(schedule).join(" · ")}</p>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="table-action table-action--danger"
-                    onClick={() => handleRemoveSchedule(schedule.id)}
-                    disabled={schedule.employeeCount > 0}
-                    title={
-                      schedule.employeeCount > 0
-                        ? "Move employees off this shift before deleting it."
-                        : "Remove shift"
-                    }
-                  >
-                    Remove
-                  </button>
+                <td>
+                  <div className="table-actions-cell">
+                    {invalidScheduleIds.has(schedule.id) ? (
+                      <p className="row-issue">{getScheduleIssues(schedule).join(" · ")}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="table-action table-action--danger"
+                      onClick={() => handleRemoveSchedule(schedule.id)}
+                      disabled={schedule.employeeCount > 0}
+                      title={
+                        schedule.employeeCount > 0
+                          ? "Move employees off this shift before deleting it."
+                          : "Remove shift"
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
