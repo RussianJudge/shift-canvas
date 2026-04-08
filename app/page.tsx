@@ -13,7 +13,7 @@ export default async function HomePage() {
     <main className="auth-home">
       <section className="auth-home__panel">
         <div className="auth-home__copy">
-          <BrandLockup subtitle="Workforce intelligence platform" />
+          <BrandLockup />
           <h1 className="auth-home__title">Turn your personnel data into clear staffing decisions.</h1>
           <p className="auth-home__subtitle">
             Use workforce availability, competencies, and overtime coverage to plan smarter every month.

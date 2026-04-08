@@ -9,10 +9,8 @@ import Image from "next/image";
  */
 export function BrandLockup({
   size = "default",
-  subtitle,
 }: {
   size?: "default" | "compact";
-  subtitle?: string;
 }) {
   return (
     <div className={`brand-lockup ${size === "compact" ? "brand-lockup--compact" : ""}`}>
@@ -26,7 +24,6 @@ export function BrandLockup({
       />
       <div className="brand-lockup__copy">
         <strong>Schwifty</strong>
-        {subtitle ? <span>{subtitle}</span> : null}
       </div>
     </div>
   );

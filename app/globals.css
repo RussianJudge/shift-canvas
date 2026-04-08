@@ -127,13 +127,6 @@ select {
   font-size: 1.12rem;
 }
 
-.brand-lockup__copy span {
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 0.68rem;
-}
-
 .workspace-brand span,
 .panel-eyebrow {
   color: var(--muted);

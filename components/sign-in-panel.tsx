@@ -30,7 +30,7 @@ export function SignInPanel({
     <section className="auth-shell">
       <div className="auth-panel">
         <div className="auth-panel__copy">
-          <BrandLockup size="compact" subtitle="Secure workforce access" />
+          <BrandLockup size="compact" />
           <h1 className="auth-title">Sign In</h1>
           <p className="auth-subtitle">Use your email to enter the workspace.</p>
         </div>
