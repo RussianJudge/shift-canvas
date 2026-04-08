@@ -64,13 +64,14 @@ select {
 }
 
 .workspace-sidebar {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 2rem;
   padding: 1.4rem 1rem;
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(255, 252, 248, 0.95), rgba(245, 236, 223, 0.85));
+  min-height: 100%;
 }
 
 .workspace-sidebar--collapsed {
