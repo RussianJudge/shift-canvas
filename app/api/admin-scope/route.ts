@@ -20,8 +20,8 @@ export async function GET() {
 
   return NextResponse.json({
     companyName: session.companyName,
-    activeSiteId: session.activeSiteId ?? session.siteId ?? null,
-    activeBusinessAreaId: session.activeBusinessAreaId ?? session.businessAreaId ?? null,
+    activeSiteId: session.activeSiteId ?? null,
+    activeBusinessAreaId: session.activeBusinessAreaId ?? null,
     sites: options.sites,
     businessAreas: options.businessAreas,
   });

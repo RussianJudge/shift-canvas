@@ -82,8 +82,8 @@ export async function signIn(formData: FormData) {
         companyName,
         siteName,
         businessAreaName,
-        activeSiteId: profile.role === "admin" ? profile.site_id : profile.site_id,
-        activeBusinessAreaId: profile.role === "admin" ? profile.business_area_id : profile.business_area_id,
+        activeSiteId: profile.role === "admin" ? null : profile.site_id,
+        activeBusinessAreaId: profile.role === "admin" ? null : profile.business_area_id,
       };
 
       const [scheduleResult, companyResult, siteResult, businessAreaResult] = await Promise.all([
