@@ -652,16 +652,17 @@ export function MonthlyScheduler({
   const monthDays = useMemo(() => getMonthDays(currentMonth), [currentMonth]);
   const extendedMonthDays = useMemo(() => getExtendedMonthDays(currentMonth), [currentMonth]);
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
+  const activeScheduleId = activeSchedule?.id ?? "";
   const selectedSetDays = useMemo(
-    () => getWorkedSetDays(activeSchedule, extendedMonthDays, selectedSetAnchorDate),
+    () => (activeSchedule ? getWorkedSetDays(activeSchedule, extendedMonthDays, selectedSetAnchorDate) : []),
     [activeSchedule, extendedMonthDays, selectedSetAnchorDate],
   );
   const completedSetDates = useMemo(
-    () => getCompletedSetDatesForMonth(snapshot.completedSets, activeSchedule.id, monthDays),
-    [activeSchedule.id, monthDays, snapshot.completedSets],
+    () => (activeSchedule ? getCompletedSetDatesForMonth(snapshot.completedSets, activeSchedule.id, monthDays) : new Set<string>()),
+    [activeSchedule, monthDays, snapshot.completedSets],
   );
   const isSelectedSetComplete =
-    selectedSetDays.length > 0
+    activeSchedule && selectedSetDays.length > 0
       ? isCompletedSetRange(
           snapshot.completedSets,
           activeSchedule.id,
@@ -671,12 +672,16 @@ export function MonthlyScheduler({
       : false;
   const canPasteSet =
     copiedSetTemplate !== null &&
-    copiedSetTemplate.scheduleId === activeSchedule.id &&
+    copiedSetTemplate.scheduleId === activeScheduleId &&
     copiedSetTemplate.setLength === selectedSetDays.length &&
     selectedSetDays.length > 0 &&
     !isSelectedSetComplete &&
     copiedSetTemplate.sourceStartDate !== selectedSetDays[0]?.date;
   const competencyCoverage = useMemo(() => {
+    if (!activeSchedule) {
+      return {};
+    }
+
     return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
       let hasOvertime = false;
@@ -738,7 +743,7 @@ export function MonthlyScheduler({
     }, {});
   }, [activeSchedule, draftAssignments, employeeMap, selectedSetDays, snapshot.competencies, snapshot.overtimeClaims, snapshot.timeCodes]);
   const unassignedSetCells = useMemo(() => {
-    if (selectedSetDays.length === 0) {
+    if (!activeSchedule || selectedSetDays.length === 0) {
       return [];
     }
 
@@ -767,7 +772,7 @@ export function MonthlyScheduler({
     );
   }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.timeCodes]);
   const fullyBlankSetWorkers = useMemo(() => {
-    if (selectedSetDays.length === 0) {
+    if (!activeSchedule || selectedSetDays.length === 0) {
       return [];
     }
 
@@ -788,13 +793,15 @@ export function MonthlyScheduler({
   }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.timeCodes]);
   const displayEmployees = useMemo<DisplayEmployee[]>(
     () =>
-      buildDisplayEmployeesForSchedule({
-        schedule: activeSchedule,
-        snapshot,
-        employeeMap,
-        currentMonth,
-        pinnedEmployeesBySchedule,
-      }),
+      activeSchedule
+        ? buildDisplayEmployeesForSchedule({
+            schedule: activeSchedule,
+            snapshot,
+            employeeMap,
+            currentMonth,
+            pinnedEmployeesBySchedule,
+          })
+        : [],
     [activeSchedule, currentMonth, employeeMap, pinnedEmployeesBySchedule, snapshot],
   );
   if (!activeSchedule) {
