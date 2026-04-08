@@ -18,6 +18,11 @@ export interface OrganizationContext extends OrganizationScope {
   businessAreaName: string;
 }
 
+export interface AdminViewScope {
+  activeSiteId?: string | null;
+  activeBusinessAreaId?: string | null;
+}
+
 export interface ProductionUnit extends OrganizationScope {
   id: string;
   name: string;
@@ -110,7 +115,7 @@ export interface CompletedSet extends OrganizationScope {
   endDate: string;
 }
 
-export interface AppSession extends OrganizationContext {
+export interface AppSession extends OrganizationContext, AdminViewScope {
   email: string;
   role: AppRole;
   displayName: string;

@@ -1,13 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
-import { signOut } from "@/app/auth-actions";
+import { setAdminViewingScope, signOut } from "@/app/auth-actions";
 import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
+
+type AdminScopePayload = {
+  companyName: string;
+  activeSiteId: string | null;
+  activeBusinessAreaId: string | null;
+  sites: Array<{ id: string; name: string }>;
+  businessAreas: Array<{ id: string; siteId: string; name: string }>;
+};
 
 /**
  * Shared application shell for every authenticated page.
@@ -149,11 +157,14 @@ export function WorkspaceShell({
   children: React.ReactNode;
   viewer: AppSession;
 }) {
+  const router = useRouter();
   /**
    * The sidebar remembers the user's last choice so a page navigation does not
    * feel like the app is fighting their layout preference.
    */
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(null);
+  const [isUpdatingScope, startScopeTransition] = useTransition();
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -174,6 +185,37 @@ export function WorkspaceShell({
 
     window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, String(isCollapsed));
   }, [isCollapsed]);
+
+  useEffect(() => {
+    if (viewer.role !== "admin") {
+      return;
+    }
+
+    let cancelled = false;
+
+    fetch("/api/admin-scope", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Unable to load admin scope.");
+        }
+
+        return (await response.json()) as AdminScopePayload;
+      })
+      .then((payload) => {
+        if (!cancelled) {
+          setAdminScope(payload);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAdminScope(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewer.role]);
   /**
    * Navigation is derived directly from the resolved app role so page
    * visibility stays centralized here instead of being scattered through the UI.
@@ -204,6 +246,20 @@ export function WorkspaceShell({
           { href: "/profile", label: "My Profile", icon: <ProfileIcon /> },
         ];
 
+  const filteredBusinessAreas = useMemo(() => {
+    if (!adminScope) {
+      return [];
+    }
+
+    const activeSiteId = adminScope.activeSiteId ?? null;
+
+    if (!activeSiteId) {
+      return adminScope.businessAreas;
+    }
+
+    return adminScope.businessAreas.filter((entry) => entry.siteId === activeSiteId);
+  }, [adminScope]);
+
   return (
     <main className="shell">
       <section className={`workspace-frame ${isCollapsed ? "workspace-frame--collapsed" : ""}`}>
@@ -229,6 +285,94 @@ export function WorkspaceShell({
               <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} />
             ))}
           </nav>
+
+          {viewer.role === "admin" && adminScope ? (
+            <section className="workspace-admin-scope" aria-label="Admin view scope">
+              <div className="workspace-admin-scope__heading">
+                <strong>Viewing Context</strong>
+                <span>{adminScope.companyName}</span>
+              </div>
+
+              <label className="field">
+                <span>Site</span>
+                <select
+                  value={adminScope.activeSiteId ?? ""}
+                  onChange={(event) => {
+                    const nextSiteId = event.target.value || null;
+
+                    startScopeTransition(async () => {
+                      const result = await setAdminViewingScope({
+                        siteId: nextSiteId,
+                        businessAreaId: null,
+                      });
+
+                      if (!result.ok) {
+                        return;
+                      }
+
+                      setAdminScope((current) =>
+                        current
+                          ? {
+                              ...current,
+                              activeSiteId: nextSiteId,
+                              activeBusinessAreaId: null,
+                            }
+                          : current,
+                      );
+                      router.refresh();
+                    });
+                  }}
+                  disabled={isUpdatingScope}
+                >
+                  <option value="">All sites</option>
+                  {adminScope.sites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Business Area</span>
+                <select
+                  value={adminScope.activeBusinessAreaId ?? ""}
+                  onChange={(event) => {
+                    const nextBusinessAreaId = event.target.value || null;
+
+                    startScopeTransition(async () => {
+                      const result = await setAdminViewingScope({
+                        siteId: adminScope.activeSiteId ?? null,
+                        businessAreaId: nextBusinessAreaId,
+                      });
+
+                      if (!result.ok) {
+                        return;
+                      }
+
+                      setAdminScope((current) =>
+                        current
+                          ? {
+                              ...current,
+                              activeBusinessAreaId: nextBusinessAreaId,
+                            }
+                          : current,
+                      );
+                      router.refresh();
+                    });
+                  }}
+                  disabled={isUpdatingScope || !adminScope.activeSiteId}
+                >
+                  <option value="">{adminScope.activeSiteId ? "All business areas" : "Select a site first"}</option>
+                  {filteredBusinessAreas.map((businessArea) => (
+                    <option key={businessArea.id} value={businessArea.id}>
+                      {businessArea.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
+          ) : null}
 
           <form action={signOut} className="workspace-session">
             <div className="workspace-session__meta">

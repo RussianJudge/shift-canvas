@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 
-import { clearAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
+import { clearAppSession, getAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
 import type { AppSession } from "@/lib/types";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 
@@ -82,6 +82,8 @@ export async function signIn(formData: FormData) {
         companyName,
         siteName,
         businessAreaName,
+        activeSiteId: profile.role === "admin" ? profile.site_id : profile.site_id,
+        activeBusinessAreaId: profile.role === "admin" ? profile.business_area_id : profile.business_area_id,
       };
 
       const [scheduleResult, companyResult, siteResult, businessAreaResult] = await Promise.all([
@@ -143,4 +145,90 @@ export async function signIn(formData: FormData) {
 export async function signOut() {
   await clearAppSession();
   redirect("/sign-in");
+}
+
+/**
+ * Updates the admin's current viewing context without changing their actual
+ * profile assignment.
+ *
+ * This is intentionally session-only state. Admins remain company-wide in
+ * authority, but they can choose which site/business-area slice the app should
+ * render at a given moment.
+ */
+export async function setAdminViewingScope(input: {
+  siteId: string | null;
+  businessAreaId: string | null;
+}) {
+  const session = await getAppSession();
+
+  if (!session || session.role !== "admin") {
+    return {
+      ok: false,
+      message: "Only admins can change the viewing scope.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Admin viewing scope is unavailable.",
+    };
+  }
+
+  const nextSiteId = input.siteId || null;
+  const nextBusinessAreaId = input.businessAreaId || null;
+
+  if (nextBusinessAreaId && !nextSiteId) {
+    return {
+      ok: false,
+      message: "Choose a site before choosing a business area.",
+    };
+  }
+
+  if (nextSiteId) {
+    const siteResult = await supabase
+      .from("sites")
+      .select("id, company_id")
+      .eq("id", nextSiteId)
+      .maybeSingle();
+
+    const site = siteResult.data as { id: string; company_id: string } | null;
+
+    if (siteResult.error || !site || site.company_id !== session.companyId) {
+      return {
+        ok: false,
+        message: "That site is not available in your company.",
+      };
+    }
+  }
+
+  if (nextBusinessAreaId) {
+    const businessAreaResult = await supabase
+      .from("business_areas")
+      .select("id, site_id")
+      .eq("id", nextBusinessAreaId)
+      .maybeSingle();
+
+    const businessArea = businessAreaResult.data as { id: string; site_id: string } | null;
+
+    if (businessAreaResult.error || !businessArea || businessArea.site_id !== nextSiteId) {
+      return {
+        ok: false,
+        message: "That business area does not belong to the selected site.",
+      };
+    }
+  }
+
+  await setAppSession({
+    ...session,
+    activeSiteId: nextSiteId,
+    activeBusinessAreaId: nextBusinessAreaId,
+  });
+
+  return {
+    ok: true,
+    message: "Viewing scope updated.",
+  };
 }

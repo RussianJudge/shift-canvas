@@ -84,14 +84,27 @@ function toDatabaseScope(scope: ActionScope) {
 
 /** Pulls the required company/site/business-area ids out of the signed session. */
 function getSessionScope(session: Awaited<ReturnType<typeof getAppSession>>): ActionScope | null {
-  if (!session?.companyId || !session.siteId || !session.businessAreaId) {
+  const siteId =
+    session?.role === "admin"
+      ? session.activeSiteId === undefined
+        ? session.siteId
+        : session.activeSiteId
+      : session?.siteId;
+  const businessAreaId =
+    session?.role === "admin"
+      ? session.activeBusinessAreaId === undefined
+        ? session.businessAreaId
+        : session.activeBusinessAreaId
+      : session?.businessAreaId;
+
+  if (!session?.companyId || !siteId || !businessAreaId) {
     return null;
   }
 
   return {
     companyId: session.companyId,
-    siteId: session.siteId,
-    businessAreaId: session.businessAreaId,
+    siteId,
+    businessAreaId,
   };
 }
 

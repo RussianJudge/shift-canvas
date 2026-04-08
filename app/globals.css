@@ -132,6 +132,32 @@ select {
   width: 100%;
 }
 
+.workspace-admin-scope {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.35rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(23, 20, 17, 0.08);
+}
+
+.workspace-admin-scope__heading {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.workspace-admin-scope__heading strong {
+  font-size: 0.92rem;
+}
+
+.workspace-admin-scope__heading span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .sidebar-toggle {
   width: 1.9rem;
   height: 1.9rem;
@@ -2435,7 +2461,8 @@ select {
 .workspace-sidebar--collapsed .workspace-brand span,
 .workspace-sidebar--collapsed .workspace-brand strong,
 .workspace-sidebar--collapsed .workspace-nav-link strong,
-.workspace-sidebar--collapsed .workspace-session__meta {
+.workspace-sidebar--collapsed .workspace-session__meta,
+.workspace-sidebar--collapsed .workspace-admin-scope {
   display: none;
 }
 

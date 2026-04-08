@@ -89,6 +89,15 @@ function decodeSession(value: string | undefined): AppSession | null {
       return null;
     }
 
+    if (
+      ("activeSiteId" in session && session.activeSiteId !== null && typeof session.activeSiteId !== "string") ||
+      ("activeBusinessAreaId" in session &&
+        session.activeBusinessAreaId !== null &&
+        typeof session.activeBusinessAreaId !== "string")
+    ) {
+      return null;
+    }
+
     return session;
   } catch {
     return null;

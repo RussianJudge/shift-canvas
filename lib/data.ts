@@ -207,13 +207,63 @@ function applySessionScope(query: any, session?: AppSession | null) {
 
   const companyScoped = query.eq("company_id", session.companyId);
 
-  if (session.role === "admin" || !session.siteId || !session.businessAreaId) {
+  if (session.role === "admin") {
+    if (session.activeSiteId && session.activeBusinessAreaId) {
+      return companyScoped
+        .eq("site_id", session.activeSiteId)
+        .eq("business_area_id", session.activeBusinessAreaId);
+    }
+
+    if (session.activeSiteId) {
+      return companyScoped.eq("site_id", session.activeSiteId);
+    }
+
     return companyScoped;
   }
 
   return companyScoped
     .eq("site_id", session.siteId)
     .eq("business_area_id", session.businessAreaId);
+}
+
+export async function getAdminScopeOptions(session: AppSession) {
+  const supabase = getDataClient();
+
+  if (!supabase || session.role !== "admin") {
+    return {
+      sites: [] as Array<{ id: string; name: string }>,
+      businessAreas: [] as Array<{ id: string; siteId: string; name: string }>,
+    };
+  }
+
+  const sitesResult = await supabase
+    .from("sites")
+    .select("id, name")
+    .eq("company_id", session.companyId)
+    .order("name");
+
+  const sites = ((sitesResult.data as Array<{ id: string; name: string }> | null) ?? []);
+  const siteIds = sites.map((site) => site.id);
+
+  const businessAreasResult =
+    siteIds.length > 0
+      ? await supabase
+          .from("business_areas")
+          .select("id, site_id, name")
+          .in("site_id", siteIds)
+          .order("name")
+      : { data: [], error: null };
+
+  return {
+    sites,
+    businessAreas: ((businessAreasResult.data as Array<{ id: string; site_id: string; name: string }> | null) ?? []).map(
+      (row) => ({
+        id: row.id,
+        siteId: row.site_id,
+        name: row.name,
+      }),
+    ),
+  };
 }
 
 /** Empty snapshot shape used when data is unavailable or a page is unconfigured. */
