@@ -20,7 +20,7 @@ export default async function SchedulePage({
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
-  const snapshot = scopeScheduleSnapshot(await getSchedulerSnapshot(month), session);
+  const snapshot = scopeScheduleSnapshot(await getSchedulerSnapshot(month, session), session);
   const initialPinnedEmployeesBySchedule = await getUserSchedulePins(session.email);
 
   return (

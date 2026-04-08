@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function CompetenciesPage() {
   const session = await requireAppSession(["admin"]);
   const month = getCurrentMonthKey("America/Edmonton");
-  const snapshot = await getCompetenciesSnapshot(month);
+  const snapshot = await getCompetenciesSnapshot(month, session);
 
   return (
     <WorkspaceShell viewer={session}>

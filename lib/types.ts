@@ -6,13 +6,25 @@ export type ScheduleCode = "601" | "602" | "603" | "604";
 
 export const REQUIRED_SHIFT_CODES: ScheduleCode[] = ["601", "602", "603", "604"];
 
-export interface ProductionUnit {
+export interface OrganizationScope {
+  companyId?: string;
+  siteId?: string;
+  businessAreaId?: string;
+}
+
+export interface OrganizationContext extends OrganizationScope {
+  companyName: string;
+  siteName: string;
+  businessAreaName: string;
+}
+
+export interface ProductionUnit extends OrganizationScope {
   id: string;
   name: string;
   description: string;
 }
 
-export interface Competency {
+export interface Competency extends OrganizationScope {
   id: string;
   code: string;
   label: string;
@@ -20,14 +32,14 @@ export interface Competency {
   requiredStaff: number;
 }
 
-export interface TimeCode {
+export interface TimeCode extends OrganizationScope {
   id: string;
   code: string;
   label: string;
   colorToken: string;
 }
 
-export interface Employee {
+export interface Employee extends OrganizationScope {
   id: string;
   name: string;
   role: string;
@@ -36,7 +48,7 @@ export interface Employee {
   competencyIds: string[];
 }
 
-export interface Schedule {
+export interface Schedule extends OrganizationScope {
   id: string;
   name: string;
   startDate: string;
@@ -46,7 +58,7 @@ export interface Schedule {
   employees: Employee[];
 }
 
-export interface StoredAssignment {
+export interface StoredAssignment extends OrganizationScope {
   employeeId: string;
   date: string;
   competencyId: string | null;
@@ -55,7 +67,7 @@ export interface StoredAssignment {
   shiftKind: ShiftKind;
 }
 
-export interface OvertimeClaim {
+export interface OvertimeClaim extends OrganizationScope {
   id: string;
   scheduleId: string;
   employeeId: string;
@@ -63,7 +75,7 @@ export interface OvertimeClaim {
   date: string;
 }
 
-export interface MutualShiftApplication {
+export interface MutualShiftApplication extends OrganizationScope {
   id: string;
   postingId: string;
   applicantEmployeeId: string;
@@ -76,7 +88,7 @@ export interface MutualShiftApplication {
   createdAt: string;
 }
 
-export interface MutualShiftPosting {
+export interface MutualShiftPosting extends OrganizationScope {
   id: string;
   ownerEmployeeId: string;
   ownerEmployeeName: string;
@@ -91,14 +103,14 @@ export interface MutualShiftPosting {
   applications: MutualShiftApplication[];
 }
 
-export interface CompletedSet {
+export interface CompletedSet extends OrganizationScope {
   scheduleId: string;
   month: string;
   startDate: string;
   endDate: string;
 }
 
-export interface AppSession {
+export interface AppSession extends OrganizationContext {
   email: string;
   role: AppRole;
   displayName: string;

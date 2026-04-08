@@ -12,6 +12,7 @@ import {
 } from "@/lib/scheduling";
 import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
 import type {
+  AppSession,
   CompletedSet,
   Competency,
   Employee,
@@ -42,6 +43,9 @@ type ScheduleRow = {
   day_shift_days: number;
   night_shift_days: number;
   off_days: number;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type EmployeeRow = {
@@ -50,6 +54,9 @@ type EmployeeRow = {
   unit_id: string;
   full_name: string;
   role_title: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type CompetencyRow = {
@@ -58,6 +65,9 @@ type CompetencyRow = {
   label: string;
   color_token: string | null;
   required_staff: number | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type TimeCodeRow = {
@@ -65,11 +75,17 @@ type TimeCodeRow = {
   code: string;
   label: string;
   color_token: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type EmployeeCompetencyRow = {
   employee_id: string;
   competency_id: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type AssignmentRow = {
@@ -79,12 +95,18 @@ type AssignmentRow = {
   time_code_id: string | null;
   notes: string | null;
   shift_kind: StoredAssignment["shiftKind"];
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type ProductionUnitRow = {
   id: string;
   name: string;
   description: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type OvertimeClaimRow = {
@@ -93,6 +115,9 @@ type OvertimeClaimRow = {
   employee_id: string;
   competency_id: string;
   assignment_date: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type CompletedSetRow = {
@@ -100,16 +125,25 @@ type CompletedSetRow = {
   month_key: string;
   start_date: string;
   end_date: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type ProfileRow = {
   id: string;
+  company_id?: string;
+  site_id?: string;
+  business_area_id?: string;
 };
 
 type UserSchedulePinRow = {
   schedule_id: string;
   employee_id: string;
   sort_order: number;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type MutualShiftPostingRow = {
@@ -120,12 +154,18 @@ type MutualShiftPostingRow = {
   month_key: string;
   accepted_application_id: string | null;
   created_at: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type MutualShiftPostingDateRow = {
   posting_id: string;
   swap_date: string;
   shift_kind: Exclude<StoredAssignment["shiftKind"], "OFF">;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type MutualShiftApplicationRow = {
@@ -135,17 +175,45 @@ type MutualShiftApplicationRow = {
   applicant_schedule_id: string;
   status: MutualShiftApplication["status"];
   created_at: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type MutualShiftApplicationDateRow = {
   application_id: string;
   swap_date: string;
   shift_kind: Exclude<StoredAssignment["shiftKind"], "OFF">;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 /** Prefers the admin client, but can fall back to a server-scoped client. */
 function getDataClient() {
   return getSupabaseAdminClient() ?? getSupabaseServerClient();
+}
+
+/**
+ * Applies the current user's organization boundary to a Supabase query.
+ *
+ * Admins can see the whole company. Leaders and workers are narrowed to a
+ * single business area inside that company/site hierarchy.
+ */
+function applySessionScope(query: any, session?: AppSession | null) {
+  if (!session?.companyId) {
+    return query;
+  }
+
+  const companyScoped = query.eq("company_id", session.companyId);
+
+  if (session.role === "admin" || !session.siteId || !session.businessAreaId) {
+    return companyScoped;
+  }
+
+  return companyScoped
+    .eq("site_id", session.siteId)
+    .eq("business_area_id", session.businessAreaId);
 }
 
 /** Empty snapshot shape used when data is unavailable or a page is unconfigured. */
@@ -194,6 +262,9 @@ function mapProductionUnits(rows: ProductionUnitRow[]) {
     id: row.id,
     name: row.name,
     description: row.description ?? "",
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
   }));
 }
 
@@ -205,6 +276,9 @@ function mapCompetencies(rows: CompetencyRow[]) {
     label: row.label,
     colorToken: row.color_token ?? "slate",
     requiredStaff: Math.max(1, row.required_staff ?? 1),
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
   }));
 }
 
@@ -214,6 +288,9 @@ function mapTimeCodes(rows: TimeCodeRow[]) {
     code: row.code,
     label: row.label,
     colorToken: row.color_token ?? "slate",
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
   }));
 }
 
@@ -237,6 +314,9 @@ function buildEmployeesBySchedule(
       scheduleId: row.schedule_id,
       unitId: row.unit_id,
       competencyIds: competenciesByEmployee[row.id] ?? [],
+      companyId: row.company_id,
+      siteId: row.site_id,
+      businessAreaId: row.business_area_id,
     });
     return map;
   }, {});
@@ -251,6 +331,9 @@ function mapSchedules(scheduleRows: ScheduleRow[], employeesBySchedule: Record<s
     nightShiftDays: row.night_shift_days,
     offDays: row.off_days,
     employees: employeesBySchedule[row.id] ?? [],
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
   }));
 }
 
@@ -262,6 +345,9 @@ function mapAssignments(rows: AssignmentRow[]) {
     timeCodeId: row.time_code_id,
     notes: row.notes,
     shiftKind: row.shift_kind,
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
   }));
 }
 
@@ -272,6 +358,9 @@ function mapOvertimeClaims(rows: OvertimeClaimRow[]) {
     employeeId: row.employee_id,
     competencyId: row.competency_id,
     date: row.assignment_date,
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
   }));
 }
 
@@ -281,6 +370,9 @@ function mapCompletedSets(rows: CompletedSetRow[]) {
     month: row.month_key,
     startDate: row.start_date,
     endDate: row.end_date,
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
   }));
 }
 
@@ -409,7 +501,7 @@ function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
  * - overtime claims
  * - completed-set state
  */
-export async function getSchedulerSnapshot(month: string) {
+export async function getSchedulerSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
   if (!supabase) {
@@ -429,29 +521,56 @@ export async function getSchedulerSnapshot(month: string) {
     overtimeClaimsResult,
     completedSetsResult,
   ] = await Promise.all([
-    supabase.from("production_units").select("id, name, description").order("name"),
-    supabase.from("competencies").select("id, code, label, color_token, required_staff").order("code"),
-    supabase.from("time_codes").select("id, code, label, color_token").order("code"),
-    supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days").order("name"),
-    supabase
+    applySessionScope(
+      supabase.from("production_units").select("id, name, description, company_id, site_id, business_area_id"),
+      session,
+    ).order("name"),
+    applySessionScope(
+      supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
+      session,
+    ).order("code"),
+    applySessionScope(
+      supabase.from("time_codes").select("id, code, label, color_token, company_id, site_id, business_area_id"),
+      session,
+    ).order("code"),
+    applySessionScope(
+      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+      session,
+    ).order("name"),
+    applySessionScope(
+      supabase
       .from("employees")
-      .select("id, schedule_id, unit_id, full_name, role_title")
+      .select("id, schedule_id, unit_id, full_name, role_title, company_id, site_id, business_area_id"),
+      session,
+    )
       .eq("is_active", true)
       .order("full_name"),
-    supabase.from("employee_competencies").select("employee_id, competency_id"),
-    supabase
+    applySessionScope(
+      supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
+      session,
+    ),
+    applySessionScope(
+      supabase
       .from("schedule_assignments")
-      .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
+      .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
+      session,
+    )
       .gte("assignment_date", monthStart)
       .lte("assignment_date", monthEnd),
-    supabase
+    applySessionScope(
+      supabase
       .from("overtime_claims")
-      .select("id, schedule_id, employee_id, competency_id, assignment_date")
+      .select("id, schedule_id, employee_id, competency_id, assignment_date, company_id, site_id, business_area_id"),
+      session,
+    )
       .gte("assignment_date", monthStart)
       .lte("assignment_date", monthEnd),
-    supabase
+    applySessionScope(
+      supabase
       .from("completed_sets")
-      .select("schedule_id, month_key, start_date, end_date")
+      .select("schedule_id, month_key, start_date, end_date, company_id, site_id, business_area_id"),
+      session,
+    )
       .in("month_key", windowMonths),
   ]);
 
@@ -488,7 +607,7 @@ export async function getSchedulerSnapshot(month: string) {
   };
 }
 
-export async function getPersonnelSnapshot(month: string) {
+export async function getPersonnelSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
   if (!supabase) {
@@ -497,15 +616,30 @@ export async function getPersonnelSnapshot(month: string) {
 
   const [unitsResult, competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult] =
     await Promise.all([
-      supabase.from("production_units").select("id, name, description").order("name"),
-      supabase.from("competencies").select("id, code, label, color_token, required_staff").order("code"),
-      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days").order("name"),
-      supabase
+      applySessionScope(
+        supabase.from("production_units").select("id, name, description, company_id, site_id, business_area_id"),
+        session,
+      ).order("name"),
+      applySessionScope(
+        supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
+        session,
+      ).order("code"),
+      applySessionScope(
+        supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+        session,
+      ).order("name"),
+      applySessionScope(
+        supabase
         .from("employees")
-        .select("id, schedule_id, unit_id, full_name, role_title")
+        .select("id, schedule_id, unit_id, full_name, role_title, company_id, site_id, business_area_id"),
+        session,
+      )
         .eq("is_active", true)
         .order("full_name"),
-      supabase.from("employee_competencies").select("employee_id, competency_id"),
+      applySessionScope(
+        supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
+        session,
+      ),
     ]);
 
   const employeesBySchedule = buildEmployeesBySchedule(
@@ -525,16 +659,19 @@ export async function getPersonnelSnapshot(month: string) {
   };
 }
 
-export async function getMetricsOvertimeHistory(today: string) {
+export async function getMetricsOvertimeHistory(today: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
   if (!supabase) {
     return [];
   }
 
-  const result = await supabase
+  const result = await applySessionScope(
+    supabase
     .from("overtime_claims")
-    .select("id, schedule_id, employee_id, competency_id, assignment_date")
+    .select("id, schedule_id, employee_id, competency_id, assignment_date, company_id, site_id, business_area_id"),
+    session,
+  )
     .gte("assignment_date", getYearStart(today))
     .lte("assignment_date", today);
 
@@ -545,16 +682,19 @@ export async function getMetricsOvertimeHistory(today: string) {
   return mapOvertimeClaims((result.data as OvertimeClaimRow[] | null) ?? []);
 }
 
-export async function getMetricsAssignmentHistory(today: string) {
+export async function getMetricsAssignmentHistory(today: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
   if (!supabase) {
     return [];
   }
 
-  const result = await supabase
+  const result = await applySessionScope(
+    supabase
     .from("schedule_assignments")
-    .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
+    .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
+    session,
+  )
     .gte("assignment_date", getYearStart(today))
     .lte("assignment_date", today);
 
@@ -565,7 +705,7 @@ export async function getMetricsAssignmentHistory(today: string) {
   return mapAssignments((result.data as AssignmentRow[] | null) ?? []);
 }
 
-export async function getSchedulesSnapshot(month: string) {
+export async function getSchedulesSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
   if (!supabase) {
@@ -573,8 +713,14 @@ export async function getSchedulesSnapshot(month: string) {
   }
 
   const [schedulesResult, employeesResult] = await Promise.all([
-    supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days").order("name"),
-    supabase.from("employees").select("id, schedule_id, unit_id, full_name, role_title").eq("is_active", true),
+    applySessionScope(
+      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+      session,
+    ).order("name"),
+    applySessionScope(
+      supabase.from("employees").select("id, schedule_id, unit_id, full_name, role_title, company_id, site_id, business_area_id"),
+      session,
+    ).eq("is_active", true),
   ]);
 
   const employeesBySchedule = buildEmployeesBySchedule(
@@ -594,7 +740,7 @@ export async function getSchedulesSnapshot(month: string) {
   };
 }
 
-export async function getCompetenciesSnapshot(month: string) {
+export async function getCompetenciesSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
   if (!supabase) {
@@ -602,14 +748,26 @@ export async function getCompetenciesSnapshot(month: string) {
   }
 
   const [competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult] = await Promise.all([
-    supabase.from("competencies").select("id, code, label, color_token, required_staff").order("code"),
-    supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days").order("name"),
-    supabase
+    applySessionScope(
+      supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
+      session,
+    ).order("code"),
+    applySessionScope(
+      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+      session,
+    ).order("name"),
+    applySessionScope(
+      supabase
       .from("employees")
-      .select("id, schedule_id, unit_id, full_name, role_title")
+      .select("id, schedule_id, unit_id, full_name, role_title, company_id, site_id, business_area_id"),
+      session,
+    )
       .eq("is_active", true)
       .order("full_name"),
-    supabase.from("employee_competencies").select("employee_id, competency_id"),
+    applySessionScope(
+      supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
+      session,
+    ),
   ]);
 
   const employeesBySchedule = buildEmployeesBySchedule(
@@ -629,16 +787,19 @@ export async function getCompetenciesSnapshot(month: string) {
   };
 }
 
-export async function getTimeCodesSnapshot(month: string) {
+export async function getTimeCodesSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
   if (!supabase) {
     return emptySnapshot(month);
   }
 
-  const timeCodesResult = await supabase
+  const timeCodesResult = await applySessionScope(
+    supabase
     .from("time_codes")
-    .select("id, code, label, color_token")
+    .select("id, code, label, color_token, company_id, site_id, business_area_id"),
+    session,
+  )
     .order("code");
 
   return {
@@ -653,16 +814,20 @@ export async function getTimeCodesSnapshot(month: string) {
   };
 }
 
-export async function getOvertimeMonths(currentMonth: string) {
+export async function getOvertimeMonths(currentMonth: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
   if (!supabase) {
     return [currentMonth];
   }
 
-  const completedSetsResult = await supabase
+  const completedSetsResult = await applySessionScope(
+    supabase
     .from("completed_sets")
     .select("month_key")
+    ,
+    session,
+  )
     .order("month_key");
 
   if (completedSetsResult.error) {
@@ -671,11 +836,14 @@ export async function getOvertimeMonths(currentMonth: string) {
 
   const candidateMonths = Array.from(
     new Set(
-      [currentMonth, ...(completedSetsResult.data ?? []).map((row) => (row as { month_key: string }).month_key)].filter(Boolean),
+      [
+        currentMonth,
+        ...(((completedSetsResult.data as Array<{ month_key: string }> | null) ?? []).map((row) => row.month_key)),
+      ].filter(Boolean),
     ),
   ).sort();
 
-  const snapshots = await Promise.all(candidateMonths.map((month) => getSchedulerSnapshot(month)));
+  const snapshots = await Promise.all(candidateMonths.map((month) => getSchedulerSnapshot(month, session)));
   const monthsWithPostings = candidateMonths.filter((month, index) => monthHasOvertimePostings(snapshots[index]));
 
   return monthsWithPostings.length > 0
@@ -721,8 +889,8 @@ export async function getUserSchedulePins(email: string) {
   );
 }
 
-export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot> {
-  const schedulerSnapshot = await getSchedulerSnapshot(month);
+export async function getMutualsSnapshot(month: string, session?: AppSession | null): Promise<MutualsSnapshot> {
+  const schedulerSnapshot = await getSchedulerSnapshot(month, session);
   const supabase = getDataClient();
 
   if (!supabase) {
@@ -734,9 +902,12 @@ export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot
   }
 
   const { monthStart, monthEnd } = getMonthBounds(month);
-  const postingIdsForMonthResult = await supabase
+  const postingIdsForMonthResult = await applySessionScope(
+    supabase
     .from("mutual_shift_posting_dates")
-    .select("posting_id, swap_date, shift_kind")
+    .select("posting_id, swap_date, shift_kind, company_id, site_id, business_area_id"),
+    session,
+  )
     .gte("swap_date", monthStart)
     .lte("swap_date", monthEnd)
     .order("swap_date");
@@ -758,12 +929,12 @@ export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot
   const [postingsResult, applicationsResult] = await Promise.all([
     supabase
       .from("mutual_shift_postings")
-      .select("id, owner_employee_id, owner_schedule_id, status, month_key, accepted_application_id, created_at")
+      .select("id, owner_employee_id, owner_schedule_id, status, month_key, accepted_application_id, created_at, company_id, site_id, business_area_id")
       .in("id", postingIds)
       .order("created_at"),
     supabase
       .from("mutual_shift_applications")
-      .select("id, posting_id, applicant_employee_id, applicant_schedule_id, status, created_at")
+      .select("id, posting_id, applicant_employee_id, applicant_schedule_id, status, created_at, company_id, site_id, business_area_id")
       .in("posting_id", postingIds)
       .order("created_at"),
   ]);
@@ -773,14 +944,14 @@ export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot
     postingIds.length > 0
       ? supabase
           .from("mutual_shift_posting_dates")
-          .select("posting_id, swap_date, shift_kind")
+          .select("posting_id, swap_date, shift_kind, company_id, site_id, business_area_id")
           .in("posting_id", postingIds)
           .order("swap_date")
       : Promise.resolve({ data: [], error: null }),
     applicationIds.length > 0
       ? supabase
           .from("mutual_shift_application_dates")
-          .select("application_id, swap_date, shift_kind")
+          .select("application_id, swap_date, shift_kind, company_id, site_id, business_area_id")
           .in("application_id", applicationIds)
           .order("swap_date")
       : Promise.resolve({ data: [], error: null }),
@@ -825,6 +996,9 @@ export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot
       dates: (applicationDatesById[row.id] ?? []).map((entry) => entry.swap_date),
       shiftKinds: (applicationDatesById[row.id] ?? []).map((entry) => entry.shift_kind),
       createdAt: row.created_at,
+      companyId: row.company_id,
+      siteId: row.site_id,
+      businessAreaId: row.business_area_id,
     });
     return map;
   }, {});
@@ -848,6 +1022,9 @@ export async function getMutualsSnapshot(month: string): Promise<MutualsSnapshot
       applications: (applicationsByPostingId[row.id] ?? []).sort(
         (left, right) => left.createdAt.localeCompare(right.createdAt),
       ),
+      companyId: row.company_id,
+      siteId: row.site_id,
+      businessAreaId: row.business_area_id,
     };
   });
 

@@ -14,14 +14,14 @@ export default async function OvertimePage({
   const session = await requireAppSession(["admin", "leader", "worker"]);
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const availableMonths = await getOvertimeMonths(currentMonth);
+  const availableMonths = await getOvertimeMonths(currentMonth, session);
   const month =
     resolvedSearchParams?.month && availableMonths.includes(resolvedSearchParams.month)
       ? resolvedSearchParams.month
       : availableMonths.includes(currentMonth)
       ? currentMonth
       : availableMonths[0] ?? currentMonth;
-  const snapshot = await getSchedulerSnapshot(month);
+  const snapshot = await getSchedulerSnapshot(month, session);
 
   return (
     <WorkspaceShell viewer={session}>

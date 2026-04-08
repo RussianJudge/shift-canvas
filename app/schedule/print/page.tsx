@@ -22,7 +22,7 @@ export default async function SchedulePrintPage({
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
-  const snapshot = scopeScheduleSnapshot(await getSchedulerSnapshot(month), session);
+  const snapshot = scopeScheduleSnapshot(await getSchedulerSnapshot(month, session), session);
   const pinnedEmployeesBySchedule = await getUserSchedulePins(session.email);
 
   return (

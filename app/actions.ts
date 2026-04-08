@@ -46,6 +46,8 @@ import {
 import { getAppSession } from "@/lib/auth";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
+type ActionScope = { companyId: string; siteId: string; businessAreaId: string };
+type ScopedDatabaseRow = { company_id: string; site_id: string; business_area_id: string };
 
 /**
  * Main server action layer for the app.
@@ -69,6 +71,57 @@ function isBlank(value: string) {
 function hasValidShiftPattern(dayShiftDays: number, nightShiftDays: number, offDays: number) {
   return [dayShiftDays, nightShiftDays, offDays].every((value) => Number.isInteger(value) && value >= 0) &&
     dayShiftDays + nightShiftDays + offDays > 0;
+}
+
+/** Converts a scoped session into the database column payload used on inserts. */
+function toDatabaseScope(scope: ActionScope) {
+  return {
+    company_id: scope.companyId,
+    site_id: scope.siteId,
+    business_area_id: scope.businessAreaId,
+  };
+}
+
+/** Pulls the required company/site/business-area ids out of the signed session. */
+function getSessionScope(session: Awaited<ReturnType<typeof getAppSession>>): ActionScope | null {
+  if (!session?.companyId || !session.siteId || !session.businessAreaId) {
+    return null;
+  }
+
+  return {
+    companyId: session.companyId,
+    siteId: session.siteId,
+    businessAreaId: session.businessAreaId,
+  };
+}
+
+/** Normalizes a scoped row from Supabase into the app-side scope shape. */
+function scopeFromRow(row: ScopedDatabaseRow): ActionScope {
+  return {
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
+  };
+}
+
+/** Company-wide admins pass on company match; others must match the exact business area. */
+function canAccessScope(
+  session: Awaited<ReturnType<typeof getAppSession>>,
+  scope: ActionScope,
+) {
+  if (!session?.companyId) {
+    return false;
+  }
+
+  if (session.role === "admin") {
+    return session.companyId === scope.companyId;
+  }
+
+  return (
+    session.companyId === scope.companyId &&
+    session.siteId === scope.siteId &&
+    session.businessAreaId === scope.businessAreaId
+  );
 }
 
 /**
@@ -101,7 +154,7 @@ async function restoreSwappedAssignmentsForClaims(
     const notePrefix = `OT|claimant:${group.employeeId}|claim:${group.competencyId}|`;
     const { data, error } = await supabase
       .from("schedule_assignments")
-      .select("employee_id, assignment_date, notes, shift_kind")
+      .select("employee_id, assignment_date, notes, shift_kind, company_id, site_id, business_area_id")
       .in("assignment_date", group.dates)
       .like("notes", `${notePrefix}%`);
 
@@ -117,6 +170,9 @@ async function restoreSwappedAssignmentsForClaims(
       assignment_date: string;
       notes: string | null;
       shift_kind: ShiftKind;
+      company_id: string;
+      site_id: string;
+      business_area_id: string;
     }> | null) ?? [])
       .flatMap((row) => {
         const parsed = parseOvertimeAssignmentNote(row.notes);
@@ -136,6 +192,9 @@ async function restoreSwappedAssignmentsForClaims(
             time_code_id: null,
             notes: null,
             shift_kind: row.shift_kind,
+            company_id: row.company_id,
+            site_id: row.site_id,
+            business_area_id: row.business_area_id,
           } satisfies OvertimeAssignmentRow,
         ];
       });
@@ -265,13 +324,14 @@ function getWorkedShiftKindsForDates(
 async function removeStaleOvertimeClaims(
   supabase: SupabaseAdminClient,
   months: string[],
+  session: Awaited<ReturnType<typeof getAppSession>> | null,
   forcedRanges: Array<{ scheduleId: string; startDate: string; endDate: string }> = [],
 ) {
   const uniqueMonths = Array.from(new Set(months.filter(Boolean)));
   let removedClaims = 0;
 
   for (const month of uniqueMonths) {
-    const snapshot = await getSchedulerSnapshot(month);
+    const snapshot = await getSchedulerSnapshot(month, session);
     const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
     const monthDays = getMonthDays(month);
     const completedDateKeys = snapshot.completedSets.reduce<Set<string>>((set, completedSet) => {
@@ -415,16 +475,41 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     };
   }
 
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  const scopeMonth = input.updates[0]?.date.slice(0, 7);
+  const scopedSnapshot = scopeMonth ? await getSchedulerSnapshot(scopeMonth, session) : null;
+  const scopedEmployeeMap = scopedSnapshot ? getEmployeeMap(scopedSnapshot.schedules) : {};
+
   const rowsToUpsert = input.updates
     .filter((update) => update.competencyId || update.timeCodeId)
-    .map((update) => ({
-      employee_id: update.employeeId,
-      assignment_date: update.date,
-      competency_id: update.competencyId,
-      time_code_id: update.timeCodeId,
-      notes: update.notes ?? null,
-      shift_kind: update.shiftKind,
-    }));
+    .map((update) => {
+      const employee = scopedEmployeeMap[update.employeeId];
+      const rowScope = employee
+        ? {
+            companyId: employee.companyId ?? sessionScope.companyId,
+            siteId: employee.siteId ?? sessionScope.siteId,
+            businessAreaId: employee.businessAreaId ?? sessionScope.businessAreaId,
+          }
+        : sessionScope;
+
+      return {
+        employee_id: update.employeeId,
+        assignment_date: update.date,
+        competency_id: update.competencyId,
+        time_code_id: update.timeCodeId,
+        notes: update.notes ?? null,
+        shift_kind: update.shiftKind,
+        ...toDatabaseScope(rowScope),
+      };
+    });
 
   const rowsToDelete = input.updates
     .filter((update) => !update.competencyId && !update.timeCodeId)
@@ -470,6 +555,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   const cleanupResult = await removeStaleOvertimeClaims(
     supabase,
     input.updates.map((update) => update.date.slice(0, 7)),
+    session,
   );
 
   revalidatePath("/schedule");
@@ -511,6 +597,39 @@ export async function saveSchedulePins(input: {
     };
   }
 
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  const scheduleResult = await supabase
+    .from("schedules")
+    .select("id, company_id, site_id, business_area_id")
+    .eq("id", input.scheduleId)
+    .maybeSingle();
+
+  const scheduleScopeRow = scheduleResult.data as ({ id: string } & ScopedDatabaseRow) | null;
+
+  if (scheduleResult.error || !scheduleScopeRow) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected shift for pinning.",
+    };
+  }
+
+  const scheduleScope = scopeFromRow(scheduleScopeRow);
+
+  if (!canAccessScope(session, scheduleScope)) {
+    return {
+      ok: false,
+      message: "You do not have permission to save pins for that shift.",
+    };
+  }
+
   const profileResult = await supabase
     .from("profiles")
     .select("id")
@@ -545,6 +664,7 @@ export async function saveSchedulePins(input: {
       schedule_id: input.scheduleId,
       employee_id: employeeId,
       sort_order: index,
+      ...toDatabaseScope(scheduleScope),
     }));
 
     const { error: insertError } = await supabase
@@ -593,6 +713,30 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
     };
   }
 
+  const scheduleResult = await supabase
+    .from("schedules")
+    .select("id, company_id, site_id, business_area_id")
+    .eq("id", input.scheduleId)
+    .maybeSingle();
+
+  const scheduleScopeRow = scheduleResult.data as ({ id: string } & ScopedDatabaseRow) | null;
+
+  if (scheduleResult.error || !scheduleScopeRow) {
+    return {
+      ok: false,
+      message: "Could not resolve that shift for set completion.",
+    };
+  }
+
+  const scheduleScope = scopeFromRow(scheduleScopeRow);
+
+  if (!canAccessScope(session, scheduleScope)) {
+    return {
+      ok: false,
+      message: "You do not have permission to complete sets for that shift.",
+    };
+  }
+
   if (
     isBlank(input.scheduleId) ||
     isBlank(input.startDate) ||
@@ -629,6 +773,7 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
       month_key: monthKey,
       start_date: input.startDate,
       end_date: input.endDate,
+      ...toDatabaseScope(scheduleScope),
     }));
     const { error } = await supabase.from("completed_sets").upsert(rows, {
       onConflict: "schedule_id,month_key,start_date,end_date",
@@ -641,7 +786,7 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
       };
     }
 
-    const cleanupResult = await removeStaleOvertimeClaims(supabase, touchedMonths);
+    const cleanupResult = await removeStaleOvertimeClaims(supabase, touchedMonths, session);
 
     revalidatePath("/schedule");
     revalidatePath("/overtime");
@@ -664,7 +809,7 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
       };
     }
 
-    const cleanupResult = await removeStaleOvertimeClaims(supabase, touchedMonths, [
+    const cleanupResult = await removeStaleOvertimeClaims(supabase, touchedMonths, session, [
       {
         scheduleId: input.scheduleId,
         startDate: input.startDate,
@@ -724,7 +869,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   }
 
   const month = input.dates[0]?.slice(0, 7);
-  const snapshot = await getSchedulerSnapshot(month);
+  const snapshot = await getSchedulerSnapshot(month, session);
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
@@ -846,6 +991,11 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       swapEmployeeId: input.swapEmployeeId ?? null,
     }),
     shift_kind: shiftForDate(targetSchedule, date),
+    ...toDatabaseScope({
+      companyId: targetSchedule.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+    }),
   }));
 
   const claimRows = input.dates.map((date) => ({
@@ -854,6 +1004,20 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     employee_id: input.employeeId,
     competency_id: input.competencyId,
     assignment_date: date,
+    ...toDatabaseScope({
+      companyId: targetSchedule.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+    }),
+  }));
+
+  swapAssignmentRows = swapAssignmentRows.map((row) => ({
+    ...row,
+    ...toDatabaseScope({
+      companyId: targetSchedule.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+    }),
   }));
 
   const { error: assignmentError } = await supabase.from("schedule_assignments").upsert([...assignmentRows, ...swapAssignmentRows], {
@@ -1018,7 +1182,7 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
 
   const month = dates[0].slice(0, 7);
 
-  const snapshot = await getSchedulerSnapshot(month);
+  const snapshot = await getSchedulerSnapshot(month, session);
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
@@ -1047,6 +1211,11 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
     status: "open",
     month_key: month,
     accepted_application_id: null,
+    ...toDatabaseScope({
+      companyId: employee.companyId ?? session.companyId ?? "",
+      siteId: employee.siteId ?? session.siteId ?? "",
+      businessAreaId: employee.businessAreaId ?? session.businessAreaId ?? "",
+    }),
   });
 
   if (postingError) {
@@ -1061,6 +1230,11 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
       posting_id: postingId,
       swap_date: date,
       shift_kind: shiftKinds[index],
+      ...toDatabaseScope({
+        companyId: employee.companyId ?? session.companyId ?? "",
+        siteId: employee.siteId ?? session.siteId ?? "",
+        businessAreaId: employee.businessAreaId ?? session.businessAreaId ?? "",
+      }),
     })),
   );
 
@@ -1110,7 +1284,7 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
 
   const postingResult = await supabase
     .from("mutual_shift_postings")
-    .select("id, owner_employee_id, owner_schedule_id, status, month_key")
+    .select("id, owner_employee_id, owner_schedule_id, status, month_key, company_id, site_id, business_area_id")
     .eq("id", input.postingId)
     .maybeSingle();
 
@@ -1120,12 +1294,22 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     owner_schedule_id: string;
     status: string;
     month_key: string;
+    company_id: string;
+    site_id: string;
+    business_area_id: string;
   } | null;
 
   if (postingResult.error || !posting) {
     return {
       ok: false,
       message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(posting))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual posting.",
     };
   }
 
@@ -1160,7 +1344,7 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     };
   }
 
-  const snapshot = await getSchedulerSnapshot(posting.month_key);
+  const snapshot = await getSchedulerSnapshot(posting.month_key, session);
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
@@ -1204,6 +1388,11 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     applicant_employee_id: employee.id,
     applicant_schedule_id: employee.scheduleId,
     status: "open",
+    ...toDatabaseScope({
+      companyId: employee.companyId ?? session.companyId ?? "",
+      siteId: employee.siteId ?? session.siteId ?? "",
+      businessAreaId: employee.businessAreaId ?? session.businessAreaId ?? "",
+    }),
   });
 
   if (applicationError) {
@@ -1218,6 +1407,11 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
       application_id: applicationId,
       swap_date: date,
       shift_kind: offeredShiftKinds[index],
+      ...toDatabaseScope({
+        companyId: employee.companyId ?? session.companyId ?? "",
+        siteId: employee.siteId ?? session.siteId ?? "",
+        businessAreaId: employee.businessAreaId ?? session.businessAreaId ?? "",
+      }),
     })),
   );
 
@@ -1263,7 +1457,7 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
 
   const postingResult = await supabase
     .from("mutual_shift_postings")
-    .select("id, owner_employee_id, owner_schedule_id, status")
+    .select("id, owner_employee_id, owner_schedule_id, status, company_id, site_id, business_area_id")
     .eq("id", input.postingId)
     .maybeSingle();
 
@@ -1272,12 +1466,22 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     owner_employee_id: string;
     owner_schedule_id: string;
     status: string;
+    company_id: string;
+    site_id: string;
+    business_area_id: string;
   } | null;
 
   if (postingResult.error || !posting) {
     return {
       ok: false,
       message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(posting))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual posting.",
     };
   }
 
@@ -1297,7 +1501,7 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
 
   const applicationResult = await supabase
     .from("mutual_shift_applications")
-    .select("id, status, applicant_employee_id, applicant_schedule_id")
+    .select("id, status, applicant_employee_id, applicant_schedule_id, company_id, site_id, business_area_id")
     .eq("id", input.applicationId)
     .eq("posting_id", input.postingId)
     .maybeSingle();
@@ -1307,12 +1511,22 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     status: string;
     applicant_employee_id: string;
     applicant_schedule_id: string;
+    company_id: string;
+    site_id: string;
+    business_area_id: string;
   } | null;
 
   if (applicationResult.error || !application || application.status !== "open") {
     return {
       ok: false,
       message: "Could not find that mutual application.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(application))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual application.",
     };
   }
 
@@ -1366,12 +1580,31 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     };
   }
 
+  const scheduleScopesResult = await supabase
+    .from("schedules")
+    .select("id, company_id, site_id, business_area_id")
+    .in("id", [posting.owner_schedule_id, application.applicant_schedule_id]);
+
+  if (scheduleScopesResult.error) {
+    return {
+      ok: false,
+      message: `Could not resolve mutual schedule scope: ${scheduleScopesResult.error.message}`,
+    };
+  }
+
+  const scheduleScopes = new Map(
+    (((scheduleScopesResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [])).map((row) => [
+      row.id,
+      scopeFromRow(row),
+    ]),
+  );
+
   const allMutualDates = Array.from(
     new Set([...postingDates.map((row) => row.swap_date), ...applicationDates.map((row) => row.swap_date)]),
   );
   const existingAssignmentsResult = await supabase
     .from("schedule_assignments")
-    .select("employee_id, assignment_date, competency_id, time_code_id")
+    .select("employee_id, assignment_date, competency_id, time_code_id, company_id, site_id, business_area_id")
     .in("employee_id", [posting.owner_employee_id, application.applicant_employee_id])
     .in("assignment_date", allMutualDates);
 
@@ -1401,6 +1634,14 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     applicantScheduleId: application.applicant_schedule_id,
     applicantDates: applicationDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
     existingAssignments,
+  }).map((row) => {
+    const parsed = parseMutualAssignmentNote(row.notes);
+    const targetScope = parsed.targetScheduleId ? scheduleScopes.get(parsed.targetScheduleId) : null;
+
+    return {
+      ...row,
+      ...toDatabaseScope(targetScope ?? scopeFromRow(posting)),
+    };
   });
 
   const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
@@ -1474,16 +1715,23 @@ export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
 
   const postingResult = await supabase
     .from("mutual_shift_postings")
-    .select("id, owner_employee_id, status")
+    .select("id, owner_employee_id, status, company_id, site_id, business_area_id")
     .eq("id", input.postingId)
     .maybeSingle();
 
-  const posting = postingResult.data as { id: string; owner_employee_id: string; status: string } | null;
+  const posting = postingResult.data as ({ id: string; owner_employee_id: string; status: string } & ScopedDatabaseRow) | null;
 
   if (postingResult.error || !posting) {
     return {
       ok: false,
       message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(posting))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual posting.",
     };
   }
 
@@ -1526,7 +1774,7 @@ export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
 export async function withdrawMutualApplication(input: WithdrawMutualApplicationInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
-  if (!session || !session.employeeId) {
+  if (!session) {
     return {
       ok: false,
       message: "You do not have permission to withdraw mutual applications.",
@@ -1544,17 +1792,24 @@ export async function withdrawMutualApplication(input: WithdrawMutualApplication
 
   const applicationResult = await supabase
     .from("mutual_shift_applications")
-    .select("id, applicant_employee_id, status")
+    .select("id, applicant_employee_id, status, company_id, site_id, business_area_id")
     .eq("id", input.applicationId)
     .eq("posting_id", input.postingId)
     .maybeSingle();
 
-  const application = applicationResult.data as { id: string; applicant_employee_id: string; status: string } | null;
+  const application = applicationResult.data as ({ id: string; applicant_employee_id: string; status: string } & ScopedDatabaseRow) | null;
 
   if (applicationResult.error || !application) {
     return {
       ok: false,
       message: "Could not find that mutual application.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(application))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual application.",
     };
   }
 
@@ -1618,16 +1873,23 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
 
   const postingResult = await supabase
     .from("mutual_shift_postings")
-    .select("id, status")
+    .select("id, status, company_id, site_id, business_area_id")
     .eq("id", input.postingId)
     .maybeSingle();
 
-  const posting = postingResult.data as { id: string; status: string } | null;
+  const posting = postingResult.data as ({ id: string; status: string } & ScopedDatabaseRow) | null;
 
   if (postingResult.error || !posting) {
     return {
       ok: false,
       message: "Could not find that mutual.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(posting))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual.",
     };
   }
 
@@ -1640,7 +1902,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
 
   const mutualAssignmentsResult = await supabase
     .from("schedule_assignments")
-    .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
+    .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
     .like("notes", `MUT|posting:${input.postingId}|%`);
 
   if (mutualAssignmentsResult.error) {
@@ -1657,6 +1919,9 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
     time_code_id: string | null;
     notes: string | null;
     shift_kind: ShiftKind;
+    company_id: string;
+    site_id: string;
+    business_area_id: string;
   }> | null) ?? []);
 
   const restoreRows = mutualAssignments.flatMap((row) => {
@@ -1674,6 +1939,9 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
         time_code_id: parsed.originalTimeCodeId,
         notes: null,
         shift_kind: row.shift_kind,
+        company_id: row.company_id,
+        site_id: row.site_id,
+        business_area_id: row.business_area_id,
       } satisfies MutualAssignmentRow,
     ];
   });
@@ -1769,7 +2037,167 @@ export async function savePersonnel(input: SavePersonnelInput) {
     };
   }
 
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  const scheduleIds = Array.from(new Set(input.updates.map((update) => update.scheduleId).filter(Boolean)));
+  const unitIds = Array.from(new Set(input.updates.map((update) => update.unitId).filter(Boolean)));
+  const competencyIds = Array.from(
+    new Set(input.updates.flatMap((update) => update.competencyIds).filter(Boolean)),
+  );
+  const employeeIdsToDelete = Array.from(new Set(input.deletedEmployeeIds.filter(Boolean)));
+
+  const [scheduleRowsResult, unitRowsResult, competencyRowsResult, deleteEmployeeRowsResult] = await Promise.all([
+    scheduleIds.length > 0
+      ? supabase
+          .from("schedules")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", scheduleIds)
+      : Promise.resolve({ data: [], error: null }),
+    unitIds.length > 0
+      ? supabase
+          .from("production_units")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", unitIds)
+      : Promise.resolve({ data: [], error: null }),
+    competencyIds.length > 0
+      ? supabase
+          .from("competencies")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", competencyIds)
+      : Promise.resolve({ data: [], error: null }),
+    employeeIdsToDelete.length > 0
+      ? supabase
+          .from("employees")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", employeeIdsToDelete)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const scheduleScopeRows = (scheduleRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+  const unitScopeRows = (unitRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+  const competencyScopeRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+  const deleteEmployeeScopeRows = (deleteEmployeeRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+  if (scheduleRowsResult.error || scheduleScopeRows.length !== scheduleIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more shifts for the personnel update.",
+    };
+  }
+
+  if (unitRowsResult.error || unitScopeRows.length !== unitIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more business areas for the selected teams.",
+    };
+  }
+
+  if (competencyRowsResult.error || competencyScopeRows.length !== competencyIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more competencies for the personnel update.",
+    };
+  }
+
+  if (deleteEmployeeRowsResult.error || deleteEmployeeScopeRows.length !== employeeIdsToDelete.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more employees selected for removal.",
+    };
+  }
+
+  const scheduleScopeMap = new Map(scheduleScopeRows.map((row) => [row.id, scopeFromRow(row)]));
+  const unitScopeMap = new Map(unitScopeRows.map((row) => [row.id, scopeFromRow(row)]));
+  const competencyScopeMap = new Map(competencyScopeRows.map((row) => [row.id, scopeFromRow(row)]));
+
+  for (const scheduleScope of scheduleScopeMap.values()) {
+    if (!canAccessScope(session, scheduleScope)) {
+      return {
+        ok: false,
+        message: "You do not have permission to assign personnel to one or more selected shifts.",
+      };
+    }
+  }
+
+  for (const unitScope of unitScopeMap.values()) {
+    if (!canAccessScope(session, unitScope)) {
+      return {
+        ok: false,
+        message: "You do not have permission to use one or more selected business areas.",
+      };
+    }
+  }
+
+  for (const competencyScope of competencyScopeMap.values()) {
+    if (!canAccessScope(session, competencyScope)) {
+      return {
+        ok: false,
+        message: "You do not have permission to assign one or more selected competencies.",
+      };
+    }
+  }
+
+  for (const row of deleteEmployeeScopeRows) {
+    if (!canAccessScope(session, scopeFromRow(row))) {
+      return {
+        ok: false,
+        message: "You do not have permission to remove one or more selected employees.",
+      };
+    }
+  }
+
+  for (const update of input.updates) {
+    const scheduleScope = scheduleScopeMap.get(update.scheduleId);
+
+    if (!scheduleScope) {
+      return {
+        ok: false,
+        message: "Could not resolve the organizational scope for one or more selected shifts.",
+      };
+    }
+
+    if (update.unitId) {
+      const unitScope = unitScopeMap.get(update.unitId);
+
+      if (
+        !unitScope ||
+        unitScope.companyId !== scheduleScope.companyId ||
+        unitScope.siteId !== scheduleScope.siteId ||
+        unitScope.businessAreaId !== scheduleScope.businessAreaId
+      ) {
+        return {
+          ok: false,
+          message: "Employees must stay inside the same company, site, and business area as their assigned business unit.",
+        };
+      }
+    }
+
+    for (const competencyId of update.competencyIds) {
+      const competencyScope = competencyScopeMap.get(competencyId);
+
+      if (
+        !competencyScope ||
+        competencyScope.companyId !== scheduleScope.companyId ||
+        competencyScope.siteId !== scheduleScope.siteId ||
+        competencyScope.businessAreaId !== scheduleScope.businessAreaId
+      ) {
+        return {
+          ok: false,
+          message: "Employees can only be assigned competencies from the same company, site, and business area as their shift.",
+        };
+      }
+    }
+  }
+
   const employeeRows = input.updates.map((update) => ({
+    ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
     id: update.employeeId,
     full_name: update.name.trim(),
     role_title: update.role.trim(),
@@ -1813,6 +2241,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
         update.competencyIds.map((competencyId) => ({
           employee_id: update.employeeId,
           competency_id: competencyId,
+          ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
         })),
       );
     }),
@@ -1885,6 +2314,15 @@ export async function saveSchedules(input: SaveSchedulesInput) {
     };
   }
 
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
   const rows = input.updates.map((update) => ({
     id: update.scheduleId,
     name: update.name.trim(),
@@ -1892,7 +2330,31 @@ export async function saveSchedules(input: SaveSchedulesInput) {
     day_shift_days: update.dayShiftDays,
     night_shift_days: update.nightShiftDays,
     off_days: update.offDays,
+    ...toDatabaseScope(sessionScope),
   }));
+
+  if (input.deletedScheduleIds.length > 0) {
+    const deleteScopeResult = await supabase
+      .from("schedules")
+      .select("id, company_id, site_id, business_area_id")
+      .in("id", input.deletedScheduleIds);
+
+    const deleteScopeRows = (deleteScopeResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+    if (deleteScopeResult.error || deleteScopeRows.length !== input.deletedScheduleIds.length) {
+      return {
+        ok: false,
+        message: "Could not resolve one or more shifts selected for removal.",
+      };
+    }
+
+    if (deleteScopeRows.some((row) => !canAccessScope(session, scopeFromRow(row)))) {
+      return {
+        ok: false,
+        message: "You do not have permission to remove one or more selected shifts.",
+      };
+    }
+  }
 
   const error =
     rows.length > 0
@@ -1973,13 +2435,46 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
     };
   }
 
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
   const rows = input.updates.map((update) => ({
     id: update.competencyId,
     code: update.code.trim(),
     label: update.label.trim(),
     color_token: update.colorToken,
     required_staff: update.requiredStaff,
+    ...toDatabaseScope(sessionScope),
   }));
+
+  if (input.deletedCompetencyIds.length > 0) {
+    const deleteScopeResult = await supabase
+      .from("competencies")
+      .select("id, company_id, site_id, business_area_id")
+      .in("id", input.deletedCompetencyIds);
+
+    const deleteScopeRows = (deleteScopeResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+    if (deleteScopeResult.error || deleteScopeRows.length !== input.deletedCompetencyIds.length) {
+      return {
+        ok: false,
+        message: "Could not resolve one or more competencies selected for removal.",
+      };
+    }
+
+    if (deleteScopeRows.some((row) => !canAccessScope(session, scopeFromRow(row)))) {
+      return {
+        ok: false,
+        message: "You do not have permission to remove one or more selected competencies.",
+      };
+    }
+  }
 
   const error =
     rows.length > 0
@@ -2057,12 +2552,45 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
     };
   }
 
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
   const rows = input.updates.map((update) => ({
     id: update.timeCodeId,
     code: update.code.trim(),
     label: update.label.trim(),
     color_token: update.colorToken,
+    ...toDatabaseScope(sessionScope),
   }));
+
+  if (input.deletedTimeCodeIds.length > 0) {
+    const deleteScopeResult = await supabase
+      .from("time_codes")
+      .select("id, company_id, site_id, business_area_id")
+      .in("id", input.deletedTimeCodeIds);
+
+    const deleteScopeRows = (deleteScopeResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+    if (deleteScopeResult.error || deleteScopeRows.length !== input.deletedTimeCodeIds.length) {
+      return {
+        ok: false,
+        message: "Could not resolve one or more time codes selected for removal.",
+      };
+    }
+
+    if (deleteScopeRows.some((row) => !canAccessScope(session, scopeFromRow(row)))) {
+      return {
+        ok: false,
+        message: "You do not have permission to remove one or more selected time codes.",
+      };
+    }
+  }
 
   const error =
     rows.length > 0

@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function ProfilePage() {
   const session = await requireAppSession(["worker"]);
   const month = getCurrentMonthKey("America/Edmonton");
-  const snapshot = await getPersonnelSnapshot(month);
+  const snapshot = await getPersonnelSnapshot(month, session);
   const allEmployees = snapshot.schedules.flatMap((schedule) => schedule.employees);
   const supabase = getSupabaseAdminClient();
   const displayName = session.displayName.trim().toLowerCase();

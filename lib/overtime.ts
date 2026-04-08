@@ -14,6 +14,9 @@ export type OvertimeAssignmentRow = {
   time_code_id: string | null;
   notes: string | null;
   shift_kind: ShiftKind;
+  company_id?: string;
+  site_id?: string;
+  business_area_id?: string;
 };
 
 export type ParsedOvertimeNote = {

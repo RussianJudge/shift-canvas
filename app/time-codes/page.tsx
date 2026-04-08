@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function TimeCodesPage() {
   const session = await requireAppSession(["admin"]);
   const month = getCurrentMonthKey("America/Edmonton");
-  const snapshot = await getTimeCodesSnapshot(month);
+  const snapshot = await getTimeCodesSnapshot(month, session);
 
   return (
     <WorkspaceShell viewer={session}>

@@ -19,9 +19,9 @@ export default async function MetricsPage() {
   const session = await requireAppSession(["admin"]);
   const month = getCurrentMonthKey("America/Edmonton");
   const today = getCurrentDateKey("America/Edmonton");
-  const snapshot = await getSchedulerSnapshot(month);
-  const overtimeHistory = await getMetricsOvertimeHistory(today);
-  const assignmentHistory = await getMetricsAssignmentHistory(today);
+  const snapshot = await getSchedulerSnapshot(month, session);
+  const overtimeHistory = await getMetricsOvertimeHistory(today, session);
+  const assignmentHistory = await getMetricsAssignmentHistory(today, session);
 
   return (
     <WorkspaceShell viewer={session}>

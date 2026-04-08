@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function SchedulesPage() {
   const session = await requireAppSession(["admin"]);
   const month = getCurrentMonthKey("America/Edmonton");
-  const snapshot = await getSchedulesSnapshot(month);
+  const snapshot = await getSchedulesSnapshot(month, session);
 
   return (
     <WorkspaceShell viewer={session}>

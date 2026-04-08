@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Month is required." }, { status: 400 });
   }
 
-  const snapshot = scopeScheduleSnapshot(await getSchedulerSnapshot(month), session);
+  const snapshot = scopeScheduleSnapshot(await getSchedulerSnapshot(month, session), session);
 
   return NextResponse.json(snapshot);
 }

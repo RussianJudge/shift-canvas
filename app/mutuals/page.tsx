@@ -18,7 +18,7 @@ export default async function MutualsPage({
     resolvedSearchParams?.month && /^\d{4}-\d{2}$/.test(resolvedSearchParams.month)
       ? resolvedSearchParams.month
       : currentMonth;
-  const snapshot = await getMutualsSnapshot(month);
+  const snapshot = await getMutualsSnapshot(month, session);
 
   return (
     <WorkspaceShell viewer={session}>

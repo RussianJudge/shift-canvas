@@ -19,9 +19,17 @@ type ProfileRow = {
   role: "admin" | "leader" | "worker";
   schedule_id: string | null;
   employee_id: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
 };
 
 type ScheduleRow = {
+  id: string;
+  name: string;
+};
+
+type NamedScopeRow = {
   id: string;
   name: string;
 };
@@ -46,7 +54,7 @@ export async function signIn(formData: FormData) {
   if (supabase) {
     const profileResult = await supabase
       .from("profiles")
-      .select("email, display_name, role, schedule_id, employee_id")
+      .select("email, display_name, role, schedule_id, employee_id, company_id, site_id, business_area_id")
       .eq("email", email)
       .maybeSingle();
 
@@ -58,6 +66,9 @@ export async function signIn(formData: FormData) {
 
     if (profile) {
       let scheduleName: string | null = null;
+      let companyName = profile.company_id;
+      let siteName = profile.site_id;
+      let businessAreaName = profile.business_area_id;
       const session: AppSession = {
         email: profile.email,
         role: profile.role,
@@ -65,21 +76,59 @@ export async function signIn(formData: FormData) {
         scheduleId: profile.schedule_id,
         employeeId: profile.employee_id,
         scheduleName,
+        companyId: profile.company_id,
+        siteId: profile.site_id,
+        businessAreaId: profile.business_area_id,
+        companyName,
+        siteName,
+        businessAreaName,
       };
 
-      if (profile.schedule_id) {
-        const scheduleResult = await supabase
-          .from("schedules")
+      const [scheduleResult, companyResult, siteResult, businessAreaResult] = await Promise.all([
+        profile.schedule_id
+          ? supabase
+              .from("schedules")
+              .select("id, name")
+              .eq("id", profile.schedule_id)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        supabase
+          .from("companies")
           .select("id, name")
-          .eq("id", profile.schedule_id)
-          .maybeSingle();
+          .eq("id", profile.company_id)
+          .maybeSingle(),
+        supabase
+          .from("sites")
+          .select("id, name")
+          .eq("id", profile.site_id)
+          .maybeSingle(),
+        supabase
+          .from("business_areas")
+          .select("id, name")
+          .eq("id", profile.business_area_id)
+          .maybeSingle(),
+      ]);
 
-        if (!scheduleResult.error) {
-          scheduleName = (scheduleResult.data as ScheduleRow | null)?.name ?? null;
-        }
-
-        session.scheduleName = scheduleName;
+      if (!scheduleResult.error) {
+        scheduleName = (scheduleResult.data as ScheduleRow | null)?.name ?? null;
       }
+
+      if (!companyResult.error) {
+        companyName = (companyResult.data as NamedScopeRow | null)?.name ?? companyName;
+      }
+
+      if (!siteResult.error) {
+        siteName = (siteResult.data as NamedScopeRow | null)?.name ?? siteName;
+      }
+
+      if (!businessAreaResult.error) {
+        businessAreaName = (businessAreaResult.data as NamedScopeRow | null)?.name ?? businessAreaName;
+      }
+
+      session.scheduleName = scheduleName;
+      session.companyName = companyName;
+      session.siteName = siteName;
+      session.businessAreaName = businessAreaName;
 
       await setAppSession(session);
 
