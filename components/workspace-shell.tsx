@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { setAdminViewingScope, signOut } from "@/app/auth-actions";
+import { BrandLockup } from "@/components/brand-lockup";
 import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
@@ -266,7 +267,7 @@ export function WorkspaceShell({
         <aside className={`workspace-sidebar ${isCollapsed ? "workspace-sidebar--collapsed" : ""}`}>
           <div className="workspace-brand-row">
             <div className="workspace-brand">
-              <strong>Shift Canvas</strong>
+              <BrandLockup size="compact" />
               <span>{viewer.role === "admin" ? "Administrator" : viewer.displayName}</span>
             </div>
             <button

@@ -1,6 +1,7 @@
 "use client";
 
 import { signIn } from "@/app/auth-actions";
+import { BrandLockup } from "@/components/brand-lockup";
 
 function getErrorMessage(error: string | undefined) {
   if (error === "missing-email") {
@@ -29,7 +30,7 @@ export function SignInPanel({
     <section className="auth-shell">
       <div className="auth-panel">
         <div className="auth-panel__copy">
-          <span className="auth-eyebrow">Shift Canvas</span>
+          <BrandLockup size="compact" subtitle="Secure workforce access" />
           <h1 className="auth-title">Sign In</h1>
           <p className="auth-subtitle">Use your email to enter the workspace.</p>
         </div>

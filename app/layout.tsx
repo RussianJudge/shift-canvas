@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Shift Canvas",
+  title: "Schwifty",
   description:
     "Create monthly shift plans, assign competencies, and extrapolate day, night, and off rotations from shift rules.",
 };
