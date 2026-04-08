@@ -112,22 +112,6 @@ select {
   width: min(8.75rem, 100%);
 }
 
-.brand-lockup__copy {
-  display: grid;
-  gap: 0.12rem;
-}
-
-.brand-lockup__copy strong {
-  font-family: var(--font-display), sans-serif;
-  font-size: 1.4rem;
-  font-weight: 600;
-  line-height: 0.95;
-}
-
-.brand-lockup--compact .brand-lockup__copy strong {
-  font-size: 1.12rem;
-}
-
 .workspace-brand span,
 .panel-eyebrow {
   color: var(--muted);
@@ -2519,7 +2503,6 @@ select {
   display: none;
 }
 
-.workspace-sidebar--collapsed .brand-lockup__copy,
 .workspace-sidebar--collapsed .brand-lockup__logo {
   display: none;
 }

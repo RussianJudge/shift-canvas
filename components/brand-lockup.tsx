@@ -22,9 +22,6 @@ export function BrandLockup({
         className="brand-lockup__logo"
         priority={size === "default"}
       />
-      <div className="brand-lockup__copy">
-        <strong>Schwifty</strong>
-      </div>
     </div>
   );
 }
