@@ -23,7 +23,7 @@ const SESSION_SECRET =
   "shift-canvas-local-session-secret";
 
 type SessionEnvelope = {
-  version: 1;
+  version: 2;
   payload: AppSession;
 };
 
@@ -36,7 +36,7 @@ function sign(value: string) {
 function encodeSession(session: AppSession) {
   const payload = Buffer.from(
     JSON.stringify({
-      version: 1,
+      version: 2,
       payload: session,
     } satisfies SessionEnvelope),
   ).toString("base64url");
@@ -68,11 +68,28 @@ function decodeSession(value: string | undefined): AppSession | null {
   try {
     const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as SessionEnvelope;
 
-    if (decoded.version !== 1) {
+    if (decoded.version !== 2) {
       return null;
     }
 
-    return decoded.payload;
+    const session = decoded.payload;
+
+    if (
+      !session ||
+      typeof session.email !== "string" ||
+      typeof session.role !== "string" ||
+      typeof session.displayName !== "string" ||
+      typeof session.companyId !== "string" ||
+      typeof session.siteId !== "string" ||
+      typeof session.businessAreaId !== "string" ||
+      typeof session.companyName !== "string" ||
+      typeof session.siteName !== "string" ||
+      typeof session.businessAreaName !== "string"
+    ) {
+      return null;
+    }
+
+    return session;
   } catch {
     return null;
   }
