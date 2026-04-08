@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
@@ -405,6 +405,28 @@ export function MetricsPanel({
   const [transferSuggestions, setTransferSuggestions] = useState<TransferSuggestion[]>([]);
   const [selectedTransferSuggestionIndex, setSelectedTransferSuggestionIndex] = useState(0);
   const [transferMessage, setTransferMessage] = useState("");
+
+  useEffect(() => {
+    setSelectedTimeCodeId((current) =>
+      snapshot.timeCodes.some((timeCode) => timeCode.id === current) ? current : snapshot.timeCodes[0]?.id ?? "",
+    );
+    setSourceScheduleId((current) =>
+      snapshot.schedules.some((schedule) => schedule.id === current) ? current : snapshot.schedules[0]?.id ?? "",
+    );
+    setTargetScheduleId((current) => {
+      if (snapshot.schedules.some((schedule) => schedule.id === current)) {
+        return current;
+      }
+
+      return snapshot.schedules[1]?.id ?? snapshot.schedules[0]?.id ?? "";
+    });
+    setSelectedTransferCompetencyIds((current) =>
+      current.filter((competencyId) => snapshot.competencies.some((competency) => competency.id === competencyId)),
+    );
+    setTransferSuggestions([]);
+    setSelectedTransferSuggestionIndex(0);
+    setTransferMessage("");
+  }, [snapshot]);
 
   function toggleTransferCompetency(competencyId: string) {
     setSelectedTransferCompetencyIds((current) =>

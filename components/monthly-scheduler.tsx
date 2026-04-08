@@ -897,6 +897,30 @@ export function MonthlyScheduler({
   }, [forcedScheduleId, selectedScheduleId]);
 
   useEffect(() => {
+    const nextAssignments = buildAssignmentIndex(initialSnapshot.assignments);
+
+    setSnapshot(initialSnapshot);
+    setCurrentMonth(initialSnapshot.month);
+    setSelectedScheduleId((current) =>
+      forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
+        ? forcedScheduleId
+        : initialSnapshot.schedules.some((schedule) => schedule.id === current)
+        ? current
+        : initialSnapshot.schedules[0]?.id ?? "",
+    );
+    setBaselineAssignments(nextAssignments);
+    setDraftAssignments(nextAssignments);
+    setStatusMessage("");
+    setSelectedCell(null);
+    setEditorCell(null);
+    setSelectedSetAnchorDate(null);
+    setSelectedCoverageCompetencyId(null);
+    setCopiedSetTemplate(null);
+    setDragRange(null);
+    window.localStorage.removeItem(STORAGE_KEY);
+  }, [forcedScheduleId, initialSnapshot]);
+
+  useEffect(() => {
     if (!selectedCell) {
       return;
     }

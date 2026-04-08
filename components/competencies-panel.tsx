@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { saveCompetencies } from "@/app/actions";
 import type { CompetencyUpdate, SaveCompetenciesInput, SchedulerSnapshot } from "@/lib/types";
@@ -82,6 +82,13 @@ export function CompetenciesPanel({
   const [deletedCompetencyIds, setDeletedCompetencyIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
+
+  useEffect(() => {
+    setCompetencies(cloneCompetencies(initialCompetencies));
+    setBaselineCompetencies(cloneCompetencies(initialCompetencies));
+    setDeletedCompetencyIds([]);
+    setStatusMessage("");
+  }, [initialCompetencies]);
 
   const baselineMap = useMemo(
     () => new Map(baselineCompetencies.map((competency) => [competency.id, normalizeCompetency(competency)])),

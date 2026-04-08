@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { claimOvertimePosting, releaseOvertimePosting } from "@/app/actions";
@@ -252,6 +252,24 @@ export function OvertimePanel({
         .sort((left, right) => left.name.localeCompare(right.name)),
     [snapshot.schedules],
   );
+
+  useEffect(() => {
+    setClaimingEmployeeId((current) => {
+      if (viewer.role === "worker") {
+        return viewer.employeeId ?? "";
+      }
+
+      return allEmployees.some((employee) => employee.id === current) ? current : allEmployees[0]?.id ?? "";
+    });
+    setSelectedScheduleFilter((current) =>
+      current === "all" || snapshot.schedules.some((schedule) => schedule.id === current) ? current : "all",
+    );
+    setSelectedCompetencyFilter((current) =>
+      current === "all" || snapshot.competencies.some((competency) => competency.id === current) ? current : "all",
+    );
+    setSelectedPostingByGroup({});
+    setStatusMessage("");
+  }, [allEmployees, snapshot.competencies, snapshot.schedules, viewer.employeeId, viewer.role]);
 
   const postings = useMemo<OvertimePosting[]>(() => {
     const nextPostings: OvertimePosting[] = [];

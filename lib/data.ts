@@ -624,36 +624,42 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       .in("month_key", windowMonths),
   ]);
 
-  const results = [
-    unitsResult,
-    competenciesResult,
-    timeCodesResult,
-    schedulesResult,
-    employeesResult,
-    employeeCompetenciesResult,
-    assignmentsResult,
-    overtimeClaimsResult,
-    completedSetsResult,
-  ];
-
-  if (results.some((result) => result.error)) {
+  if (schedulesResult.error) {
     return emptySnapshot(month);
   }
 
+  const queryErrors = [
+    ["production_units", unitsResult.error],
+    ["competencies", competenciesResult.error],
+    ["time_codes", timeCodesResult.error],
+    ["employees", employeesResult.error],
+    ["employee_competencies", employeeCompetenciesResult.error],
+    ["schedule_assignments", assignmentsResult.error],
+    ["overtime_claims", overtimeClaimsResult.error],
+    ["completed_sets", completedSetsResult.error],
+  ].filter((entry) => entry[1]);
+
+  if (queryErrors.length > 0) {
+    console.error(
+      "Scheduler snapshot loaded with partial data:",
+      queryErrors.map(([name, error]) => `${name}: ${error?.message ?? "unknown error"}`),
+    );
+  }
+
   const employeesBySchedule = buildEmployeesBySchedule(
-    employeesResult.data as EmployeeRow[],
-    employeeCompetenciesResult.data as EmployeeCompetencyRow[],
+    (employeesResult.data as EmployeeRow[] | null) ?? [],
+    (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
 
   return {
     month,
-    productionUnits: mapProductionUnits(unitsResult.data as ProductionUnitRow[]),
-    competencies: mapCompetencies(competenciesResult.data as CompetencyRow[]),
-    timeCodes: mapTimeCodes(timeCodesResult.data as TimeCodeRow[]),
-    schedules: mapSchedules(schedulesResult.data as ScheduleRow[], employeesBySchedule),
-    assignments: mapAssignments(assignmentsResult.data as AssignmentRow[]),
-    overtimeClaims: mapOvertimeClaims(overtimeClaimsResult.data as OvertimeClaimRow[]),
-    completedSets: mapCompletedSets(completedSetsResult.data as CompletedSetRow[]),
+    productionUnits: mapProductionUnits((unitsResult.data as ProductionUnitRow[] | null) ?? []),
+    competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
+    timeCodes: mapTimeCodes((timeCodesResult.data as TimeCodeRow[] | null) ?? []),
+    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
+    assignments: mapAssignments((assignmentsResult.data as AssignmentRow[] | null) ?? []),
+    overtimeClaims: mapOvertimeClaims((overtimeClaimsResult.data as OvertimeClaimRow[] | null) ?? []),
+    completedSets: mapCompletedSets((completedSetsResult.data as CompletedSetRow[] | null) ?? []),
   };
 }
 

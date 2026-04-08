@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { savePersonnel } from "@/app/actions";
 import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
@@ -378,6 +378,18 @@ export function PersonnelPanel({
     .map((employee) => normalizeEmployee(employee))
     .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee));
   const hasChanges = dirtyUpdates.length > 0 || deletedEmployeeIds.length > 0;
+
+  useEffect(() => {
+    setEmployees(cloneEmployees(initialEmployees));
+    setBaselineEmployees(cloneEmployees(initialEmployees));
+    setDeletedEmployeeIds([]);
+    setStatusMessage("");
+    setSearch("");
+    setSelectedScheduleFilter("all");
+    setSelectedCompetencyFilter("all");
+    setPendingCsvImport(null);
+    setDraftEmployee(null);
+  }, [initialEmployees]);
   const hasValidationErrors = invalidEmployeeIds.size > 0;
   const draftEmployeeIssues = draftEmployee ? getEmployeeIssues(draftEmployee) : [];
 

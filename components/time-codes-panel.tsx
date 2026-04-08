@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { saveTimeCodes } from "@/app/actions";
 import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate } from "@/lib/types";
@@ -70,6 +70,13 @@ export function TimeCodesPanel({
   const [deletedTimeCodeIds, setDeletedTimeCodeIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
+
+  useEffect(() => {
+    setTimeCodes(cloneTimeCodes(initialTimeCodes));
+    setBaselineTimeCodes(cloneTimeCodes(initialTimeCodes));
+    setDeletedTimeCodeIds([]);
+    setStatusMessage("");
+  }, [initialTimeCodes]);
 
   const baselineMap = useMemo(
     () => new Map(baselineTimeCodes.map((timeCode) => [timeCode.id, normalizeTimeCode(timeCode)])),

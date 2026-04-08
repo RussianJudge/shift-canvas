@@ -4,6 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { getSupabaseAdminClient } from "@/lib/supabase";
 import type { AppRole, AppSession } from "@/lib/types";
 
 /**
@@ -25,6 +26,27 @@ const SESSION_SECRET =
 type SessionEnvelope = {
   version: 2;
   payload: AppSession;
+};
+
+type ProfileSessionRow = {
+  email: string;
+  display_name: string;
+  role: AppRole;
+  schedule_id: string | null;
+  employee_id: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+type NamedScopeRow = {
+  id: string;
+  name: string;
+};
+
+type ScheduleNameRow = {
+  id: string;
+  name: string;
 };
 
 /** Produces the signature used to detect tampering on the stored session cookie. */
@@ -107,7 +129,106 @@ function decodeSession(value: string | undefined): AppSession | null {
 /** Reads the current signed session cookie, if one exists. */
 export async function getAppSession() {
   const cookieStore = await cookies();
-  return decodeSession(cookieStore.get(SESSION_COOKIE)?.value);
+  const cookieSession = decodeSession(cookieStore.get(SESSION_COOKIE)?.value);
+
+  if (!cookieSession) {
+    return null;
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return cookieSession;
+  }
+
+  /**
+   * Refreshes the effective app session from `public.profiles`.
+   *
+   * The signed cookie is still useful as a fast identity snapshot, but profile
+   * rows can change outside the app (for example, an admin updates a role or
+   * business area in Supabase). Re-hydrating here makes those changes take
+   * effect on the next request instead of leaving the browser trapped behind a
+   * stale cookie until the user manually signs out.
+   */
+  const profileResult = await supabase
+    .from("profiles")
+    .select("email, display_name, role, schedule_id, employee_id, company_id, site_id, business_area_id")
+    .eq("email", cookieSession.email)
+    .maybeSingle();
+
+  if (profileResult.error) {
+    return cookieSession;
+  }
+
+  const profile = profileResult.data as ProfileSessionRow | null;
+
+  if (!profile) {
+    return null;
+  }
+
+  let scheduleName = cookieSession.scheduleName ?? null;
+  let companyName = cookieSession.companyName;
+  let siteName = cookieSession.siteName;
+  let businessAreaName = cookieSession.businessAreaName;
+
+  const [scheduleResult, companyResult, siteResult, businessAreaResult] = await Promise.all([
+    profile.schedule_id
+      ? supabase
+          .from("schedules")
+          .select("id, name")
+          .eq("id", profile.schedule_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    supabase
+      .from("companies")
+      .select("id, name")
+      .eq("id", profile.company_id)
+      .maybeSingle(),
+    supabase
+      .from("sites")
+      .select("id, name")
+      .eq("id", profile.site_id)
+      .maybeSingle(),
+    supabase
+      .from("business_areas")
+      .select("id, name")
+      .eq("id", profile.business_area_id)
+      .maybeSingle(),
+  ]);
+
+  if (!scheduleResult.error) {
+    scheduleName = (scheduleResult.data as ScheduleNameRow | null)?.name ?? null;
+  }
+
+  if (!companyResult.error) {
+    companyName = (companyResult.data as NamedScopeRow | null)?.name ?? companyName;
+  }
+
+  if (!siteResult.error) {
+    siteName = (siteResult.data as NamedScopeRow | null)?.name ?? siteName;
+  }
+
+  if (!businessAreaResult.error) {
+    businessAreaName = (businessAreaResult.data as NamedScopeRow | null)?.name ?? businessAreaName;
+  }
+
+  return {
+    ...cookieSession,
+    role: profile.role,
+    displayName: profile.display_name || profile.email.split("@")[0] || cookieSession.displayName,
+    scheduleId: profile.schedule_id,
+    employeeId: profile.employee_id,
+    scheduleName,
+    companyId: profile.company_id,
+    siteId: profile.site_id,
+    businessAreaId: profile.business_area_id,
+    companyName,
+    siteName,
+    businessAreaName,
+    activeSiteId: profile.role === "admin" ? cookieSession.activeSiteId ?? null : profile.site_id,
+    activeBusinessAreaId:
+      profile.role === "admin" ? cookieSession.activeBusinessAreaId ?? null : profile.business_area_id,
+  };
 }
 
 /** Writes a fresh signed session cookie after sign-in. */
