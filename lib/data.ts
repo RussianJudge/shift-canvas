@@ -10,7 +10,7 @@ import {
   shiftForDate,
   shiftMonthKey,
 } from "@/lib/scheduling";
-import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
+import { getSupabaseAdminClient } from "@/lib/supabase";
 import type {
   AppSession,
   CompletedSet,
@@ -34,7 +34,7 @@ import type {
  * in-memory structure used by the rest of the app. The central goal is to keep
  * the UI mostly unaware of table layouts and row naming conventions.
  */
-type DataClient = NonNullable<ReturnType<typeof getSupabaseAdminClient> | ReturnType<typeof getSupabaseServerClient>>;
+type DataClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
 
 type ScheduleRow = {
   id: string;
@@ -189,9 +189,17 @@ type MutualShiftApplicationDateRow = {
   business_area_id: string;
 };
 
-/** Prefers the admin client, but can fall back to a server-scoped client. */
+/**
+ * Returns the only Supabase client that can reliably read this app's data.
+ *
+ * The app does not yet attach a real Supabase Auth user session to server-side
+ * reads. That means an anon client is not an acceptable fallback here, because
+ * RLS policies on the core tables allow `authenticated` reads, not anonymous
+ * reads. Falling back to anon would make the app look like it has "no data"
+ * when the real problem is "the runtime has no privileged database client."
+ */
 function getDataClient() {
-  return getSupabaseAdminClient() ?? getSupabaseServerClient();
+  return getSupabaseAdminClient();
 }
 
 /**
@@ -555,6 +563,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Scheduler snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return emptySnapshot(month);
   }
 
@@ -625,6 +634,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
   ]);
 
   if (schedulesResult.error) {
+    console.error("Scheduler snapshot failed to load schedules:", schedulesResult.error.message);
     return emptySnapshot(month);
   }
 
@@ -667,6 +677,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Personnel snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return emptySnapshot(month);
   }
 
@@ -719,6 +730,7 @@ export async function getMetricsOvertimeHistory(today: string, session?: AppSess
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Metrics overtime history unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return [];
   }
 
@@ -742,6 +754,7 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Metrics assignment history unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return [];
   }
 
@@ -765,6 +778,7 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Schedules snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return emptySnapshot(month);
   }
 
@@ -800,6 +814,7 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Competencies snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return emptySnapshot(month);
   }
 
@@ -847,6 +862,7 @@ export async function getTimeCodesSnapshot(month: string, session?: AppSession |
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Time code snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return emptySnapshot(month);
   }
 
@@ -874,6 +890,7 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Overtime month discovery unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return [currentMonth];
   }
 
@@ -950,6 +967,7 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
   const supabase = getDataClient();
 
   if (!supabase) {
+    console.error("Mutuals snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return {
       month,
       schedules: schedulerSnapshot.schedules,
