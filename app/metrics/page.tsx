@@ -16,7 +16,7 @@ function getCurrentDateKey(timeZone: string) {
 }
 
 export default async function MetricsPage() {
-  const session = await requireAppSession(["admin"]);
+  const session = await requireAppSession(["admin", "leader"]);
   const month = getCurrentMonthKey("America/Edmonton");
   const today = getCurrentDateKey("America/Edmonton");
   const snapshot = await getSchedulerSnapshot(month, session);

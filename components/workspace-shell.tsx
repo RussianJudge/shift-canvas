@@ -263,6 +263,7 @@ export function WorkspaceShell({
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
           { href: "/mutuals", label: "Mutuals", icon: <MutualsIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
+          { href: "/metrics", label: "Metrics", icon: <MetricsIcon /> },
         ]
       : [
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
