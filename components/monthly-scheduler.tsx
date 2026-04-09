@@ -41,7 +41,7 @@ import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, Time
  * render detail.
  */
 const STORAGE_KEY = "shift-canvas-drafts-v2";
-type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
+type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes: string | null };
 type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
 type SelectedCell = { employeeId: string; date: string };
 type DragRange = {
@@ -301,7 +301,8 @@ function buildDraftDelta(
 
     if (
       baseline?.competencyId === draft?.competencyId &&
-      baseline?.timeCodeId === draft?.timeCodeId
+      baseline?.timeCodeId === draft?.timeCodeId &&
+      baseline?.notes === draft?.notes
     ) {
       return delta;
     }
@@ -343,6 +344,7 @@ function getDefaultSelection(_shiftKind: ShiftKind, _timeCodes: TimeCode[]): Ass
   return {
     competencyId: null,
     timeCodeId: null,
+    notes: null,
   };
 }
 
@@ -468,6 +470,7 @@ function buildSetAutofillPlan({
       nextAssignments[createAssignmentKey(employee.id, day.date)] = {
         competencyId: bestCompetencyId,
         timeCodeId: null,
+        notes: null,
       };
       assignedCells += 1;
     }
@@ -509,6 +512,12 @@ function AssignmentModal({
   onApply: (selection: AssignmentSelection) => void;
   onClose: () => void;
 }) {
+  const [draftSelection, setDraftSelection] = useState<AssignmentSelection>(selection);
+
+  useEffect(() => {
+    setDraftSelection(selection);
+  }, [selection]);
+
   if (!selectedEmployee || !selectedDate) {
     return null;
   }
@@ -544,13 +553,14 @@ function AssignmentModal({
                 key={timeCode.id}
                 type="button"
                 className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
-                  selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
+                  draftSelection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
                 }`}
                 onClick={() =>
-                  onApply({
+                  setDraftSelection((current) => ({
+                    ...current,
                     competencyId: null,
                     timeCodeId: timeCode.id,
-                  })
+                  }))
                 }
               >
                 {timeCode.code}
@@ -567,13 +577,14 @@ function AssignmentModal({
                 key={competency.id}
                 type="button"
                 className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
-                  selection.competencyId === competency.id ? "legend-pill--selected" : ""
+                  draftSelection.competencyId === competency.id ? "legend-pill--selected" : ""
                 }`}
                 onClick={() =>
-                  onApply({
+                  setDraftSelection((current) => ({
+                    ...current,
                     competencyId: competency.id,
                     timeCodeId: null,
-                  })
+                  }))
                 }
               >
                 {getCompactCode(competency.code)}
@@ -582,15 +593,35 @@ function AssignmentModal({
           </div>
         </div>
 
+        <div className="assignment-modal__group">
+          <label className="assignment-modal__label" htmlFor="assignment-note">
+            Note
+          </label>
+          <textarea
+            id="assignment-note"
+            className="assignment-modal__note-input"
+            rows={3}
+            value={draftSelection.notes ?? ""}
+            placeholder="Add a note for this cell"
+            onChange={(event) =>
+              setDraftSelection((current) => ({
+                ...current,
+                notes: event.target.value || null,
+              }))
+            }
+          />
+        </div>
+
         <div className="assignment-modal__footer">
           <button
             type="button"
             className="ghost-button"
-            onClick={() =>
-              onApply(getDefaultSelection(shiftKind, timeCodes))
-            }
+            onClick={() => setDraftSelection(getDefaultSelection(shiftKind, timeCodes))}
           >
             Clear assignment
+          </button>
+          <button type="button" className="primary-button" onClick={() => onApply(draftSelection)}>
+            Save cell
           </button>
         </div>
       </section>
@@ -842,12 +873,13 @@ export function MonthlyScheduler({
     }
 
     const shiftKind = shiftForDate(employeeSchedule, date);
-    const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null };
-    const draft = draftAssignments[key] ?? { competencyId: null, timeCodeId: null };
+    const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
+    const draft = draftAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
 
     if (
       baseline.competencyId === draft.competencyId &&
-      baseline.timeCodeId === draft.timeCodeId
+      baseline.timeCodeId === draft.timeCodeId &&
+      baseline.notes === draft.notes
     ) {
       return [];
     }
@@ -858,7 +890,7 @@ export function MonthlyScheduler({
         date,
         competencyId: draft.competencyId,
         timeCodeId: draft.timeCodeId,
-        notes: null,
+        notes: draft.notes,
         shiftKind,
       },
     ];
@@ -878,7 +910,7 @@ export function MonthlyScheduler({
           draftAssignments,
           snapshot.timeCodes,
         )
-      : { competencyId: null, timeCodeId: null };
+      : { competencyId: null, timeCodeId: null, notes: null };
   const editorEmployeeCompetencies = editorEmployee
     ? editorEmployee.competencyIds.map((competencyId) => competencyMap[competencyId]).filter(isCompetency)
     : [];
@@ -1047,7 +1079,8 @@ export function MonthlyScheduler({
 
               if (
                 defaultSelection.competencyId === dragRange.selection.competencyId &&
-                defaultSelection.timeCodeId === dragRange.selection.timeCodeId
+                defaultSelection.timeCodeId === dragRange.selection.timeCodeId &&
+                defaultSelection.notes === dragRange.selection.notes
               ) {
                 delete nextAssignments[key];
                 continue;
@@ -1158,7 +1191,8 @@ export function MonthlyScheduler({
     const key = createAssignmentKey(employeeId, date);
     const shouldResetToDefault =
       defaultSelection.competencyId === selection.competencyId &&
-      defaultSelection.timeCodeId === selection.timeCodeId;
+      defaultSelection.timeCodeId === selection.timeCodeId &&
+      defaultSelection.notes === selection.notes;
 
     startTransition(() => {
       setDraftAssignments((current) => {
@@ -1894,6 +1928,7 @@ function EmployeeRow({
           : {
               competencyId: null,
               timeCodeId: null,
+              notes: null,
             };
         const overtimeClaimCompetencyId =
           !selection.competencyId && !selection.timeCodeId
@@ -1904,11 +1939,13 @@ function EmployeeRow({
             ? {
                 competencyId: overtimeClaimCompetencyId,
                 timeCodeId: null,
+                notes: selection.notes,
               }
             : selection;
         const activeCompetency = effectiveSelection.competencyId ? competencyMap[effectiveSelection.competencyId] : null;
         const activeTimeCode = effectiveSelection.timeCodeId ? timeCodeMap[effectiveSelection.timeCodeId] : null;
         const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
+        const hasCellNote = Boolean(selection.notes?.trim());
         const isSelected =
           selectedCell?.employeeId === employee.sourceEmployeeId && selectedCell.date === day.date;
         const isInDragRange =
@@ -1934,7 +1971,7 @@ function EmployeeRow({
               isInDragRange ? "shift-cell--range" : ""
             } ${highlightedMissingDates.has(day.date) && setDates.has(day.date) ? "shift-cell--missing-column" : ""} ${
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
-            }`}
+            } ${hasCellNote ? "shift-cell--has-note" : ""}`}
             onPointerDown={(event) => {
               if (event.button !== 0 || !canEdit || !isBorrowedCellVisible || isLockedCell) {
                 return;
@@ -1962,8 +1999,10 @@ function EmployeeRow({
               }}
               disabled={!canEdit || !isBorrowedCellVisible || isLockedCell}
               aria-label={`${employee.name} ${day.date} assignment`}
+              title={selection.notes ?? undefined}
             >
               {isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""}
+              {hasCellNote ? <span className="shift-cell__note-indicator" aria-hidden="true" /> : null}
             </button>
           </div>
         );

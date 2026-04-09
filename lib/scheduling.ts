@@ -276,11 +276,12 @@ export function getSuggestedCompetencyId(employee: Pick<Employee, "id" | "compet
 
 /** Converts persisted assignment rows into O(1) lookup shape for UI logic. */
 export function buildAssignmentIndex(assignments: StoredAssignment[]) {
-  return assignments.reduce<Record<string, { competencyId: string | null; timeCodeId: string | null }>>(
+  return assignments.reduce<Record<string, { competencyId: string | null; timeCodeId: string | null; notes: string | null }>>(
     (index, assignment) => {
       index[createAssignmentKey(assignment.employeeId, assignment.date)] = {
         competencyId: assignment.competencyId,
         timeCodeId: assignment.timeCodeId,
+        notes: assignment.notes ?? null,
       };
       return index;
     },

@@ -498,7 +498,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   const scopedEmployeeMap = scopedSnapshot ? getEmployeeMap(scopedSnapshot.schedules) : {};
 
   const rowsToUpsert = input.updates
-    .filter((update) => update.competencyId || update.timeCodeId)
+    .filter((update) => update.competencyId || update.timeCodeId || (update.notes?.trim().length ?? 0) > 0)
     .map((update) => {
       const employee = scopedEmployeeMap[update.employeeId];
       const rowScope = employee
@@ -514,14 +514,14 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
         assignment_date: update.date,
         competency_id: update.competencyId,
         time_code_id: update.timeCodeId,
-        notes: update.notes ?? null,
+        notes: update.notes?.trim() ? update.notes.trim() : null,
         shift_kind: update.shiftKind,
         ...toDatabaseScope(rowScope),
       };
     });
 
   const rowsToDelete = input.updates
-    .filter((update) => !update.competencyId && !update.timeCodeId)
+    .filter((update) => !update.competencyId && !update.timeCodeId && !(update.notes?.trim().length ?? 0))
     .map((update) => ({
       employee_id: update.employeeId,
       assignment_date: update.date,
