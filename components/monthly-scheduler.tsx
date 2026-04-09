@@ -1311,6 +1311,28 @@ export function MonthlyScheduler({
     }
 
     startSetCompletionTransition(async () => {
+      /**
+       * Completing a set causes the page to revalidate from Supabase. If we let
+       * that happen while there are still unsaved local draft cells, the fresh
+       * server snapshot will not include those browser-only edits and they will
+       * appear to "turn into OFF". Saving first keeps time codes and
+       * competencies in sync with the completion toggle.
+       */
+      if (dirtyUpdates.length > 0) {
+        const saveResult = await saveAssignments({
+          scheduleId: activeSchedule.id,
+          updates: dirtyUpdates,
+        });
+
+        setStatusMessage(saveResult.message);
+
+        if (!saveResult.ok) {
+          return;
+        }
+
+        setBaselineAssignments(cloneAssignments(draftAssignments));
+      }
+
       const result = await setScheduleSetCompletion({
         scheduleId: activeSchedule.id,
         month: currentMonth,
