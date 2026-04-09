@@ -51,7 +51,6 @@ type ScheduleRow = {
 type EmployeeRow = {
   id: string;
   schedule_id: string;
-  unit_id: string;
   full_name: string;
   role_title: string | null;
   company_id: string;
@@ -423,7 +422,6 @@ function buildEmployeesBySchedule(
       name: row.full_name,
       role: row.role_title ?? "Operator",
       scheduleId: row.schedule_id,
-      unitId: row.unit_id,
       competencyIds: competenciesByEmployee[row.id] ?? [],
       companyId: row.company_id,
       siteId: row.site_id,
@@ -650,11 +648,11 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       session,
     ).order("name"),
     applySessionScope(
-      supabase
+        supabase
       .from("employees")
-      .select("id, schedule_id, unit_id, full_name, role_title, company_id, site_id, business_area_id"),
-      session,
-    )
+      .select("id, schedule_id, full_name, role_title, company_id, site_id, business_area_id"),
+        session,
+      )
       .eq("is_active", true)
       .order("full_name"),
     applySessionScope(
@@ -751,7 +749,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
       applySessionScope(
         supabase
         .from("employees")
-        .select("id, schedule_id, unit_id, full_name, role_title, company_id, site_id, business_area_id"),
+        .select("id, schedule_id, full_name, role_title, company_id, site_id, business_area_id"),
         session,
       )
         .eq("is_active", true)
@@ -859,7 +857,7 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
       session,
     ).order("name"),
     applySessionScope(
-      supabase.from("employees").select("id, schedule_id, unit_id, full_name, role_title, company_id, site_id, business_area_id"),
+      supabase.from("employees").select("id, schedule_id, full_name, role_title, company_id, site_id, business_area_id"),
       session,
     ).eq("is_active", true),
   ]);
@@ -915,7 +913,7 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     applySessionScope(
       supabase
       .from("employees")
-      .select("id, schedule_id, unit_id, full_name, role_title, company_id, site_id, business_area_id"),
+      .select("id, schedule_id, full_name, role_title, company_id, site_id, business_area_id"),
       session,
     )
       .eq("is_active", true)

@@ -49,7 +49,6 @@ export interface Employee extends OrganizationScope {
   name: string;
   role: string;
   scheduleId: string;
-  unitId: string;
   competencyIds: string[];
 }
 
@@ -204,7 +203,6 @@ export interface PersonnelUpdate {
   name: string;
   role: string;
   scheduleId: string;
-  unitId: string;
   competencyIds: string[];
 }
 

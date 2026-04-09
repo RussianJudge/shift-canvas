@@ -2060,24 +2060,17 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   const scheduleIds = Array.from(new Set(input.updates.map((update) => update.scheduleId).filter(Boolean)));
-  const unitIds = Array.from(new Set(input.updates.map((update) => update.unitId).filter(Boolean)));
   const competencyIds = Array.from(
     new Set(input.updates.flatMap((update) => update.competencyIds).filter(Boolean)),
   );
   const employeeIdsToDelete = Array.from(new Set(input.deletedEmployeeIds.filter(Boolean)));
 
-  const [scheduleRowsResult, unitRowsResult, competencyRowsResult, deleteEmployeeRowsResult] = await Promise.all([
+  const [scheduleRowsResult, competencyRowsResult, deleteEmployeeRowsResult] = await Promise.all([
     scheduleIds.length > 0
       ? supabase
           .from("schedules")
           .select("id, company_id, site_id, business_area_id")
           .in("id", scheduleIds)
-      : Promise.resolve({ data: [], error: null }),
-    unitIds.length > 0
-      ? supabase
-          .from("production_units")
-          .select("id, company_id, site_id, business_area_id")
-          .in("id", unitIds)
       : Promise.resolve({ data: [], error: null }),
     competencyIds.length > 0
       ? supabase
@@ -2094,7 +2087,6 @@ export async function savePersonnel(input: SavePersonnelInput) {
   ]);
 
   const scheduleScopeRows = (scheduleRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
-  const unitScopeRows = (unitRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
   const competencyScopeRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
   const deleteEmployeeScopeRows = (deleteEmployeeRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
 
@@ -2102,13 +2094,6 @@ export async function savePersonnel(input: SavePersonnelInput) {
     return {
       ok: false,
       message: "Could not resolve one or more shifts for the personnel update.",
-    };
-  }
-
-  if (unitRowsResult.error || unitScopeRows.length !== unitIds.length) {
-    return {
-      ok: false,
-      message: "Could not resolve one or more business areas for the selected teams.",
     };
   }
 
@@ -2127,7 +2112,6 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   const scheduleScopeMap = new Map(scheduleScopeRows.map((row) => [row.id, scopeFromRow(row)]));
-  const unitScopeMap = new Map(unitScopeRows.map((row) => [row.id, scopeFromRow(row)]));
   const competencyScopeMap = new Map(competencyScopeRows.map((row) => [row.id, scopeFromRow(row)]));
 
   for (const scheduleScope of scheduleScopeMap.values()) {
@@ -2135,15 +2119,6 @@ export async function savePersonnel(input: SavePersonnelInput) {
       return {
         ok: false,
         message: "You do not have permission to assign personnel to one or more selected shifts.",
-      };
-    }
-  }
-
-  for (const unitScope of unitScopeMap.values()) {
-    if (!canAccessScope(session, unitScope)) {
-      return {
-        ok: false,
-        message: "You do not have permission to use one or more selected business areas.",
       };
     }
   }
@@ -2176,22 +2151,6 @@ export async function savePersonnel(input: SavePersonnelInput) {
       };
     }
 
-    if (update.unitId) {
-      const unitScope = unitScopeMap.get(update.unitId);
-
-      if (
-        !unitScope ||
-        unitScope.companyId !== scheduleScope.companyId ||
-        unitScope.siteId !== scheduleScope.siteId ||
-        unitScope.businessAreaId !== scheduleScope.businessAreaId
-      ) {
-        return {
-          ok: false,
-          message: "Employees must stay inside the same company, site, and business area as their assigned business unit.",
-        };
-      }
-    }
-
     for (const competencyId of update.competencyIds) {
       const competencyScope = competencyScopeMap.get(competencyId);
 
@@ -2215,7 +2174,6 @@ export async function savePersonnel(input: SavePersonnelInput) {
     full_name: update.name.trim(),
     role_title: update.role.trim(),
     schedule_id: update.scheduleId,
-    unit_id: update.unitId,
     is_active: true,
   }));
 

@@ -17,7 +17,6 @@ type EditableEmployee = {
   name: string;
   role: string;
   scheduleId: string;
-  unitId: string;
   competencyIds: string[];
 };
 
@@ -46,7 +45,6 @@ function createDraftEmployee() {
     name: "",
     role: "",
     scheduleId: "",
-    unitId: "",
     competencyIds: [],
   };
 }
@@ -243,7 +241,6 @@ function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
     name: employee.name.trim(),
     role: employee.role.trim(),
     scheduleId: employee.scheduleId,
-    unitId: employee.unitId,
     competencyIds: [...employee.competencyIds].sort(),
   };
 }
@@ -281,7 +278,6 @@ export function PersonnelPanel({
           name: employee.name,
           role: employee.role,
           scheduleId: employee.scheduleId,
-          unitId: employee.unitId,
           competencyIds: employee.competencyIds,
         })),
       ),
@@ -302,7 +298,6 @@ export function PersonnelPanel({
     [...snapshot.schedules]
       .sort((left, right) => left.employees.length - right.employees.length || left.name.localeCompare(right.name))[0] ??
     snapshot.schedules[0];
-  const defaultUnit = snapshot.productionUnits[0];
 
   const scheduleNameById = useMemo(
     () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
@@ -490,22 +485,17 @@ export function PersonnelPanel({
   }
 
   function handleAddEmployee() {
-    if (!defaultSchedule || !defaultUnit) {
+    if (!defaultSchedule) {
       setStatusMessage("Complete setup first.");
       return;
     }
 
-    setDraftEmployee((current) =>
-      current ?? {
-        ...createDraftEmployee(),
-        unitId: defaultUnit.id,
-      },
-    );
+    setDraftEmployee((current) => current ?? createDraftEmployee());
     setStatusMessage("");
   }
 
   function handleCreateEmployee() {
-    if (!draftEmployee || !defaultUnit) {
+    if (!draftEmployee) {
       return;
     }
 
@@ -516,7 +506,7 @@ export function PersonnelPanel({
       return;
     }
 
-    setEmployees((current) => [{ ...draftEmployee, unitId: draftEmployee.unitId || defaultUnit.id }, ...current]);
+    setEmployees((current) => [{ ...draftEmployee }, ...current]);
     setDraftEmployee(null);
     setStatusMessage("Employee added to the table. Save when you're ready.");
   }
@@ -529,7 +519,7 @@ export function PersonnelPanel({
       return;
     }
 
-    if (!defaultSchedule || !defaultUnit) {
+    if (!defaultSchedule) {
       setStatusMessage("Complete setup first.");
       return;
     }
@@ -630,7 +620,6 @@ export function PersonnelPanel({
         name: csvName || existing?.name || "New Employee",
         role: csvRole || existing?.role || "Operator",
         scheduleId: resolvedScheduleId || existing?.scheduleId || defaultSchedule.id,
-        unitId: existing?.unitId || defaultUnit.id,
         competencyIds:
           resolvedCompetencyIds.length > 0
             ? [...new Set(resolvedCompetencyIds)]
