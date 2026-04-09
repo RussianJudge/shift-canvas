@@ -86,15 +86,11 @@ function toDatabaseScope(scope: ActionScope) {
 function getSessionScope(session: Awaited<ReturnType<typeof getAppSession>>): ActionScope | null {
   const siteId =
     session?.role === "admin"
-      ? session.activeSiteId === undefined
-        ? session.siteId
-        : session.activeSiteId
+      ? session.activeSiteId ?? session.siteId
       : session?.siteId;
   const businessAreaId =
     session?.role === "admin"
-      ? session.activeBusinessAreaId === undefined
-        ? session.businessAreaId
-        : session.activeBusinessAreaId
+      ? session.activeBusinessAreaId ?? session.businessAreaId
       : session?.businessAreaId;
 
   if (!session?.companyId || !siteId || !businessAreaId) {
