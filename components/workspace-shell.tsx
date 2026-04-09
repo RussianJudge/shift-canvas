@@ -9,7 +9,6 @@ import { BrandLockup } from "@/components/brand-lockup";
 import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
-const SIDEBAR_COLLAPSE_MIN_WIDTH = 450;
 
 type AdminScopePayload = {
   companyName: string;
@@ -167,35 +166,17 @@ export function WorkspaceShell({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(null);
   const [isUpdatingScope, startScopeTransition] = useTransition();
-  const [canCollapseSidebar, setCanCollapseSidebar] = useState(true);
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    const updateCollapseAvailability = () => {
-      const nextCanCollapse = window.innerWidth >= SIDEBAR_COLLAPSE_MIN_WIDTH;
-      setCanCollapseSidebar(nextCanCollapse);
-
-      if (!nextCanCollapse) {
-        setIsCollapsed(false);
-      }
-    };
-
     const storedPreference = window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY);
 
-    updateCollapseAvailability();
-
-    if (storedPreference === "true" && window.innerWidth >= SIDEBAR_COLLAPSE_MIN_WIDTH) {
+    if (storedPreference === "true") {
       setIsCollapsed(true);
     }
-
-    window.addEventListener("resize", updateCollapseAvailability);
-
-    return () => {
-      window.removeEventListener("resize", updateCollapseAvailability);
-    };
   }, []);
 
   useEffect(() => {
@@ -203,13 +184,8 @@ export function WorkspaceShell({
       return;
     }
 
-    if (!canCollapseSidebar) {
-      window.localStorage.removeItem(SIDEBAR_COLLAPSE_STORAGE_KEY);
-      return;
-    }
-
     window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, String(isCollapsed));
-  }, [canCollapseSidebar, isCollapsed]);
+  }, [isCollapsed]);
 
   useEffect(() => {
     if (viewer.role !== "admin") {
@@ -295,17 +271,15 @@ export function WorkspaceShell({
               <BrandLockup size="compact" />
               <span>{viewer.role === "admin" ? "Administrator" : viewer.displayName}</span>
             </div>
-            {canCollapseSidebar ? (
-              <button
-                type="button"
-                className="sidebar-toggle"
-                onClick={() => setIsCollapsed((current) => !current)}
-                aria-label={isCollapsed ? "Expand toolbar" : "Collapse toolbar"}
-                aria-pressed={isCollapsed}
-              >
-                <SidebarToggleIcon collapsed={isCollapsed} />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="sidebar-toggle"
+              onClick={() => setIsCollapsed((current) => !current)}
+              aria-label={isCollapsed ? "Expand toolbar" : "Collapse toolbar"}
+              aria-pressed={isCollapsed}
+            >
+              <SidebarToggleIcon collapsed={isCollapsed} />
+            </button>
           </div>
 
           <nav className="workspace-nav" aria-label="Primary">
@@ -321,84 +295,86 @@ export function WorkspaceShell({
                 <span>{adminScope.companyName}</span>
               </div>
 
-              <label className="field">
-                <span>Site</span>
-                <select
-                  value={adminScope.activeSiteId ?? ""}
-                  onChange={(event) => {
-                    const nextSiteId = event.target.value || null;
+              <div className="workspace-admin-scope__fields">
+                <label className="field workspace-admin-scope__field">
+                  <span>Site</span>
+                  <select
+                    value={adminScope.activeSiteId ?? ""}
+                    onChange={(event) => {
+                      const nextSiteId = event.target.value || null;
 
-                    startScopeTransition(async () => {
-                      const result = await setAdminViewingScope({
-                        siteId: nextSiteId,
-                        businessAreaId: null,
+                      startScopeTransition(async () => {
+                        const result = await setAdminViewingScope({
+                          siteId: nextSiteId,
+                          businessAreaId: null,
+                        });
+
+                        if (!result.ok) {
+                          return;
+                        }
+
+                        setAdminScope((current) =>
+                          current
+                            ? {
+                                ...current,
+                                activeSiteId: nextSiteId,
+                                activeBusinessAreaId: null,
+                              }
+                            : current,
+                        );
+                        router.refresh();
                       });
+                    }}
+                    disabled={isUpdatingScope}
+                  >
+                    <option value="">All sites</option>
+                    {adminScope.sites.map((site) => (
+                      <option key={site.id} value={site.id}>
+                        {site.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-                      if (!result.ok) {
-                        return;
-                      }
+                <label className="field workspace-admin-scope__field">
+                  <span>Business Area</span>
+                  <select
+                    value={adminScope.activeBusinessAreaId ?? ""}
+                    onChange={(event) => {
+                      const nextBusinessAreaId = event.target.value || null;
 
-                      setAdminScope((current) =>
-                        current
-                          ? {
-                              ...current,
-                              activeSiteId: nextSiteId,
-                              activeBusinessAreaId: null,
-                            }
-                          : current,
-                      );
-                      router.refresh();
-                    });
-                  }}
-                  disabled={isUpdatingScope}
-                >
-                  <option value="">All sites</option>
-                  {adminScope.sites.map((site) => (
-                    <option key={site.id} value={site.id}>
-                      {site.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                      startScopeTransition(async () => {
+                        const result = await setAdminViewingScope({
+                          siteId: adminScope.activeSiteId ?? null,
+                          businessAreaId: nextBusinessAreaId,
+                        });
 
-              <label className="field">
-                <span>Business Area</span>
-                <select
-                  value={adminScope.activeBusinessAreaId ?? ""}
-                  onChange={(event) => {
-                    const nextBusinessAreaId = event.target.value || null;
+                        if (!result.ok) {
+                          return;
+                        }
 
-                    startScopeTransition(async () => {
-                      const result = await setAdminViewingScope({
-                        siteId: adminScope.activeSiteId ?? null,
-                        businessAreaId: nextBusinessAreaId,
+                        setAdminScope((current) =>
+                          current
+                            ? {
+                                ...current,
+                                activeBusinessAreaId: nextBusinessAreaId,
+                              }
+                            : current,
+                        );
+                        router.refresh();
                       });
-
-                      if (!result.ok) {
-                        return;
-                      }
-
-                      setAdminScope((current) =>
-                        current
-                          ? {
-                              ...current,
-                              activeBusinessAreaId: nextBusinessAreaId,
-                            }
-                          : current,
-                      );
-                      router.refresh();
-                    });
-                  }}
-                  disabled={isUpdatingScope || !adminScope.activeSiteId}
-                >
-                  <option value="">{adminScope.activeSiteId ? "All business areas" : "Select a site first"}</option>
-                  {filteredBusinessAreas.map((businessArea) => (
-                    <option key={businessArea.id} value={businessArea.id}>
-                      {businessArea.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                    }}
+                    disabled={isUpdatingScope || !adminScope.activeSiteId}
+                  >
+                    <option value="">{adminScope.activeSiteId ? "All business areas" : "Select a site first"}</option>
+                    {filteredBusinessAreas.map((businessArea) => (
+                      <option key={businessArea.id} value={businessArea.id}>
+                        {businessArea.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </section>
           ) : null}
 

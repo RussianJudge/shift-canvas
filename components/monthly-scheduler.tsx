@@ -1601,7 +1601,7 @@ export function MonthlyScheduler({
         </div>
       </div>
 
-      <div className="workspace-toolbar">
+      <div className="workspace-toolbar workspace-toolbar--scheduler">
         {canSwitchSchedule ? (
           <label className="field">
             <span>Shift</span>
