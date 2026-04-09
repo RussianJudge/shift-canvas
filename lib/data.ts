@@ -289,6 +289,59 @@ function emptySnapshot(month: string, overrides: Partial<SchedulerSnapshot> = {}
   };
 }
 
+/**
+ * Logs query failures in a consistent way across the different snapshot
+ * loaders.
+ *
+ * This matters because several pages intentionally degrade to an "empty"
+ * snapshot instead of throwing. Without explicit logs, a real database/query
+ * failure can look identical to "there is simply no data in this scope."
+ */
+function logSnapshotQueryErrors(
+  context: string,
+  errors: Array<[string, { message?: string } | null | undefined]>,
+) {
+  const failingQueries = errors.filter((entry) => entry[1]);
+
+  if (failingQueries.length === 0) {
+    return;
+  }
+
+  console.error(
+    `${context} loaded with query errors:`,
+    failingQueries.map(([name, error]) => `${name}: ${error?.message ?? "unknown error"}`),
+  );
+}
+
+/**
+ * Logs when a scoped loader returns nothing at all.
+ *
+ * This is especially useful after the company/site/business-area rollout,
+ * because "empty because the business area truly has no data" and "empty
+ * because the scope/session is wrong" look identical in the UI.
+ */
+function logScopedEmptyState(
+  context: string,
+  counts: Record<string, number>,
+  session?: AppSession | null,
+) {
+  const totalRows = Object.values(counts).reduce((sum, count) => sum + count, 0);
+
+  if (totalRows > 0) {
+    return;
+  }
+
+  console.error(`${context} returned an empty scoped dataset`, {
+    role: session?.role ?? null,
+    companyId: session?.companyId ?? null,
+    siteId: session?.siteId ?? null,
+    businessAreaId: session?.businessAreaId ?? null,
+    activeSiteId: session?.activeSiteId ?? null,
+    activeBusinessAreaId: session?.activeBusinessAreaId ?? null,
+    counts,
+  });
+}
+
 function getMonthBounds(month: string) {
   const [year, monthIndex] = month.split("-").map(Number);
   return {
@@ -709,9 +762,27 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
       ),
     ]);
 
+  logSnapshotQueryErrors("Personnel snapshot", [
+    ["production_units", unitsResult.error],
+    ["competencies", competenciesResult.error],
+    ["schedules", schedulesResult.error],
+    ["employees", employeesResult.error],
+    ["employee_competencies", employeeCompetenciesResult.error],
+  ]);
+
   const employeesBySchedule = buildEmployeesBySchedule(
     (employeesResult.data as EmployeeRow[] | null) ?? [],
     (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
+  );
+
+  logScopedEmptyState(
+    "Personnel snapshot",
+    {
+      schedules: (schedulesResult.data as ScheduleRow[] | null)?.length ?? 0,
+      employees: (employeesResult.data as EmployeeRow[] | null)?.length ?? 0,
+      competencies: (competenciesResult.data as CompetencyRow[] | null)?.length ?? 0,
+    },
+    session,
   );
 
   return {
@@ -793,9 +864,23 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
     ).eq("is_active", true),
   ]);
 
+  logSnapshotQueryErrors("Schedules snapshot", [
+    ["schedules", schedulesResult.error],
+    ["employees", employeesResult.error],
+  ]);
+
   const employeesBySchedule = buildEmployeesBySchedule(
     (employeesResult.data as EmployeeRow[] | null) ?? [],
     [],
+  );
+
+  logScopedEmptyState(
+    "Schedules snapshot",
+    {
+      schedules: (schedulesResult.data as ScheduleRow[] | null)?.length ?? 0,
+      employees: (employeesResult.data as EmployeeRow[] | null)?.length ?? 0,
+    },
+    session,
   );
 
   return {
@@ -839,6 +924,13 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
       supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
       session,
     ),
+  ]);
+
+  logSnapshotQueryErrors("Competencies snapshot", [
+    ["competencies", competenciesResult.error],
+    ["schedules", schedulesResult.error],
+    ["employees", employeesResult.error],
+    ["employee_competencies", employeeCompetenciesResult.error],
   ]);
 
   const employeesBySchedule = buildEmployeesBySchedule(
