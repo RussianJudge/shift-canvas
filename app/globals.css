@@ -2960,7 +2960,7 @@ select {
   }
 }
 
-@media (max-width: 450px) {
+@media (max-width: 500px) {
   .workspace-content {
     padding: 0.65rem;
   }
