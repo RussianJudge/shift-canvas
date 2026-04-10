@@ -117,6 +117,32 @@ function getTimeCodeWindowStart(today: string, window: TimeCodeWindow) {
   }
 }
 
+/** Returns the last day inside the selected snapshot month. */
+function getMonthEndDateKey(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const monthEnd = new Date(Date.UTC(year, monthNumber, 0));
+  return monthEnd.toISOString().slice(0, 10);
+}
+
+/**
+ * Anchors rolling windows to the visible metrics month, but never extends into
+ * the future when the selected month is current or ahead of today.
+ */
+function getMetricsAnchorDate(month: string, today: string) {
+  const monthEnd = getMonthEndDateKey(month);
+  return monthEnd < today ? monthEnd : today;
+}
+
+/** Compact label used to show which day the rolling windows are anchored to. */
+function formatAnchorDateLabel(isoDate: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${isoDate}T00:00:00Z`));
+}
+
 /** Summarizes one chosen time code across teams for the selected history window. */
 function getTeamTimeCodeMetrics(
   snapshot: SchedulerSnapshot,
@@ -367,17 +393,21 @@ export function MetricsPanel({
   snapshot,
   overtimeHistory,
   assignmentHistory,
-  metricsAnchorDate,
+  today,
 }: {
   snapshot: SchedulerSnapshot;
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
-  metricsAnchorDate: string;
+  today: string;
 }) {
   const router = useRouter();
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
   const [timeCodeWindow, setTimeCodeWindow] = useState<TimeCodeWindow>("30d");
   const [selectedTimeCodeId, setSelectedTimeCodeId] = useState(snapshot.timeCodes[0]?.id ?? "");
+  const metricsAnchorDate = useMemo(
+    () => getMetricsAnchorDate(snapshot.month, today),
+    [snapshot.month, today],
+  );
   const filteredOvertimeHistory = useMemo(() => {
     const start = getWindowStart(metricsAnchorDate, overtimeWindow);
     return overtimeHistory.filter((claim) => claim.date >= start && claim.date <= metricsAnchorDate);
@@ -556,7 +586,10 @@ export function MetricsPanel({
 
         <section className="metrics-section">
           <div className="metrics-section__header">
-            <h2 className="metrics-section__title">Overtime Incurred By Team</h2>
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Overtime Incurred By Team</h2>
+              <p className="toolbar-status">Anchored to {formatAnchorDateLabel(metricsAnchorDate)}</p>
+            </div>
             <div className="metrics-window-toggle" aria-label="Overtime time window">
               {(["30d", "90d", "1y", "ytd"] as OvertimeWindow[]).map((window) => (
                 <button
@@ -635,6 +668,7 @@ export function MetricsPanel({
               ) : null}
             </div>
             <div className="metrics-section__controls">
+              <p className="toolbar-status">Anchored to {formatAnchorDateLabel(metricsAnchorDate)}</p>
               <div className="metrics-window-toggle" aria-label="Time code time window">
                 {(["30d", "90d", "1y", "ytd"] as TimeCodeWindow[]).map((window) => (
                   <button
