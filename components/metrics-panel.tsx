@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 
 import {
   formatMonthLabel,
   getEmployeeMap,
+  shiftMonthKey,
 } from "@/lib/scheduling";
 import type { Competency, OvertimeClaim, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
 
@@ -366,24 +368,25 @@ export function MetricsPanel({
   snapshot,
   overtimeHistory,
   assignmentHistory,
-  today,
+  metricsAnchorDate,
 }: {
   snapshot: SchedulerSnapshot;
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
-  today: string;
+  metricsAnchorDate: string;
 }) {
+  const router = useRouter();
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
   const [timeCodeWindow, setTimeCodeWindow] = useState<TimeCodeWindow>("30d");
   const [selectedTimeCodeId, setSelectedTimeCodeId] = useState(snapshot.timeCodes[0]?.id ?? "");
   const filteredOvertimeHistory = useMemo(() => {
-    const start = getWindowStart(today, overtimeWindow);
-    return overtimeHistory.filter((claim) => claim.date >= start && claim.date <= today);
-  }, [overtimeHistory, overtimeWindow, today]);
+    const start = getWindowStart(metricsAnchorDate, overtimeWindow);
+    return overtimeHistory.filter((claim) => claim.date >= start && claim.date <= metricsAnchorDate);
+  }, [overtimeHistory, overtimeWindow, metricsAnchorDate]);
   const filteredAssignmentHistory = useMemo(() => {
-    const start = getTimeCodeWindowStart(today, timeCodeWindow);
-    return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= today);
-  }, [assignmentHistory, timeCodeWindow, today]);
+    const start = getTimeCodeWindowStart(metricsAnchorDate, timeCodeWindow);
+    return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
+  }, [assignmentHistory, timeCodeWindow, metricsAnchorDate]);
   const teamMetrics = useMemo(
     () => getTeamMetrics(snapshot, filteredOvertimeHistory),
     [snapshot, filteredOvertimeHistory],
@@ -405,6 +408,11 @@ export function MetricsPanel({
   const [transferSuggestions, setTransferSuggestions] = useState<TransferSuggestion[]>([]);
   const [selectedTransferSuggestionIndex, setSelectedTransferSuggestionIndex] = useState(0);
   const [transferMessage, setTransferMessage] = useState("");
+
+  function navigateMonth(delta: number) {
+    const nextMonth = shiftMonthKey(snapshot.month, delta);
+    router.push(`/metrics?month=${nextMonth}`, { scroll: false });
+  }
 
   useEffect(() => {
     setSelectedTimeCodeId((current) =>
@@ -482,9 +490,17 @@ export function MetricsPanel({
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--metrics">
-        <div className="field field--static">
-          <span>Month</span>
-          <strong>{formatMonthLabel(snapshot.month)}</strong>
+        <div className="metrics-month-nav">
+          <button type="button" className="ghost-button" onClick={() => navigateMonth(-1)}>
+            Prev month
+          </button>
+          <div className="field field--static">
+            <span>Month</span>
+            <strong>{formatMonthLabel(snapshot.month)}</strong>
+          </div>
+          <button type="button" className="ghost-button" onClick={() => navigateMonth(1)}>
+            Next month
+          </button>
         </div>
       </div>
 
