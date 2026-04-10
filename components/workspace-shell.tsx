@@ -9,6 +9,7 @@ import { BrandLockup } from "@/components/brand-lockup";
 import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
+const FORCED_COMPACT_SIDEBAR_MAX_WIDTH = 500;
 
 type AdminScopePayload = {
   companyName: string;
@@ -164,6 +165,7 @@ export function WorkspaceShell({
    * feel like the app is fighting their layout preference.
    */
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isForcedCompactSidebar, setIsForcedCompactSidebar] = useState(false);
   const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(null);
   const [isUpdatingScope, startScopeTransition] = useTransition();
 
@@ -174,9 +176,18 @@ export function WorkspaceShell({
 
     const storedPreference = window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY);
 
-    if (storedPreference === "true") {
-      setIsCollapsed(true);
-    }
+    const updateForcedCompactSidebar = () => {
+      const nextIsForcedCompact = window.innerWidth < FORCED_COMPACT_SIDEBAR_MAX_WIDTH;
+      setIsForcedCompactSidebar(nextIsForcedCompact);
+      setIsCollapsed(nextIsForcedCompact ? true : storedPreference === "true");
+    };
+
+    updateForcedCompactSidebar();
+    window.addEventListener("resize", updateForcedCompactSidebar);
+
+    return () => {
+      window.removeEventListener("resize", updateForcedCompactSidebar);
+    };
   }, []);
 
   useEffect(() => {
@@ -184,8 +195,12 @@ export function WorkspaceShell({
       return;
     }
 
+    if (isForcedCompactSidebar) {
+      return;
+    }
+
     window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, String(isCollapsed));
-  }, [isCollapsed]);
+  }, [isCollapsed, isForcedCompactSidebar]);
 
   useEffect(() => {
     if (viewer.role !== "admin") {
@@ -271,15 +286,17 @@ export function WorkspaceShell({
               <BrandLockup size="compact" />
               <span>{viewer.role === "admin" ? "Administrator" : viewer.displayName}</span>
             </div>
-            <button
-              type="button"
-              className="sidebar-toggle"
-              onClick={() => setIsCollapsed((current) => !current)}
-              aria-label={isCollapsed ? "Expand toolbar" : "Collapse toolbar"}
-              aria-pressed={isCollapsed}
-            >
-              <SidebarToggleIcon collapsed={isCollapsed} />
-            </button>
+            {!isForcedCompactSidebar ? (
+              <button
+                type="button"
+                className="sidebar-toggle"
+                onClick={() => setIsCollapsed((current) => !current)}
+                aria-label={isCollapsed ? "Expand toolbar" : "Collapse toolbar"}
+                aria-pressed={isCollapsed}
+              >
+                <SidebarToggleIcon collapsed={isCollapsed} />
+              </button>
+            ) : null}
           </div>
 
           <nav className="workspace-nav" aria-label="Primary">
