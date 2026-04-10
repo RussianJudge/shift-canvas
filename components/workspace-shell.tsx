@@ -9,7 +9,7 @@ import { BrandLockup } from "@/components/brand-lockup";
 import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
-const FORCED_COMPACT_SIDEBAR_MAX_WIDTH = 500;
+const FORCED_COMPACT_SIDEBAR_MAX_WIDTH = 600;
 
 type AdminScopePayload = {
   companyName: string;
