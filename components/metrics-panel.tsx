@@ -42,8 +42,8 @@ type TeamMetric = {
 type TeamTimeCodeMetric = {
   scheduleId: string;
   scheduleName: string;
+  entryCount: number;
   peopleCount: number;
-  shiftCount: number;
   topPeople: Array<{
     employeeId: string;
     employeeName: string;
@@ -130,8 +130,7 @@ function getTeamTimeCodeMetrics(
 
   return snapshot.schedules.map((schedule) => {
     const scheduleAssignments = matchingAssignments.filter((assignment) => {
-      const employee = employeeMap[assignment.employeeId];
-      return employee?.scheduleId === schedule.id;
+      return (assignment.scheduleId ?? employeeMap[assignment.employeeId]?.scheduleId) === schedule.id;
     });
 
     const countsByEmployee = scheduleAssignments.reduce<Record<string, number>>((counts, assignment) => {
@@ -155,8 +154,8 @@ function getTeamTimeCodeMetrics(
     return {
       scheduleId: schedule.id,
       scheduleName: schedule.name,
+      entryCount: scheduleAssignments.length,
       peopleCount: Object.keys(countsByEmployee).length,
-      shiftCount: scheduleAssignments.length,
       topPeople,
     };
   });
@@ -400,7 +399,7 @@ export function MetricsPanel({
     () => getTeamTimeCodeMetrics(snapshot, filteredAssignmentHistory, selectedTimeCodeId),
     [snapshot, filteredAssignmentHistory, selectedTimeCodeId],
   );
-  const maxTimeCodeShifts = Math.max(1, ...teamTimeCodeMetrics.map((team) => team.shiftCount));
+  const maxTimeCodeShifts = Math.max(1, ...teamTimeCodeMetrics.map((team) => team.entryCount));
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [sourceScheduleId, setSourceScheduleId] = useState(snapshot.schedules[0]?.id ?? "");
   const [targetScheduleId, setTargetScheduleId] = useState(snapshot.schedules[1]?.id ?? snapshot.schedules[0]?.id ?? "");
@@ -664,11 +663,11 @@ export function MetricsPanel({
                     <div>
                       <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
                       <h3 className="metrics-card__title">
-                        {team.peopleCount} people with this code
+                        {team.entryCount} schedule entr{team.entryCount === 1 ? "y" : "ies"} with this code
                       </h3>
                     </div>
                     <div className="metrics-card__stats">
-                      <span>{team.shiftCount} coded shift{team.shiftCount === 1 ? "" : "s"}</span>
+                      <span>{team.peopleCount} people</span>
                     </div>
                   </div>
 
@@ -676,7 +675,7 @@ export function MetricsPanel({
                     <span
                       className="metrics-bar-fill metrics-bar-fill--slate"
                       style={{
-                        width: `${team.shiftCount === 0 ? 0 : Math.max(10, (team.shiftCount / maxTimeCodeShifts) * 100)}%`,
+                        width: `${team.entryCount === 0 ? 0 : Math.max(10, (team.entryCount / maxTimeCodeShifts) * 100)}%`,
                       }}
                     />
                   </div>

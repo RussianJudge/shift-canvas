@@ -83,6 +83,7 @@ type EmployeeCompetencyRow = {
 
 type AssignmentRow = {
   employee_id: string;
+  schedule_id: string | null;
   assignment_date: string;
   competency_id: string | null;
   time_code_id: string | null;
@@ -443,6 +444,7 @@ function mapSchedules(scheduleRows: ScheduleRow[], employeesBySchedule: Record<s
 function mapAssignments(rows: AssignmentRow[]) {
   return rows.map<StoredAssignment>((row) => ({
     employeeId: row.employee_id,
+    scheduleId: row.schedule_id,
     date: row.assignment_date,
     competencyId: row.competency_id,
     timeCodeId: row.time_code_id,
@@ -547,7 +549,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     applySessionScope(
       supabase
       .from("schedule_assignments")
-      .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
+      .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
       session,
     )
       .gte("assignment_date", monthStart)
@@ -715,7 +717,7 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
   const result = await applySessionScope(
     supabase
     .from("schedule_assignments")
-    .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
+    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
     session,
   )
     .gte("assignment_date", getYearStart(today))

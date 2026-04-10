@@ -10,6 +10,7 @@ import type { ShiftKind } from "@/lib/types";
  */
 export type MutualAssignmentRow = {
   employee_id: string;
+  schedule_id: string;
   assignment_date: string;
   competency_id: string | null;
   time_code_id: string | null;
@@ -140,6 +141,7 @@ export function buildAcceptedMutualAssignmentRows({
 
     return {
       employee_id: employeeId,
+      schedule_id: targetScheduleId,
       assignment_date: date,
       competency_id: null,
       time_code_id: mutualTimeCodeId,

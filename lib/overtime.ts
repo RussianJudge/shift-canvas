@@ -9,6 +9,7 @@ import type { ShiftKind } from "@/lib/types";
  */
 export type OvertimeAssignmentRow = {
   employee_id: string;
+  schedule_id?: string;
   assignment_date: string;
   competency_id: string | null;
   time_code_id: string | null;
@@ -104,6 +105,7 @@ export function buildSwapOvertimeAssignmentRows({
   coverageCompetencyId,
   swapEmployeeId,
   dates,
+  targetScheduleId,
   shiftKindForDate,
 }: {
   claimantEmployeeId: string;
@@ -111,10 +113,12 @@ export function buildSwapOvertimeAssignmentRows({
   coverageCompetencyId: string;
   swapEmployeeId: string;
   dates: string[];
+  targetScheduleId: string;
   shiftKindForDate: (date: string) => ShiftKind;
 }) {
   return dates.map<OvertimeAssignmentRow>((date) => ({
     employee_id: swapEmployeeId,
+    schedule_id: targetScheduleId,
     assignment_date: date,
     competency_id: coverageCompetencyId,
     time_code_id: null,

@@ -163,7 +163,7 @@ async function restoreSwappedAssignmentsForClaims(
     const notePrefix = `OT|claimant:${group.employeeId}|claim:${group.competencyId}|`;
     const { data, error } = await supabase
       .from("schedule_assignments")
-      .select("employee_id, assignment_date, notes, shift_kind, company_id, site_id, business_area_id")
+      .select("employee_id, schedule_id, assignment_date, notes, shift_kind, company_id, site_id, business_area_id")
       .in("assignment_date", group.dates)
       .like("notes", `${notePrefix}%`);
 
@@ -176,6 +176,7 @@ async function restoreSwappedAssignmentsForClaims(
 
     const restoreRows = ((data as Array<{
       employee_id: string;
+      schedule_id: string | null;
       assignment_date: string;
       notes: string | null;
       shift_kind: ShiftKind;
@@ -196,6 +197,7 @@ async function restoreSwappedAssignmentsForClaims(
         return [
           {
             employee_id: row.employee_id,
+            schedule_id: row.schedule_id ?? undefined,
             assignment_date: row.assignment_date,
             competency_id: parsed.originalCompetencyId,
             time_code_id: null,
@@ -511,6 +513,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
 
       return {
         employee_id: update.employeeId,
+        schedule_id: input.scheduleId,
         assignment_date: update.date,
         competency_id: update.competencyId,
         time_code_id: update.timeCodeId,
@@ -948,6 +951,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       coverageCompetencyId,
       swapEmployeeId: swapEmployee.id,
       dates: input.dates,
+      targetScheduleId: input.scheduleId,
       shiftKindForDate: (date) => shiftForDate(targetSchedule, date),
     });
   }
@@ -990,6 +994,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
   const assignmentRows = input.dates.map((date) => ({
     employee_id: input.employeeId,
+    schedule_id: input.scheduleId,
     assignment_date: date,
     competency_id: input.competencyId,
     time_code_id: null,
@@ -1022,6 +1027,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
   swapAssignmentRows = swapAssignmentRows.map((row) => ({
     ...row,
+    schedule_id: input.scheduleId,
     ...toDatabaseScope({
       companyId: targetSchedule.companyId ?? session.companyId ?? "",
       siteId: targetSchedule.siteId ?? session.siteId ?? "",
@@ -1613,7 +1619,7 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
   );
   const existingAssignmentsResult = await supabase
     .from("schedule_assignments")
-    .select("employee_id, assignment_date, competency_id, time_code_id, company_id, site_id, business_area_id")
+    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, company_id, site_id, business_area_id")
     .in("employee_id", [posting.owner_employee_id, application.applicant_employee_id])
     .in("assignment_date", allMutualDates);
 
@@ -1911,7 +1917,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
 
   const mutualAssignmentsResult = await supabase
     .from("schedule_assignments")
-    .select("employee_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
+    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
     .like("notes", `MUT|posting:${input.postingId}|%`);
 
   if (mutualAssignmentsResult.error) {
@@ -1923,6 +1929,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
 
   const mutualAssignments = ((mutualAssignmentsResult.data as Array<{
     employee_id: string;
+    schedule_id: string | null;
     assignment_date: string;
     competency_id: string | null;
     time_code_id: string | null;
@@ -1943,6 +1950,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
     return [
       {
         employee_id: row.employee_id,
+        schedule_id: row.schedule_id ?? parsed.targetScheduleId ?? "",
         assignment_date: row.assignment_date,
         competency_id: parsed.originalCompetencyId,
         time_code_id: parsed.originalTimeCodeId,

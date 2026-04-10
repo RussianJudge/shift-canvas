@@ -64,6 +64,7 @@ export interface Schedule extends OrganizationScope {
 
 export interface StoredAssignment extends OrganizationScope {
   employeeId: string;
+  scheduleId?: string | null;
   date: string;
   competencyId: string | null;
   timeCodeId: string | null;
