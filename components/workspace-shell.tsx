@@ -9,7 +9,7 @@ import { BrandLockup } from "@/components/brand-lockup";
 import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
-const FORCED_COMPACT_SIDEBAR_MAX_WIDTH = 600;
+const MOBILE_SIDEBAR_MAX_WIDTH = 600;
 
 type AdminScopePayload = {
   companyName: string;
@@ -125,6 +125,15 @@ function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+/** Hamburger-style button used to reveal the navigation drawer on phones. */
+function MobileMenuIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 7h14M5 12h14M5 17h14" />
+    </svg>
+  );
+}
+
 /** Small presentational wrapper so nav link semantics stay consistent everywhere. */
 function NavLink({
   href,
@@ -160,12 +169,14 @@ export function WorkspaceShell({
   viewer: AppSession;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   /**
    * The sidebar remembers the user's last choice so a page navigation does not
    * feel like the app is fighting their layout preference.
    */
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isForcedCompactSidebar, setIsForcedCompactSidebar] = useState(false);
+  const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(null);
   const [isUpdatingScope, startScopeTransition] = useTransition();
 
@@ -176,17 +187,18 @@ export function WorkspaceShell({
 
     const storedPreference = window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY);
 
-    const updateForcedCompactSidebar = () => {
-      const nextIsForcedCompact = window.innerWidth < FORCED_COMPACT_SIDEBAR_MAX_WIDTH;
-      setIsForcedCompactSidebar(nextIsForcedCompact);
-      setIsCollapsed(nextIsForcedCompact ? true : storedPreference === "true");
+    const updateSidebarMode = () => {
+      const nextIsMobileSidebarMode = window.innerWidth < MOBILE_SIDEBAR_MAX_WIDTH;
+      setIsMobileSidebarMode(nextIsMobileSidebarMode);
+      setIsMobileSidebarOpen(false);
+      setIsCollapsed(nextIsMobileSidebarMode ? false : storedPreference === "true");
     };
 
-    updateForcedCompactSidebar();
-    window.addEventListener("resize", updateForcedCompactSidebar);
+    updateSidebarMode();
+    window.addEventListener("resize", updateSidebarMode);
 
     return () => {
-      window.removeEventListener("resize", updateForcedCompactSidebar);
+      window.removeEventListener("resize", updateSidebarMode);
     };
   }, []);
 
@@ -195,12 +207,20 @@ export function WorkspaceShell({
       return;
     }
 
-    if (isForcedCompactSidebar) {
+    if (isMobileSidebarMode) {
       return;
     }
 
     window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, String(isCollapsed));
-  }, [isCollapsed, isForcedCompactSidebar]);
+  }, [isCollapsed, isMobileSidebarMode]);
+
+  useEffect(() => {
+    if (!isMobileSidebarMode) {
+      return;
+    }
+
+    setIsMobileSidebarOpen(false);
+  }, [pathname, isMobileSidebarMode]);
 
   useEffect(() => {
     if (viewer.role !== "admin") {
@@ -279,14 +299,22 @@ export function WorkspaceShell({
 
   return (
     <main className="shell">
-      <section className={`workspace-frame ${isCollapsed ? "workspace-frame--collapsed" : ""}`}>
-        <aside className={`workspace-sidebar ${isCollapsed ? "workspace-sidebar--collapsed" : ""}`}>
+      <section
+        className={`workspace-frame ${isCollapsed ? "workspace-frame--collapsed" : ""} ${
+          isMobileSidebarMode ? "workspace-frame--mobile" : ""
+        }`}
+      >
+        <aside
+          className={`workspace-sidebar ${isCollapsed ? "workspace-sidebar--collapsed" : ""} ${
+            isMobileSidebarMode ? "workspace-sidebar--mobile" : ""
+          } ${isMobileSidebarOpen ? "workspace-sidebar--mobile-open" : ""}`}
+        >
           <div className="workspace-brand-row">
             <div className="workspace-brand">
               <BrandLockup size="compact" />
               <span>{viewer.role === "admin" ? "Administrator" : viewer.displayName}</span>
             </div>
-            {!isForcedCompactSidebar ? (
+            {!isMobileSidebarMode ? (
               <button
                 type="button"
                 className="sidebar-toggle"
@@ -299,7 +327,7 @@ export function WorkspaceShell({
             ) : null}
           </div>
 
-          <nav className="workspace-nav" aria-label="Primary">
+          <nav id="workspace-primary-navigation" className="workspace-nav" aria-label="Primary">
             {navItems.map((item) => (
               <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} />
             ))}
@@ -406,7 +434,35 @@ export function WorkspaceShell({
           </form>
         </aside>
 
-        <div className="workspace-content">{children}</div>
+        {isMobileSidebarMode && isMobileSidebarOpen ? (
+          <button
+            type="button"
+            className="workspace-mobile-backdrop"
+            aria-label="Close navigation menu"
+            onClick={() => setIsMobileSidebarOpen(false)}
+          />
+        ) : null}
+
+        <div className="workspace-content">
+          {isMobileSidebarMode ? (
+            <div className="workspace-mobile-toolbar">
+              <button
+                type="button"
+                className="ghost-button workspace-mobile-toggle"
+                onClick={() => setIsMobileSidebarOpen((current) => !current)}
+                aria-expanded={isMobileSidebarOpen}
+                aria-controls="workspace-primary-navigation"
+              >
+                <span className="workspace-nav-icon workspace-mobile-toggle__icon">
+                  <MobileMenuIcon />
+                </span>
+                <strong>{isMobileSidebarOpen ? "Close Menu" : "Open Menu"}</strong>
+              </button>
+            </div>
+          ) : null}
+
+          {children}
+        </div>
       </section>
     </main>
   );

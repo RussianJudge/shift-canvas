@@ -1,13 +1,7 @@
 import "server-only";
 
 import {
-  buildAssignmentIndex,
-  createSetRangeKey,
   getEmployeeMap,
-  getExtendedMonthDays,
-  getMonthDays,
-  getWorkedSetDays,
-  shiftForDate,
   shiftMonthKey,
 } from "@/lib/scheduling";
 import { getSupabaseAdminClient } from "@/lib/supabase";
@@ -485,118 +479,9 @@ function mapCompletedSets(rows: CompletedSetRow[]) {
   }));
 }
 
-/**
- * Determines whether a month should appear in the overtime month filter.
- *
- * A month is considered relevant when it still has a staffing shortfall or when
- * claims already exist for that month's overtime postings.
- */
-function monthHasOvertimePostings(snapshot: SchedulerSnapshot) {
-  const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
-  const employeeMap = getEmployeeMap(snapshot.schedules);
-  const monthDays = getMonthDays(snapshot.month);
-  const extendedMonthDays = getExtendedMonthDays(snapshot.month);
-  const completedSetRangeKeys = new Set(
-    snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
-  );
-  const processedKeys = new Set<string>();
-
-  for (const schedule of snapshot.schedules) {
-    for (const day of monthDays) {
-      if (shiftForDate(schedule, day.date) === "OFF") {
-        continue;
-      }
-
-      const setDays = getWorkedSetDays(schedule, extendedMonthDays, day.date);
-
-      if (setDays.length === 0) {
-        continue;
-      }
-
-      const setKey = createSetRangeKey(
-        schedule.id,
-        setDays[0].date,
-        setDays[setDays.length - 1].date,
-      );
-
-      if (processedKeys.has(setKey) || !completedSetRangeKeys.has(setKey)) {
-        continue;
-      }
-
-      processedKeys.add(setKey);
-
-      const segments = setDays.reduce<Array<{ dates: string[]; shiftKind: "DAY" | "NIGHT" }>>((allSegments, setDay) => {
-        const shiftKind = shiftForDate(schedule, setDay.date);
-
-        if (shiftKind === "OFF") {
-          return allSegments;
-        }
-
-        const currentSegment = allSegments[allSegments.length - 1];
-
-        if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
-          allSegments.push({
-            shiftKind,
-            dates: [setDay.date],
-          });
-          return allSegments;
-        }
-
-        currentSegment.dates.push(setDay.date);
-        return allSegments;
-      }, []);
-
-      for (const segment of segments) {
-        if (segment.dates[0]?.slice(0, 7) !== snapshot.month) {
-          continue;
-        }
-
-        for (const competency of snapshot.competencies) {
-          const hasClaimedPosting = snapshot.overtimeClaims.some(
-            (claim) =>
-              claim.scheduleId === schedule.id &&
-              claim.competencyId === competency.id &&
-              segment.dates.includes(claim.date),
-          );
-
-          if (hasClaimedPosting) {
-            return true;
-          }
-
-          for (const date of segment.dates) {
-            let filledCount = 0;
-
-            for (const employee of schedule.employees) {
-              const selection = assignmentIndex[`${employee.id}:${date}`];
-
-              if (selection?.competencyId === competency.id) {
-                filledCount += 1;
-              }
-            }
-
-            for (const claim of snapshot.overtimeClaims) {
-              const claimEmployee = employeeMap[claim.employeeId];
-
-              if (
-                claim.scheduleId === schedule.id &&
-                claim.competencyId === competency.id &&
-                claim.date === date &&
-                claimEmployee?.scheduleId !== schedule.id
-              ) {
-                filledCount += 1;
-              }
-            }
-
-            if (filledCount < competency.requiredStaff) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return false;
+/** Normalizes a full date into the `YYYY-MM` month key used in routing. */
+function getMonthKeyFromDate(isoDate: string) {
+  return isoDate.slice(0, 7);
 }
 
 /**
@@ -984,16 +869,33 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
     return [currentMonth];
   }
 
-  const completedSetsResult = await applySessionScope(
-    supabase
-    .from("completed_sets")
-    .select("month_key")
-    ,
-    session,
-  )
-    .order("month_key");
+  /**
+   * The old implementation rebuilt full scheduler snapshots for every
+   * candidate month just to populate the month dropdown. That made Overtime
+   * page loads scale with "number of months ever completed", which is much more
+   * work than a filter control should require.
+   *
+   * For the picker we only need to know which months have meaningful overtime
+   * history or completed sets that could produce postings. The board itself
+   * will still calculate the exact postings for the selected month after the
+   * page loads.
+   */
+  const [completedSetsResult, overtimeClaimsResult] = await Promise.all([
+    applySessionScope(
+      supabase
+        .from("completed_sets")
+        .select("month_key"),
+      session,
+    ).order("month_key"),
+    applySessionScope(
+      supabase
+        .from("overtime_claims")
+        .select("assignment_date"),
+      session,
+    ).order("assignment_date"),
+  ]);
 
-  if (completedSetsResult.error) {
+  if (completedSetsResult.error || overtimeClaimsResult.error) {
     return [currentMonth];
   }
 
@@ -1002,16 +904,14 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
       [
         currentMonth,
         ...(((completedSetsResult.data as Array<{ month_key: string }> | null) ?? []).map((row) => row.month_key)),
+        ...(((overtimeClaimsResult.data as Array<{ assignment_date: string }> | null) ?? []).map((row) =>
+          getMonthKeyFromDate(row.assignment_date),
+        )),
       ].filter(Boolean),
     ),
   ).sort();
 
-  const snapshots = await Promise.all(candidateMonths.map((month) => getSchedulerSnapshot(month, session)));
-  const monthsWithPostings = candidateMonths.filter((month, index) => monthHasOvertimePostings(snapshots[index]));
-
-  return monthsWithPostings.length > 0
-    ? monthsWithPostings
-    : [currentMonth];
+  return candidateMonths.length > 0 ? candidateMonths : [currentMonth];
 }
 
 export async function getUserSchedulePins(email: string) {
