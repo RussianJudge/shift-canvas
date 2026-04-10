@@ -384,7 +384,7 @@ function getSelectionCode(
   return "";
 }
 
-function buildSetAutofillPlan({
+function buildSingleSetAutofillPlan({
   schedule,
   setDays,
   assignments,
@@ -490,6 +490,66 @@ function buildSetAutofillPlan({
     assignedCells,
     unresolvedCompetencies,
   };
+}
+
+function buildSetAutofillPlan({
+  schedule,
+  setDays,
+  assignments,
+  competencies,
+  timeCodes,
+}: {
+  schedule: Schedule;
+  setDays: Array<{ date: string }>;
+  assignments: Record<string, AssignmentSelection>;
+  competencies: Competency[];
+  timeCodes: TimeCode[];
+}) {
+  /**
+   * Auto-fill intentionally uses a randomized choice among still-needed
+   * competencies. That makes it more flexible, but it also means one pass can
+   * land on a suboptimal combination even when another valid fill exists.
+   *
+   * To make the tool more robust without touching any manually entered cells,
+   * we retry from the exact same untouched baseline up to five times and keep
+   * the best result we found.
+   */
+  const maxAttempts = 5;
+  let bestPlan = buildSingleSetAutofillPlan({
+    schedule,
+    setDays,
+    assignments,
+    competencies,
+    timeCodes,
+  });
+
+  for (let attempt = 1; attempt < maxAttempts; attempt += 1) {
+    if (bestPlan.unresolvedCompetencies === 0) {
+      break;
+    }
+
+    const candidatePlan = buildSingleSetAutofillPlan({
+      schedule,
+      setDays,
+      assignments,
+      competencies,
+      timeCodes,
+    });
+
+    const shouldReplace =
+      candidatePlan.unresolvedCompetencies < bestPlan.unresolvedCompetencies ||
+      (candidatePlan.unresolvedCompetencies === bestPlan.unresolvedCompetencies &&
+        candidatePlan.assignedWorkers > bestPlan.assignedWorkers) ||
+      (candidatePlan.unresolvedCompetencies === bestPlan.unresolvedCompetencies &&
+        candidatePlan.assignedWorkers === bestPlan.assignedWorkers &&
+        candidatePlan.assignedCells > bestPlan.assignedCells);
+
+    if (shouldReplace) {
+      bestPlan = candidatePlan;
+    }
+  }
+
+  return bestPlan;
 }
 
 /** Window-centered assignment picker used for individual cell edits. */
