@@ -546,16 +546,17 @@ export function MetricsPanel({
 
       <div className="workspace-toolbar workspace-toolbar--metrics">
         <div className="metrics-month-nav">
-          <button type="button" className="ghost-button" onClick={() => navigateMonth(-1)}>
-            Prev month
-          </button>
-          <div className="field field--static">
-            <span>Month</span>
+          <div className="metrics-month-nav__current">
             <strong>{formatMonthLabel(snapshot.month)}</strong>
           </div>
-          <button type="button" className="ghost-button" onClick={() => navigateMonth(1)}>
-            Next month
-          </button>
+          <div className="metrics-month-nav__actions">
+            <button type="button" className="ghost-button" onClick={() => navigateMonth(-1)}>
+              Prev month
+            </button>
+            <button type="button" className="ghost-button" onClick={() => navigateMonth(1)}>
+              Next month
+            </button>
+          </div>
         </div>
       </div>
 
