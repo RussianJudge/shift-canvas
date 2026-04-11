@@ -125,12 +125,14 @@ function getMonthEndDateKey(month: string) {
 }
 
 /**
- * Anchors rolling windows to the visible metrics month, but never extends into
- * the future when the selected month is current or ahead of today.
+ * Uses the literal last day of the selected month as the reporting anchor.
+ *
+ * This makes the rolling windows read as "what would 30d / 90d / 1Y / YTD look
+ * like as of the end of the chosen month?" instead of blending that question
+ * with today's real date.
  */
-function getMetricsAnchorDate(month: string, today: string) {
-  const monthEnd = getMonthEndDateKey(month);
-  return monthEnd < today ? monthEnd : today;
+function getMetricsAnchorDate(month: string) {
+  return getMonthEndDateKey(month);
 }
 
 /** Compact label used to show which day the rolling windows are anchored to. */
@@ -393,20 +395,18 @@ export function MetricsPanel({
   snapshot,
   overtimeHistory,
   assignmentHistory,
-  today,
 }: {
   snapshot: SchedulerSnapshot;
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
-  today: string;
 }) {
   const router = useRouter();
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
   const [timeCodeWindow, setTimeCodeWindow] = useState<TimeCodeWindow>("30d");
   const [selectedTimeCodeId, setSelectedTimeCodeId] = useState(snapshot.timeCodes[0]?.id ?? "");
   const metricsAnchorDate = useMemo(
-    () => getMetricsAnchorDate(snapshot.month, today),
-    [snapshot.month, today],
+    () => getMetricsAnchorDate(snapshot.month),
+    [snapshot.month],
   );
   const filteredOvertimeHistory = useMemo(() => {
     const start = getWindowStart(metricsAnchorDate, overtimeWindow);

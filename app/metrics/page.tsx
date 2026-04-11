@@ -40,7 +40,6 @@ export default async function MetricsPage({
         snapshot={snapshot}
         overtimeHistory={overtimeHistory}
         assignmentHistory={assignmentHistory}
-        today={today}
       />
     </WorkspaceShell>
   );
