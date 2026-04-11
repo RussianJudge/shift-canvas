@@ -610,12 +610,6 @@ function AssignmentModal({
   onClear: () => void;
   onClose: () => void;
 }) {
-  const [draftSelection, setDraftSelection] = useState<AssignmentSelection>(selection);
-
-  useEffect(() => {
-    setDraftSelection(selection);
-  }, [selection]);
-
   if (!selectedEmployee || !selectedDate) {
     return null;
   }
@@ -651,14 +645,14 @@ function AssignmentModal({
                 key={timeCode.id}
                 type="button"
                 className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
-                  draftSelection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
+                  selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
                 }`}
                 onClick={() =>
-                  setDraftSelection((current) => ({
-                    ...current,
+                  onApply({
+                    ...selection,
                     competencyId: null,
                     timeCodeId: timeCode.id,
-                  }))
+                  })
                 }
               >
                 {timeCode.code}
@@ -675,14 +669,14 @@ function AssignmentModal({
                 key={competency.id}
                 type="button"
                 className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
-                  draftSelection.competencyId === competency.id ? "legend-pill--selected" : ""
+                  selection.competencyId === competency.id ? "legend-pill--selected" : ""
                 }`}
                 onClick={() =>
-                  setDraftSelection((current) => ({
-                    ...current,
+                  onApply({
+                    ...selection,
                     competencyId: competency.id,
                     timeCodeId: null,
-                  }))
+                  })
                 }
               >
                 {getCompactCode(competency.code)}
@@ -699,13 +693,13 @@ function AssignmentModal({
             id="assignment-note"
             className="assignment-modal__note-input"
             rows={3}
-            value={draftSelection.notes ?? ""}
+            value={selection.notes ?? ""}
             placeholder="Add a note for this cell"
             onChange={(event) =>
-              setDraftSelection((current) => ({
-                ...current,
+              onApply({
+                ...selection,
                 notes: event.target.value || null,
-              }))
+              })
             }
           />
         </div>
@@ -717,9 +711,6 @@ function AssignmentModal({
             onClick={onClear}
           >
             Clear assignment
-          </button>
-          <button type="button" className="primary-button" onClick={() => onApply(draftSelection)}>
-            Save cell
           </button>
         </div>
       </section>
@@ -1061,8 +1052,6 @@ export function MonthlyScheduler({
     setEditorCell(null);
     setSelectedSetAnchorDate(null);
     setSelectedCoverageCompetencyId(null);
-    setCopiedSetTemplate(null);
-    setCopiedColumnTemplate(null);
     setDragRange(null);
     window.localStorage.removeItem(STORAGE_KEY);
   }, [forcedScheduleId, initialSnapshot]);
