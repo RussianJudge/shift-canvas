@@ -42,7 +42,7 @@ import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, Time
  * render detail.
  */
 const STORAGE_KEY = "shift-canvas-drafts-v2";
-const AUTO_SAVE_DEBOUNCE_MS = 1500;
+const AUTO_SAVE_DEBOUNCE_MS = 2500;
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes: string | null };
 type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
 type SelectedCell = { employeeId: string; date: string };
