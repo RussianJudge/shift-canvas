@@ -966,7 +966,7 @@ export function OvertimePanel({
         {canManageManualPostings ? (
           <div className="toolbar-actions">
             <button type="button" className="ghost-button" onClick={() => setIsManualModalOpen(true)}>
-              Create manual posting
+              Create posting
             </button>
           </div>
         ) : null}

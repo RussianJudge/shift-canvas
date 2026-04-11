@@ -560,14 +560,16 @@ export function MetricsPanel({
       <div className="metrics-grid">
         <section className="metrics-section">
           <div className="metrics-section__header">
-            <h2 className="metrics-section__title">Competencies By Team</h2>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => setIsTransferModalOpen(true)}
-            >
-              Shift Transfer
-            </button>
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Competencies By Team</h2>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setIsTransferModalOpen(true)}
+              >
+                Shift Transfer
+              </button>
+            </div>
           </div>
 
           <div className="metrics-team-list">

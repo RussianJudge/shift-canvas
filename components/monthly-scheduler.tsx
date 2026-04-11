@@ -34,6 +34,7 @@ import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, Time
  * - unsaved draft persistence
  * - debounced auto-save
  * - set-builder workflows
+ * - whole-column copy/paste from a clicked day
  * - per-user row pinning
  * - cell editing + drag-copy
  * - borrowed overtime rows
@@ -79,6 +80,12 @@ type CopiedSetTemplate = {
   sourceStartDate: string;
   setLength: number;
   selectionsByEmployeeId: Record<string, AssignmentSelection[]>;
+};
+
+type CopiedColumnTemplate = {
+  scheduleId: string;
+  sourceDate: string;
+  selectionsByEmployeeId: Record<string, AssignmentSelection>;
 };
 
 /** Builds the visible roster, including borrowed overtime and mutual rows for the month. */
@@ -590,6 +597,7 @@ function AssignmentModal({
   competencies,
   timeCodes,
   onApply,
+  onClear,
   onClose,
 }: {
   selectedEmployee: DisplayEmployee | null;
@@ -599,6 +607,7 @@ function AssignmentModal({
   competencies: Competency[];
   timeCodes: TimeCode[];
   onApply: (selection: AssignmentSelection) => void;
+  onClear: () => void;
   onClose: () => void;
 }) {
   const [draftSelection, setDraftSelection] = useState<AssignmentSelection>(selection);
@@ -705,7 +714,7 @@ function AssignmentModal({
           <button
             type="button"
             className="ghost-button"
-            onClick={() => setDraftSelection(getDefaultSelection(shiftKind, timeCodes))}
+            onClick={onClear}
           >
             Clear assignment
           </button>
@@ -755,6 +764,7 @@ export function MonthlyScheduler({
   const [selectedSetAnchorDate, setSelectedSetAnchorDate] = useState<string | null>(null);
   const [selectedCoverageCompetencyId, setSelectedCoverageCompetencyId] = useState<string | null>(null);
   const [copiedSetTemplate, setCopiedSetTemplate] = useState<CopiedSetTemplate | null>(null);
+  const [copiedColumnTemplate, setCopiedColumnTemplate] = useState<CopiedColumnTemplate | null>(null);
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
   const [pinnedEmployeesBySchedule, setPinnedEmployeesBySchedule] = useState<Record<string, string[]>>(
     initialPinnedEmployeesBySchedule,
@@ -798,6 +808,16 @@ export function MonthlyScheduler({
     selectedSetDays.length > 0 &&
     !isSelectedSetComplete &&
     copiedSetTemplate.sourceStartDate !== selectedSetDays[0]?.date;
+  const selectedColumnDate =
+    selectedSetAnchorDate && monthDays.some((day) => day.date === selectedSetAnchorDate)
+      ? selectedSetAnchorDate
+      : null;
+  const canPasteColumn =
+    copiedColumnTemplate !== null &&
+    copiedColumnTemplate.scheduleId === activeScheduleId &&
+    selectedColumnDate !== null &&
+    copiedColumnTemplate.sourceDate !== selectedColumnDate &&
+    !completedSetDates.has(selectedColumnDate);
   const competencyCoverage = useMemo(() => {
     if (!activeSchedule) {
       return {};
@@ -1042,6 +1062,7 @@ export function MonthlyScheduler({
     setSelectedSetAnchorDate(null);
     setSelectedCoverageCompetencyId(null);
     setCopiedSetTemplate(null);
+    setCopiedColumnTemplate(null);
     setDragRange(null);
     window.localStorage.removeItem(STORAGE_KEY);
   }, [forcedScheduleId, initialSnapshot]);
@@ -1382,19 +1403,6 @@ export function MonthlyScheduler({
     });
   }
 
-  function handleRevert() {
-    if (!canEdit) {
-      return;
-    }
-
-    startTransition(() => {
-      setDraftAssignments(cloneAssignments(baselineAssignments));
-      setDragRange(null);
-      setEditorCell(null);
-      setStatusMessage("Changes reverted.");
-    });
-  }
-
   function handlePinToggle(employeeId: string) {
     const currentPins = pinnedEmployeesBySchedule[activeSchedule.id] ?? [];
     const nextPins = currentPins.includes(employeeId)
@@ -1645,6 +1653,65 @@ export function MonthlyScheduler({
     });
   }
 
+  function handleCopyColumn() {
+    if (!canManageSetBuilder || !selectedColumnDate) {
+      return;
+    }
+
+    const selectionsByEmployeeId = Object.fromEntries(
+      activeSchedule.employees.map((employee) => [
+        employee.id,
+        getSelectionForCell(
+          employee.id,
+          selectedColumnDate,
+          shiftForDate(activeSchedule, selectedColumnDate),
+          draftAssignments,
+          snapshot.timeCodes,
+        ),
+      ]),
+    );
+
+    setCopiedColumnTemplate({
+      scheduleId: activeSchedule.id,
+      sourceDate: selectedColumnDate,
+      selectionsByEmployeeId,
+    });
+    setStatusMessage(`Column copied from ${formatShortDate(selectedColumnDate)}.`);
+  }
+
+  function handlePasteColumn() {
+    if (!canEdit || !canManageSetBuilder || !copiedColumnTemplate || !selectedColumnDate || !canPasteColumn) {
+      return;
+    }
+
+    startTransition(() => {
+      setDraftAssignments((current) => {
+        const nextAssignments = { ...current };
+
+        for (const employee of activeSchedule.employees) {
+          const copiedSelection = copiedColumnTemplate.selectionsByEmployeeId[employee.id];
+          const nextSelection =
+            copiedSelection ??
+            getDefaultSelection(shiftForDate(activeSchedule, selectedColumnDate), snapshot.timeCodes);
+          const key = createAssignmentKey(employee.id, selectedColumnDate);
+
+          if (!nextSelection.competencyId && !nextSelection.timeCodeId && !nextSelection.notes) {
+            delete nextAssignments[key];
+            continue;
+          }
+
+          nextAssignments[key] = { ...nextSelection };
+        }
+
+        return nextAssignments;
+      });
+
+      setStatusMessage(
+        `Pasted column onto ${formatShortDate(selectedColumnDate)}.`,
+      );
+    });
+  }
+
   function handleClearSet() {
     if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
@@ -1699,11 +1766,6 @@ export function MonthlyScheduler({
             <button type="button" className="ghost-button" onClick={handlePrintSchedules}>
               Print schedules
             </button>
-            {canEdit ? (
-              <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
-                Revert
-              </button>
-            ) : null}
           </div>
         </div>
       </div>
@@ -1753,6 +1815,22 @@ export function MonthlyScheduler({
           <div className="set-builder__surface">
             <div className="set-builder-heading">
               <div className="set-builder-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handleCopyColumn}
+                  disabled={!selectedColumnDate}
+                >
+                  Copy column
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handlePasteColumn}
+                  disabled={!canPasteColumn}
+                >
+                  Paste column
+                </button>
                 <button
                   type="button"
                   className="ghost-button"
@@ -1936,6 +2014,17 @@ export function MonthlyScheduler({
             }
 
             handleAssignmentChange(editorCell.employeeId, editorCell.date, selection);
+          }}
+          onClear={() => {
+            if (!editorCell) {
+              return;
+            }
+
+            handleAssignmentChange(
+              editorCell.employeeId,
+              editorCell.date,
+              getDefaultSelection(editorShiftKind, snapshot.timeCodes),
+            );
             setEditorCell(null);
           }}
           onClose={() => setEditorCell(null)}
