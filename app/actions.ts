@@ -1220,25 +1220,27 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     });
   }
 
-  const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), normalizedDates[0] ?? null);
-  const completedSetRangeKeys = new Set(
-    snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
-  );
+  if (!manualPosting) {
+    const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), normalizedDates[0] ?? null);
+    const completedSetRangeKeys = new Set(
+      snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
+    );
 
-  if (
-    fullSetDays.length === 0 ||
-    !completedSetRangeKeys.has(
-      createSetRangeKey(
-        input.scheduleId,
-        fullSetDays[0].date,
-        fullSetDays[fullSetDays.length - 1].date,
-      ),
-    )
-  ) {
-    return {
-      ok: false,
-      message: "That set is not marked schedule complete yet.",
-    };
+    if (
+      fullSetDays.length === 0 ||
+      !completedSetRangeKeys.has(
+        createSetRangeKey(
+          input.scheduleId,
+          fullSetDays[0].date,
+          fullSetDays[fullSetDays.length - 1].date,
+        ),
+      )
+    ) {
+      return {
+        ok: false,
+        message: "That set is not marked schedule complete yet.",
+      };
+    }
   }
 
   for (const date of normalizedDates) {
