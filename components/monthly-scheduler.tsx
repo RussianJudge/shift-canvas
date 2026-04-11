@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useDeferredValue, useEffect, useMemo, useState, useTransition, startTransition } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
@@ -32,6 +32,7 @@ import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, Time
  * It combines:
  * - month loading
  * - unsaved draft persistence
+ * - debounced auto-save
  * - set-builder workflows
  * - per-user row pinning
  * - cell editing + drag-copy
@@ -287,6 +288,33 @@ function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
   return Object.fromEntries(
     Object.entries(assignments).map(([key, selection]) => [key, { ...selection }]),
   );
+}
+
+/**
+ * Applies a confirmed save result back into the baseline map without touching
+ * any newer browser-only edits that may have happened while the request was in
+ * flight.
+ */
+function applySavedUpdatesToBaseline(
+  baselineAssignments: Record<string, AssignmentSelection>,
+  savedAssignments: Record<string, AssignmentSelection>,
+  savedUpdates: Array<{ employeeId: string; date: string }>,
+) {
+  const nextAssignments = { ...baselineAssignments };
+
+  for (const update of savedUpdates) {
+    const key = createAssignmentKey(update.employeeId, update.date);
+    const savedSelection = savedAssignments[key];
+
+    if (savedSelection) {
+      nextAssignments[key] = { ...savedSelection };
+      continue;
+    }
+
+    delete nextAssignments[key];
+  }
+
+  return nextAssignments;
 }
 
 function buildDraftDelta(
@@ -706,7 +734,7 @@ export function MonthlyScheduler({
   forcedScheduleId: string | null;
 }) {
   // `baselineAssignments` tracks the last server-confirmed state. `draftAssignments`
-  // layers in unsaved edits and local set actions until the user saves or reverts.
+  // layers in local edits and set actions until auto-save confirms them or the user reverts.
   const router = useRouter();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [currentMonth, setCurrentMonth] = useState(initialSnapshot.month);
@@ -736,6 +764,7 @@ export function MonthlyScheduler({
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const [isSavingPins, startPinSaveTransition] = useTransition();
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
+  const latestAutoSaveTokenRef = useRef(0);
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
   const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
@@ -921,40 +950,44 @@ export function MonthlyScheduler({
     [displayEmployees],
   );
 
-  const dirtyUpdates = Array.from(
-    new Set([...Object.keys(baselineAssignments), ...Object.keys(draftAssignments)]),
-  ).flatMap((key) => {
-    const [employeeId, date] = key.split(":");
-    const employee = employeeMap[employeeId];
-    const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+  const dirtyUpdates = useMemo(
+    () =>
+      Array.from(
+        new Set([...Object.keys(baselineAssignments), ...Object.keys(draftAssignments)]),
+      ).flatMap((key) => {
+        const [employeeId, date] = key.split(":");
+        const employee = employeeMap[employeeId];
+        const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
 
-    if (!employee || !employeeSchedule) {
-      return [];
-    }
+        if (!employee || !employeeSchedule) {
+          return [];
+        }
 
-    const shiftKind = shiftForDate(employeeSchedule, date);
-    const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
-    const draft = draftAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
+        const shiftKind = shiftForDate(employeeSchedule, date);
+        const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
+        const draft = draftAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
 
-    if (
-      baseline.competencyId === draft.competencyId &&
-      baseline.timeCodeId === draft.timeCodeId &&
-      baseline.notes === draft.notes
-    ) {
-      return [];
-    }
+        if (
+          baseline.competencyId === draft.competencyId &&
+          baseline.timeCodeId === draft.timeCodeId &&
+          baseline.notes === draft.notes
+        ) {
+          return [];
+        }
 
-    return [
-      {
-        employeeId,
-        date,
-        competencyId: draft.competencyId,
-        timeCodeId: draft.timeCodeId,
-        notes: draft.notes,
-        shiftKind,
-      },
-    ];
-  });
+        return [
+          {
+            employeeId,
+            date,
+            competencyId: draft.competencyId,
+            timeCodeId: draft.timeCodeId,
+            notes: draft.notes,
+            shiftKind,
+          },
+        ];
+      }),
+    [baselineAssignments, draftAssignments, employeeMap, snapshot],
+  );
   const hasChanges = dirtyUpdates.length > 0;
 
   const selectedEmployee = selectedCell ? displayEmployeeMap[selectedCell.employeeId] ?? null : null;
@@ -1108,6 +1141,45 @@ export function MonthlyScheduler({
 
     return () => window.clearTimeout(timer);
   }, [baselineAssignments, draftAssignments, isDraftHydrated]);
+
+  useEffect(() => {
+    if (!canEdit || !isDraftHydrated || !hasChanges) {
+      return;
+    }
+
+    const scheduledUpdates = dirtyUpdates.map((update) => ({ ...update }));
+    const scheduledDraftAssignments = cloneAssignments(draftAssignments);
+    const autoSaveToken = latestAutoSaveTokenRef.current + 1;
+
+    latestAutoSaveTokenRef.current = autoSaveToken;
+
+    const timer = window.setTimeout(() => {
+      startSaveTransition(async () => {
+        if (latestAutoSaveTokenRef.current === autoSaveToken) {
+          setStatusMessage(
+            `Saving ${scheduledUpdates.length} change${scheduledUpdates.length === 1 ? "" : "s"}...`,
+          );
+        }
+
+        const result = await saveAssignments({
+          scheduleId: activeSchedule.id,
+          updates: scheduledUpdates,
+        });
+
+        if (result.ok) {
+          setBaselineAssignments((current) =>
+            applySavedUpdatesToBaseline(current, scheduledDraftAssignments, scheduledUpdates),
+          );
+        }
+
+        if (latestAutoSaveTokenRef.current === autoSaveToken) {
+          setStatusMessage(result.ok ? "Changes saved automatically." : result.message);
+        }
+      });
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [activeSchedule.id, canEdit, dirtyUpdates, draftAssignments, hasChanges, isDraftHydrated]);
 
   useEffect(() => {
     function handlePointerUp() {
@@ -1306,22 +1378,6 @@ export function MonthlyScheduler({
         return nextMonth;
       });
       setStatusMessage("Changing month");
-    });
-  }
-
-  function handleSave() {
-    if (!canEdit) {
-      return;
-    }
-
-    startSaveTransition(async () => {
-      const result = await saveAssignments({ scheduleId: activeSchedule.id, updates: dirtyUpdates });
-
-      setStatusMessage(result.message);
-
-      if (result.ok) {
-        setBaselineAssignments(cloneAssignments(draftAssignments));
-      }
     });
   }
 
@@ -1643,19 +1699,9 @@ export function MonthlyScheduler({
               Print schedules
             </button>
             {canEdit ? (
-              <>
-                <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
-                  Revert
-                </button>
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={handleSave}
-                  disabled={isSaving || !hasChanges}
-                >
-                  {isSaving ? "Saving..." : `Save ${dirtyUpdates.length || ""}`.trim()}
-                </button>
-              </>
+              <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+                Revert
+              </button>
             ) : null}
           </div>
         </div>
