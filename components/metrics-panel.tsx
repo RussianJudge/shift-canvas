@@ -540,11 +540,8 @@ export function MetricsPanel({
 
   return (
     <section className="panel-frame">
-      <div className="panel-heading panel-heading--simple">
+      <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Metrics</h1>
-      </div>
-
-      <div className="workspace-toolbar workspace-toolbar--metrics">
         <div className="metrics-month-nav">
           <div className="metrics-month-nav__current">
             <strong>{formatMonthLabel(snapshot.month)}</strong>
