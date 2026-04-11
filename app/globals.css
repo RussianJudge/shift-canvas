@@ -936,7 +936,7 @@ select {
 }
 
 .workspace-toolbar--overtime {
-  grid-template-columns: repeat(4, minmax(10rem, 14rem)) minmax(0, 1fr);
+  grid-template-columns: repeat(5, minmax(10rem, 14rem)) minmax(0, 1fr);
 }
 
 .workspace-toolbar--metrics {
@@ -962,6 +962,12 @@ select {
 .toolbar-status-wrap {
   display: flex;
   justify-content: flex-end;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
 }
 
 .toolbar-status {

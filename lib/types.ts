@@ -78,6 +78,17 @@ export interface OvertimeClaim extends OrganizationScope {
   employeeId: string;
   competencyId: string;
   date: string;
+  manualPostingId?: string | null;
+}
+
+export interface ManualOvertimePosting extends OrganizationScope {
+  id: string;
+  scheduleId: string;
+  competencyId: string;
+  month: string;
+  shiftKind: Exclude<ShiftKind, "OFF">;
+  dates: string[];
+  createdAt: string;
 }
 
 export interface MutualShiftApplication extends OrganizationScope {
@@ -132,6 +143,7 @@ export interface SchedulerSnapshot {
   timeCodes: TimeCode[];
   assignments: StoredAssignment[];
   overtimeClaims: OvertimeClaim[];
+  manualOvertimePostings: ManualOvertimePosting[];
   completedSets: CompletedSet[];
 }
 
@@ -152,6 +164,7 @@ export interface ClaimOvertimePostingInput {
   competencyId: string;
   coverageCompetencyId?: string | null;
   swapEmployeeId?: string | null;
+  manualPostingId?: string | null;
   dates: string[];
 }
 
@@ -160,6 +173,16 @@ export interface ReleaseOvertimePostingInput {
   employeeId: string;
   competencyId: string;
   dates: string[];
+}
+
+export interface CreateManualOvertimePostingInput {
+  scheduleId: string;
+  competencyId: string;
+  dates: string[];
+}
+
+export interface DeleteManualOvertimePostingInput {
+  postingId: string;
 }
 
 export interface CreateMutualPostingInput {

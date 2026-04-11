@@ -10,6 +10,7 @@ import type {
   CompletedSet,
   Competency,
   Employee,
+  ManualOvertimePosting,
   MutualShiftApplication,
   MutualShiftPosting,
   MutualsSnapshot,
@@ -109,6 +110,20 @@ type OvertimeClaimRow = {
   employee_id: string;
   competency_id: string;
   assignment_date: string;
+  manual_posting_id: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+type ManualOvertimePostingRow = {
+  id: string;
+  schedule_id: string;
+  competency_id: string;
+  month_key: string;
+  shift_kind: Exclude<StoredAssignment["shiftKind"], "OFF">;
+  posting_dates: string[];
+  created_at: string;
   company_id: string;
   site_id: string;
   business_area_id: string;
@@ -278,6 +293,7 @@ function emptySnapshot(month: string, overrides: Partial<SchedulerSnapshot> = {}
     schedules: [],
     assignments: [],
     overtimeClaims: [],
+    manualOvertimePostings: [],
     completedSets: [],
     ...overrides,
   };
@@ -463,6 +479,22 @@ function mapOvertimeClaims(rows: OvertimeClaimRow[]) {
     employeeId: row.employee_id,
     competencyId: row.competency_id,
     date: row.assignment_date,
+    manualPostingId: row.manual_posting_id,
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
+  }));
+}
+
+function mapManualOvertimePostings(rows: ManualOvertimePostingRow[]) {
+  return rows.map<ManualOvertimePosting>((row) => ({
+    id: row.id,
+    scheduleId: row.schedule_id,
+    competencyId: row.competency_id,
+    month: row.month_key,
+    shiftKind: row.shift_kind,
+    dates: [...row.posting_dates].sort(),
+    createdAt: row.created_at,
     companyId: row.company_id,
     siteId: row.site_id,
     businessAreaId: row.business_area_id,
@@ -516,6 +548,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     employeeCompetenciesResult,
     assignmentsResult,
     overtimeClaimsResult,
+    manualOvertimePostingsResult,
     completedSetsResult,
   ] = await Promise.all([
     applySessionScope(
@@ -557,11 +590,18 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     applySessionScope(
       supabase
       .from("overtime_claims")
-      .select("id, schedule_id, employee_id, competency_id, assignment_date, company_id, site_id, business_area_id"),
+      .select("id, schedule_id, employee_id, competency_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
       session,
     )
       .gte("assignment_date", monthStart)
       .lte("assignment_date", monthEnd),
+    applySessionScope(
+      supabase
+      .from("manual_overtime_postings")
+      .select("id, schedule_id, competency_id, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
+      session,
+    )
+      .eq("month_key", month),
     applySessionScope(
       supabase
       .from("completed_sets")
@@ -584,6 +624,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     ["employee_competencies", employeeCompetenciesResult.error],
     ["schedule_assignments", assignmentsResult.error],
     ["overtime_claims", overtimeClaimsResult.error],
+    ["manual_overtime_postings", manualOvertimePostingsResult.error],
     ["completed_sets", completedSetsResult.error],
   ].filter((entry) => entry[1]);
 
@@ -607,6 +648,9 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
     assignments: mapAssignments((assignmentsResult.data as AssignmentRow[] | null) ?? []),
     overtimeClaims: mapOvertimeClaims((overtimeClaimsResult.data as OvertimeClaimRow[] | null) ?? []),
+    manualOvertimePostings: mapManualOvertimePostings(
+      (manualOvertimePostingsResult.data as ManualOvertimePostingRow[] | null) ?? [],
+    ),
     completedSets: mapCompletedSets((completedSetsResult.data as CompletedSetRow[] | null) ?? []),
   };
 }
@@ -678,6 +722,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
+    manualOvertimePostings: [],
     completedSets: [],
   };
 }
@@ -693,7 +738,7 @@ export async function getMetricsOvertimeHistory(today: string, session?: AppSess
   const result = await applySessionScope(
     supabase
     .from("overtime_claims")
-    .select("id, schedule_id, employee_id, competency_id, assignment_date, company_id, site_id, business_area_id"),
+    .select("id, schedule_id, employee_id, competency_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
     session,
   )
     .gte("assignment_date", getYearStart(today))
@@ -776,6 +821,7 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
+    manualOvertimePostings: [],
     completedSets: [],
   };
 }
@@ -831,6 +877,7 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
     assignments: [],
     overtimeClaims: [],
+    manualOvertimePostings: [],
     completedSets: [],
   };
 }
@@ -859,6 +906,7 @@ export async function getTimeCodesSnapshot(month: string, session?: AppSession |
     schedules: [],
     assignments: [],
     overtimeClaims: [],
+    manualOvertimePostings: [],
     completedSets: [],
   };
 }
@@ -882,7 +930,7 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
    * will still calculate the exact postings for the selected month after the
    * page loads.
    */
-  const [completedSetsResult, overtimeClaimsResult] = await Promise.all([
+  const [completedSetsResult, overtimeClaimsResult, manualPostingsResult] = await Promise.all([
     applySessionScope(
       supabase
         .from("completed_sets")
@@ -895,9 +943,15 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
         .select("assignment_date"),
       session,
     ).order("assignment_date"),
+    applySessionScope(
+      supabase
+        .from("manual_overtime_postings")
+        .select("month_key"),
+      session,
+    ).order("month_key"),
   ]);
 
-  if (completedSetsResult.error || overtimeClaimsResult.error) {
+  if (completedSetsResult.error || overtimeClaimsResult.error || manualPostingsResult.error) {
     return [currentMonth];
   }
 
@@ -909,6 +963,7 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
         ...(((overtimeClaimsResult.data as Array<{ assignment_date: string }> | null) ?? []).map((row) =>
           getMonthKeyFromDate(row.assignment_date),
         )),
+        ...(((manualPostingsResult.data as Array<{ month_key: string }> | null) ?? []).map((row) => row.month_key)),
       ].filter(Boolean),
     ),
   ).sort();

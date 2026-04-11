@@ -7,7 +7,9 @@ import type {
   ApplyToMutualPostingInput,
   CancelAcceptedMutualInput,
   ClaimOvertimePostingInput,
+  CreateManualOvertimePostingInput,
   CreateMutualPostingInput,
+  DeleteManualOvertimePostingInput,
   AcceptMutualApplicationInput,
   ReleaseOvertimePostingInput,
   SaveAssignmentsInput,
@@ -844,6 +846,217 @@ export async function setScheduleSetCompletion(input: SetScheduleCompletionInput
 }
 
 /**
+ * Creates a leader/admin-authored overtime posting that should appear on the
+ * board even when it was not auto-derived from a completed-set shortage.
+ */
+export async function createManualOvertimePosting(input: CreateManualOvertimePostingInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to create overtime postings.",
+    };
+  }
+
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Overtime postings are unavailable.",
+    };
+  }
+
+  const dates = uniqueSortedDates(input.dates);
+
+  if (dates.length === 0) {
+    return {
+      ok: false,
+      message: "Select at least one date for the posting.",
+    };
+  }
+
+  const monthKeys = Array.from(new Set(dates.map((date) => date.slice(0, 7))));
+
+  if (monthKeys.length !== 1) {
+    return {
+      ok: false,
+      message: "Manual overtime postings must stay within a single month.",
+    };
+  }
+
+  const month = monthKeys[0] ?? "";
+  const snapshot = await getSchedulerSnapshot(month, session);
+  const schedule = getScheduleById(snapshot, input.scheduleId);
+  const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
+
+  if (!schedule || !competency) {
+    return {
+      ok: false,
+      message: "Could not find the selected team or competency.",
+    };
+  }
+
+  const shiftKinds = dates.map((date) => shiftForDate(schedule, date));
+
+  if (shiftKinds.some((shiftKind) => shiftKind === "OFF")) {
+    return {
+      ok: false,
+      message: "Manual overtime postings can only be created on worked schedule days.",
+    };
+  }
+
+  const uniqueShiftKinds = Array.from(new Set(shiftKinds));
+
+  if (uniqueShiftKinds.length !== 1 || uniqueShiftKinds[0] === "OFF") {
+    return {
+      ok: false,
+      message: "Select dates from the same shift segment only.",
+    };
+  }
+
+  const duplicatePosting = snapshot.manualOvertimePostings.some(
+    (posting) =>
+      posting.scheduleId === input.scheduleId &&
+      posting.competencyId === input.competencyId &&
+      posting.dates.length === dates.length &&
+      posting.dates.every((date, index) => date === dates[index]),
+  );
+
+  if (duplicatePosting) {
+    return {
+      ok: false,
+      message: "That manual overtime posting already exists.",
+    };
+  }
+
+  const postingScope = {
+    companyId: schedule.companyId ?? sessionScope.companyId,
+    siteId: schedule.siteId ?? sessionScope.siteId,
+    businessAreaId: schedule.businessAreaId ?? sessionScope.businessAreaId,
+  };
+
+  const { error } = await supabase.from("manual_overtime_postings").insert({
+    id: `manual-ot-${crypto.randomUUID()}`,
+    schedule_id: schedule.id,
+    competency_id: competency.id,
+    month_key: month,
+    shift_kind: uniqueShiftKinds[0],
+    posting_dates: dates,
+    ...toDatabaseScope(postingScope),
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not create overtime posting: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: `Manual overtime posting created for ${competency.code}.`,
+  };
+}
+
+/**
+ * Deletes a manual overtime posting as long as nobody has already claimed it.
+ */
+export async function deleteManualOvertimePosting(input: DeleteManualOvertimePostingInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to delete overtime postings.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Overtime postings are unavailable.",
+    };
+  }
+
+  const { data: posting, error: postingError } = await supabase
+    .from("manual_overtime_postings")
+    .select("id, company_id, site_id, business_area_id")
+    .eq("id", input.postingId)
+    .maybeSingle();
+
+  if (postingError) {
+    return {
+      ok: false,
+      message: `Could not load overtime posting: ${postingError.message}`,
+    };
+  }
+
+  if (!posting) {
+    return {
+      ok: false,
+      message: "That overtime posting no longer exists.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(posting))) {
+    return {
+      ok: false,
+      message: "You do not have access to that overtime posting.",
+    };
+  }
+
+  const { count, error: claimsError } = await supabase
+    .from("overtime_claims")
+    .select("id", { count: "exact", head: true })
+    .eq("manual_posting_id", input.postingId);
+
+  if (claimsError) {
+    return {
+      ok: false,
+      message: `Could not verify overtime claim status: ${claimsError.message}`,
+    };
+  }
+
+  if ((count ?? 0) > 0) {
+    return {
+      ok: false,
+      message: "Release the current claim before deleting this manual posting.",
+    };
+  }
+
+  const { error } = await supabase.from("manual_overtime_postings").delete().eq("id", input.postingId);
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not delete overtime posting: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: "Manual overtime posting deleted.",
+  };
+}
+
+/**
  * Claims an overtime posting for an employee and writes the mirrored schedule
  * rows needed for the target team to see that borrowed worker.
  */
@@ -873,14 +1086,16 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     };
   }
 
-  if (input.dates.length === 0) {
+  const normalizedDates = uniqueSortedDates(input.dates);
+
+  if (normalizedDates.length === 0) {
     return {
       ok: false,
       message: "No overtime dates were provided.",
     };
   }
 
-  const month = input.dates[0]?.slice(0, 7);
+  const month = normalizedDates[0]?.slice(0, 7);
   const snapshot = await getSchedulerSnapshot(month, session);
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
@@ -890,6 +1105,9 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   const coverageCompetencyId = input.coverageCompetencyId ?? input.competencyId;
   const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
   const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
+  const manualPosting = input.manualPostingId
+    ? snapshot.manualOvertimePostings.find((posting) => posting.id === input.manualPostingId)
+    : null;
 
   if (!employee || !employeeSchedule || !competency || !coverageCompetency || !targetSchedule) {
     return {
@@ -903,6 +1121,52 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       ok: false,
       message: `${employee.name} is not qualified for ${competency.code}.`,
     };
+  }
+
+  if (input.manualPostingId) {
+    if (!manualPosting) {
+      return {
+        ok: false,
+        message: "That manual overtime posting no longer exists.",
+      };
+    }
+
+    if (
+      manualPosting.scheduleId !== input.scheduleId ||
+      manualPosting.competencyId !== input.competencyId ||
+      manualPosting.dates.length !== normalizedDates.length ||
+      manualPosting.dates.some((date, index) => date !== normalizedDates[index])
+    ) {
+      return {
+        ok: false,
+        message: "That manual overtime posting changed. Refresh and try again.",
+      };
+    }
+
+    if (coverageCompetencyId !== input.competencyId || input.swapEmployeeId) {
+      return {
+        ok: false,
+        message: "Manual overtime postings only support direct claims.",
+      };
+    }
+
+    const manualPostingClaims = snapshot.overtimeClaims.filter(
+      (claim) => claim.manualPostingId === input.manualPostingId,
+    );
+
+    if (
+      manualPostingClaims.some(
+        (claim) =>
+          claim.employeeId !== input.employeeId ||
+          claim.scheduleId !== input.scheduleId ||
+          claim.competencyId !== input.competencyId,
+      )
+    ) {
+      return {
+        ok: false,
+        message: "That manual overtime posting has already been claimed.",
+      };
+    }
   }
 
   let swapAssignmentRows: OvertimeAssignmentRow[] = [];
@@ -931,7 +1195,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       };
     }
 
-    for (const date of input.dates) {
+    for (const date of normalizedDates) {
       const swapSelection = assignmentIndex[`${swapEmployee.id}:${date}`] ?? {
         competencyId: null,
         timeCodeId: null,
@@ -950,13 +1214,13 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       claimedCompetencyId: input.competencyId,
       coverageCompetencyId,
       swapEmployeeId: swapEmployee.id,
-      dates: input.dates,
+      dates: normalizedDates,
       targetScheduleId: input.scheduleId,
       shiftKindForDate: (date) => shiftForDate(targetSchedule, date),
     });
   }
 
-  const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), input.dates[0] ?? null);
+  const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), normalizedDates[0] ?? null);
   const completedSetRangeKeys = new Set(
     snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
   );
@@ -977,7 +1241,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     };
   }
 
-  for (const date of input.dates) {
+  for (const date of normalizedDates) {
     const shiftKind = shiftForDate(employeeSchedule, date);
     const currentAssignment = assignmentIndex[`${employee.id}:${date}`] ?? {
       competencyId: null,
@@ -992,7 +1256,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     }
   }
 
-  const assignmentRows = input.dates.map((date) => ({
+  const assignmentRows = normalizedDates.map((date) => ({
     employee_id: input.employeeId,
     schedule_id: input.scheduleId,
     assignment_date: date,
@@ -1012,12 +1276,13 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     }),
   }));
 
-  const claimRows = input.dates.map((date) => ({
+  const claimRows = normalizedDates.map((date) => ({
     id: `ot-${input.scheduleId}-${input.employeeId}-${input.competencyId}-${date}`,
     schedule_id: input.scheduleId,
     employee_id: input.employeeId,
     competency_id: input.competencyId,
     assignment_date: date,
+    manual_posting_id: input.manualPostingId ?? null,
     ...toDatabaseScope({
       companyId: targetSchedule.companyId ?? session.companyId ?? "",
       siteId: targetSchedule.siteId ?? session.siteId ?? "",

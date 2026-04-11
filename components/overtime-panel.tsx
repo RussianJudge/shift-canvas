@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
-import { claimOvertimePosting, releaseOvertimePosting } from "@/app/actions";
+import {
+  claimOvertimePosting,
+  createManualOvertimePosting,
+  deleteManualOvertimePosting,
+  releaseOvertimePosting,
+} from "@/app/actions";
 import {
   buildAssignmentIndex,
   createSetRangeKey,
@@ -18,15 +24,20 @@ import {
 import type { AppSession, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
 
 /**
- * Overtime board for packaging shortages into claimable postings.
+ * Overtime board for packaging claimable work into one operational queue.
  *
- * The board works from completed sets only. Each posting can either represent:
+ * Postings come from two sources:
+ * - auto-derived shortages on completed sets
+ * - leader/admin-authored manual postings
+ *
+ * Each posting can either represent:
  * - a direct claim for the missing competency, or
  * - a swap path where the claimant takes one post and an on-team worker slides
  *   into the originally missing post.
  */
 type OvertimePosting = {
   id: string;
+  source: "auto" | "manual";
   scheduleId: string;
   scheduleName: string;
   shiftKind: Exclude<ShiftKind, "OFF">;
@@ -41,6 +52,7 @@ type OvertimePosting = {
   staffedPeople: number;
   requiredStaff: number;
   openShifts: number;
+  manualPostingId: string | null;
   claimedEmployeeId: string | null;
   claimedByName: string | null;
   swapEmployeeId: string | null;
@@ -92,6 +104,10 @@ function formatStaffCount(value: number) {
 
 function getShiftLabel(shiftKind: Exclude<ShiftKind, "OFF">, count: number) {
   return `${count} ${shiftKind === "DAY" ? "day" : "night"} shift${count === 1 ? "" : "s"}`;
+}
+
+function getShiftBadgeLabel(shiftKind: Exclude<ShiftKind, "OFF">) {
+  return shiftKind === "DAY" ? "D" : "N";
 }
 
 /** Groups a schedule's month into worked sets and their day/night segments. */
@@ -206,6 +222,120 @@ function getClaimStatus(
   return { canClaim: true, reason: "Available to claim." };
 }
 
+/** Modal used by leaders/admins to author a manual overtime posting. */
+function ManualOvertimePostingModal({
+  snapshot,
+  selectedScheduleId,
+  selectedCompetencyId,
+  selectedDates,
+  onScheduleChange,
+  onCompetencyChange,
+  onToggleDate,
+  onClose,
+  onSubmit,
+  isSubmitting,
+}: {
+  snapshot: SchedulerSnapshot;
+  selectedScheduleId: string;
+  selectedCompetencyId: string;
+  selectedDates: string[];
+  onScheduleChange: (scheduleId: string) => void;
+  onCompetencyChange: (competencyId: string) => void;
+  onToggleDate: (date: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  isSubmitting: boolean;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const selectedSchedule = snapshot.schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
+  const availableDates = selectedSchedule
+    ? getMonthDays(snapshot.month)
+        .map((day) => ({
+          date: day.date,
+          shiftKind: shiftForDate(selectedSchedule, day.date),
+        }))
+        .filter(
+          (entry): entry is { date: string; shiftKind: Exclude<ShiftKind, "OFF"> } => entry.shiftKind !== "OFF",
+        )
+    : [];
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Create Manual Overtime Posting</h2>
+            <p className="assignment-modal__context">
+              Pick one team, one competency, and dates from the same shift segment. The posting will stay on the board until it is claimed or deleted.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div className="metrics-transfer-grid">
+          <label className="field">
+            <span>Team</span>
+            <select value={selectedScheduleId} onChange={(event) => onScheduleChange(event.target.value)}>
+              {snapshot.schedules.map((schedule) => (
+                <option key={schedule.id} value={schedule.id}>
+                  {schedule.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Competency</span>
+            <select value={selectedCompetencyId} onChange={(event) => onCompetencyChange(event.target.value)}>
+              {snapshot.competencies.map((competency) => (
+                <option key={competency.id} value={competency.id}>
+                  {competency.code} · {competency.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="mutual-picker">
+          <div className="mutual-picker__header">
+            <strong>Posting dates</strong>
+            <span>{selectedDates.length} selected</span>
+          </div>
+          <div className="mutual-picker__grid">
+            {availableDates.map((entry) => {
+              const isSelected = selectedDates.includes(entry.date);
+
+              return (
+                <button
+                  key={entry.date}
+                  type="button"
+                  className={`mutual-date-pill ${isSelected ? "mutual-date-pill--selected" : ""}`}
+                  onClick={() => onToggleDate(entry.date)}
+                >
+                  <strong>{formatShortDate(entry.date)}</strong>
+                  <span>{getShiftBadgeLabel(entry.shiftKind)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="metrics-transfer-actions">
+          <button type="button" className="primary-button" onClick={onSubmit} disabled={isSubmitting}>
+            {isSubmitting ? "Creating..." : "Create posting"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 export function OvertimePanel({
   snapshot,
   availableMonths,
@@ -228,6 +358,12 @@ export function OvertimePanel({
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [manualScheduleId, setManualScheduleId] = useState(snapshot.schedules[0]?.id ?? "");
+  const [manualCompetencyId, setManualCompetencyId] = useState(snapshot.competencies[0]?.id ?? "");
+  const [manualPostingDates, setManualPostingDates] = useState<string[]>([]);
+  const [isManagingManual, startManualTransition] = useTransition();
+  const canManageManualPostings = viewer.role !== "worker";
 
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
@@ -269,6 +405,14 @@ export function OvertimePanel({
     );
     setSelectedPostingByGroup({});
     setStatusMessage("");
+    setManualScheduleId((current) =>
+      snapshot.schedules.some((schedule) => schedule.id === current) ? current : snapshot.schedules[0]?.id ?? "",
+    );
+    setManualCompetencyId((current) =>
+      snapshot.competencies.some((competency) => competency.id === current) ? current : snapshot.competencies[0]?.id ?? "",
+    );
+    setManualPostingDates([]);
+    setIsManualModalOpen(false);
   }, [allEmployees, snapshot.competencies, snapshot.schedules, viewer.employeeId, viewer.role]);
 
   const postings = useMemo<OvertimePosting[]>(() => {
@@ -371,6 +515,7 @@ export function OvertimePanel({
 
                 nextPostings.push({
                   id: `claimed:${schedule.id}:${competency.id}:${employeeId}:${currentRun[0]}`,
+                  source: "auto",
                   scheduleId: schedule.id,
                   scheduleName: schedule.name,
                   shiftKind: segment.shiftKind,
@@ -385,6 +530,7 @@ export function OvertimePanel({
                   staffedPeople,
                   requiredStaff: competency.requiredStaff,
                   openShifts: currentRun.length,
+                  manualPostingId: null,
                   claimedEmployeeId: employeeId,
                   claimedByName: claimEmployee?.name ?? "Unknown worker",
                   swapEmployeeId,
@@ -463,6 +609,7 @@ export function OvertimePanel({
 
               nextPostings.push({
                 id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
+                source: "auto",
                 scheduleId: schedule.id,
                 scheduleName: schedule.name,
                 shiftKind: segment.shiftKind,
@@ -477,6 +624,7 @@ export function OvertimePanel({
                 staffedPeople,
                 requiredStaff: competency.requiredStaff,
                 openShifts: postingDates.length,
+                manualPostingId: null,
                 claimedEmployeeId: null,
                 claimedByName: null,
                 swapEmployeeId: null,
@@ -492,6 +640,7 @@ export function OvertimePanel({
 
                 nextPostings.push({
                   id: `${schedule.id}:${candidate.competencyId}:${competency.id}:${postingDates[0]}:${slotIndex}:swap`,
+                  source: "auto",
                   scheduleId: schedule.id,
                   scheduleName: schedule.name,
                   shiftKind: segment.shiftKind,
@@ -506,6 +655,7 @@ export function OvertimePanel({
                   staffedPeople,
                   requiredStaff: competency.requiredStaff,
                   openShifts: postingDates.length,
+                  manualPostingId: null,
                   claimedEmployeeId: null,
                   claimedByName: null,
                   swapEmployeeId: candidate.employeeId,
@@ -518,8 +668,75 @@ export function OvertimePanel({
       }
     }
 
+    for (const manualPosting of snapshot.manualOvertimePostings) {
+      const schedule = snapshot.schedules.find((entry) => entry.id === manualPosting.scheduleId);
+      const competency = snapshot.competencies.find((entry) => entry.id === manualPosting.competencyId);
+
+      if (!schedule || !competency || manualPosting.dates.length === 0) {
+        continue;
+      }
+
+      const filledCells = manualPosting.dates.reduce((count, date) => {
+        let filledCount = 0;
+
+        for (const employee of schedule.employees) {
+          const selection = getCellSelection(employee, date, assignmentIndex);
+
+          if (selection.competencyId === competency.id) {
+            filledCount += 1;
+          }
+        }
+
+        for (const claim of snapshot.overtimeClaims) {
+          const claimEmployee = employeeMap[claim.employeeId];
+
+          if (
+            claim.scheduleId === schedule.id &&
+            claim.competencyId === competency.id &&
+            claim.date === date &&
+            claimEmployee?.scheduleId !== schedule.id
+          ) {
+            filledCount += 1;
+          }
+        }
+
+        return count + filledCount;
+      }, 0);
+
+      const claimsForPosting = snapshot.overtimeClaims.filter(
+        (claim) => claim.manualPostingId === manualPosting.id,
+      );
+      const claimedEmployeeId = claimsForPosting[0]?.employeeId ?? null;
+      const claimedEmployee = claimedEmployeeId ? employeeMap[claimedEmployeeId] : null;
+
+      nextPostings.push({
+        id: `manual:${manualPosting.id}`,
+        source: "manual",
+        scheduleId: schedule.id,
+        scheduleName: schedule.name,
+        shiftKind: manualPosting.shiftKind,
+        competencyId: competency.id,
+        competencyCode: competency.code,
+        competencyLabel: competency.label,
+        coverageCompetencyId: competency.id,
+        coverageCompetencyCode: competency.code,
+        coverageCompetencyLabel: competency.label,
+        colorToken: competency.colorToken,
+        dates: manualPosting.dates,
+        staffedPeople: manualPosting.dates.length > 0 ? filledCells / manualPosting.dates.length : 0,
+        requiredStaff: competency.requiredStaff,
+        openShifts: manualPosting.dates.length,
+        manualPostingId: manualPosting.id,
+        claimedEmployeeId,
+        claimedByName: claimedEmployee?.name ?? null,
+        swapEmployeeId: null,
+        swapEmployeeName: null,
+      });
+    }
+
     return nextPostings.sort((left, right) =>
       Number(Boolean(right.claimedEmployeeId)) - Number(Boolean(left.claimedEmployeeId)) ||
+      Number(right.source === "manual") - Number(left.source === "manual") ||
       left.scheduleName.localeCompare(right.scheduleName) ||
       left.dates[0].localeCompare(right.dates[0]) ||
       left.shiftKind.localeCompare(right.shiftKind) ||
@@ -560,7 +777,7 @@ export function OvertimePanel({
         filteredPostings.reduce<
           Record<string, { key: string; scheduleName: string; shiftKind: Exclude<ShiftKind, "OFF">; dates: string[]; postings: OvertimePosting[] }>
         >((groups, posting) => {
-          const key = `${posting.scheduleId}:${posting.shiftKind}:${posting.dates[0]}:${posting.dates[posting.dates.length - 1]}`;
+          const key = `${posting.scheduleId}:${posting.shiftKind}:${posting.dates.join(",")}`;
           groups[key] ??= {
             key,
             scheduleName: posting.scheduleName,
@@ -590,6 +807,7 @@ export function OvertimePanel({
         competencyId: posting.competencyId,
         coverageCompetencyId: posting.coverageCompetencyId,
         swapEmployeeId: posting.swapEmployeeId,
+        manualPostingId: posting.manualPostingId,
         dates: posting.dates,
       });
 
@@ -613,6 +831,52 @@ export function OvertimePanel({
         employeeId: claimingEmployeeId,
         competencyId: posting.competencyId,
         dates: posting.dates,
+      });
+
+      setStatusMessage(result.message);
+
+      if (result.ok) {
+        router.refresh();
+      }
+    });
+  }
+
+  function toggleManualPostingDate(date: string) {
+    setManualPostingDates((current) =>
+      current.includes(date)
+        ? current.filter((entry) => entry !== date)
+        : [...current, date].sort(),
+    );
+  }
+
+  function handleCreateManualPosting() {
+    startManualTransition(async () => {
+      const result = await createManualOvertimePosting({
+        scheduleId: manualScheduleId,
+        competencyId: manualCompetencyId,
+        dates: manualPostingDates,
+      });
+
+      setStatusMessage(result.message);
+
+      if (result.ok) {
+        setManualPostingDates([]);
+        setIsManualModalOpen(false);
+        router.refresh();
+      }
+    });
+  }
+
+  function handleDeleteManualPosting(posting: OvertimePosting) {
+    const manualPostingId = posting.manualPostingId;
+
+    if (!manualPostingId) {
+      return;
+    }
+
+    startManualTransition(async () => {
+      const result = await deleteManualOvertimePosting({
+        postingId: manualPostingId,
       });
 
       setStatusMessage(result.message);
@@ -699,6 +963,14 @@ export function OvertimePanel({
           </select>
         </label>
 
+        {canManageManualPostings ? (
+          <div className="toolbar-actions">
+            <button type="button" className="ghost-button" onClick={() => setIsManualModalOpen(true)}>
+              Create manual posting
+            </button>
+          </div>
+        ) : null}
+
         <div className="toolbar-status-wrap">
           {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
         </div>
@@ -769,11 +1041,16 @@ export function OvertimePanel({
                               : selectedPosting.competencyLabel}
                           </h3>
                         </div>
-                        <span className={`legend-pill legend-pill--${selectedPosting.colorToken.toLowerCase()}`}>
-                          {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
-                            ? `${selectedPosting.competencyCode.replace("Post ", "")} -> ${selectedPosting.coverageCompetencyCode.replace("Post ", "")}`
-                            : selectedPosting.competencyCode.replace("Post ", "")}
-                        </span>
+                        <div className="metrics-transfer-pill-row">
+                          <span className={`legend-pill legend-pill--${selectedPosting.colorToken.toLowerCase()}`}>
+                            {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                              ? `${selectedPosting.competencyCode.replace("Post ", "")} -> ${selectedPosting.coverageCompetencyCode.replace("Post ", "")}`
+                              : selectedPosting.competencyCode.replace("Post ", "")}
+                          </span>
+                          {selectedPosting.source === "manual" ? (
+                            <span className="legend-pill legend-pill--slate">Manual</span>
+                          ) : null}
+                        </div>
                       </div>
 
                       <div className="overtime-card-meta">
@@ -789,6 +1066,12 @@ export function OvertimePanel({
                             Claim {selectedPosting.competencyCode} to fill {selectedPosting.coverageCompetencyCode}
                             {selectedPosting.swapEmployeeName ? ` via ${selectedPosting.swapEmployeeName}` : " via swap"}
                           </span>
+                        </div>
+                      ) : null}
+
+                      {selectedPosting.source === "manual" ? (
+                        <div className="overtime-card-meta">
+                          <span>This posting was added manually by a leader/admin.</span>
                         </div>
                       ) : null}
 
@@ -827,6 +1110,18 @@ export function OvertimePanel({
                             ? "Claimed"
                             : "Claim Posting"}
                         </button>
+                        {canManageManualPostings &&
+                        selectedPosting.source === "manual" &&
+                        selectedPosting.claimedEmployeeId === null ? (
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => handleDeleteManualPosting(selectedPosting)}
+                            disabled={isManagingManual}
+                          >
+                            {isManagingManual ? "Deleting..." : "Delete Posting"}
+                          </button>
+                        ) : null}
                       </div>
                     </>
                   ) : null}
@@ -843,6 +1138,24 @@ export function OvertimePanel({
           </div>
         ) : null}
       </div>
+
+      {isManualModalOpen ? (
+        <ManualOvertimePostingModal
+          snapshot={snapshot}
+          selectedScheduleId={manualScheduleId}
+          selectedCompetencyId={manualCompetencyId}
+          selectedDates={manualPostingDates}
+          onScheduleChange={(scheduleId) => {
+            setManualScheduleId(scheduleId);
+            setManualPostingDates([]);
+          }}
+          onCompetencyChange={setManualCompetencyId}
+          onToggleDate={toggleManualPostingDate}
+          onClose={() => setIsManualModalOpen(false)}
+          onSubmit={handleCreateManualPosting}
+          isSubmitting={isManagingManual}
+        />
+      ) : null}
     </section>
   );
 }
