@@ -1048,11 +1048,20 @@ export function MonthlyScheduler({
     setBaselineAssignments(nextAssignments);
     setDraftAssignments(nextAssignments);
     setStatusMessage("");
-    setSelectedCell(null);
-    setEditorCell(null);
-    setSelectedSetAnchorDate(null);
-    setSelectedCoverageCompetencyId(null);
     setDragRange(null);
+
+    /**
+     * Do not eagerly clear the active selection/editor state here.
+     *
+     * Why: autosave revalidates `/schedule`, which produces a fresh
+     * `initialSnapshot` even when the user is still working in the same month.
+     * If we always null out the editor on every incoming snapshot, an open cell
+     * modal closes as soon as another save finishes in the background.
+     *
+     * Instead, we preserve the current UI target and let the narrower
+     * visibility/completion effects below decide whether that cell is still
+     * valid in the refreshed month data.
+     */
     window.localStorage.removeItem(STORAGE_KEY);
   }, [forcedScheduleId, initialSnapshot]);
 
