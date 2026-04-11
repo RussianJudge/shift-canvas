@@ -5,8 +5,14 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 import {
+  createSetRangeKey,
+  createSetRangeKeyFromEntry,
   formatMonthLabel,
   getEmployeeMap,
+  getExtendedMonthDays,
+  getMonthDays,
+  getWorkedSetDays,
+  shiftForDate,
   shiftMonthKey,
 } from "@/lib/scheduling";
 import type { Competency, OvertimeClaim, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
@@ -51,6 +57,37 @@ type TeamTimeCodeMetric = {
   }>;
 };
 
+type TeamCoverageRiskMetric = {
+  scheduleId: string;
+  scheduleName: string;
+  missingSlots: number;
+  gapDays: number;
+  completedSets: number;
+  totalSets: number;
+  topGapPosts: Array<{
+    competencyId: string;
+    code: string;
+    missingSlots: number;
+  }>;
+};
+
+type TeamDepthRiskMetric = {
+  scheduleId: string;
+  scheduleName: string;
+  undercoveredPosts: number;
+  singlePointPosts: number;
+  totalShortfall: number;
+  thinnestPostCode: string | null;
+  thinnestPostSummary: string | null;
+  topThinPosts: Array<{
+    competencyId: string;
+    code: string;
+    qualifiedPeople: number;
+    requiredStaff: number;
+    shortfall: number;
+  }>;
+};
+
 type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
 type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
 
@@ -79,6 +116,11 @@ type TransferSuggestion = {
 
 /** Pads "top 3" lists with blanks so metric cards keep a stable height. */
 function padMetricPeopleRows<T extends { employeeId: string; employeeName: string }>(rows: T[], size = 3) {
+  return Array.from({ length: size }, (_, index) => rows[index] ?? null);
+}
+
+/** Generic version used for non-person metric rows that still need stable height. */
+function padMetricRows<T>(rows: T[], size = 3) {
   return Array.from({ length: size }, (_, index) => rows[index] ?? null);
 }
 
@@ -185,6 +227,179 @@ function getTeamTimeCodeMetrics(
       entryCount: scheduleAssignments.length,
       peopleCount: Object.keys(countsByEmployee).length,
       topPeople,
+    };
+  });
+}
+
+/** Counts competency-covered cells by schedule/date/post for the visible month window. */
+function buildScheduleCoverageIndex(snapshot: SchedulerSnapshot) {
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+
+  return snapshot.assignments.reduce<Record<string, number>>((counts, assignment) => {
+    if (!assignment.competencyId) {
+      return counts;
+    }
+
+    const scheduleId = assignment.scheduleId ?? employeeMap[assignment.employeeId]?.scheduleId;
+
+    if (!scheduleId) {
+      return counts;
+    }
+
+    const key = `${scheduleId}:${assignment.date}:${assignment.competencyId}`;
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+/** Returns each distinct worked set that touches the selected month for one schedule. */
+function getScheduleWorkedSets(snapshot: SchedulerSnapshot, schedule: SchedulerSnapshot["schedules"][number]) {
+  const monthDays = getMonthDays(snapshot.month);
+  const extendedMonthDays = getExtendedMonthDays(snapshot.month);
+  const processedKeys = new Set<string>();
+
+  return monthDays.reduce<Array<{ startDate: string; endDate: string }>>((sets, day) => {
+    if (shiftForDate(schedule, day.date) === "OFF") {
+      return sets;
+    }
+
+    const setDays = getWorkedSetDays(schedule, extendedMonthDays, day.date);
+
+    if (setDays.length === 0) {
+      return sets;
+    }
+
+    const setKey = createSetRangeKey(
+      schedule.id,
+      setDays[0].date,
+      setDays[setDays.length - 1].date,
+    );
+
+    if (processedKeys.has(setKey)) {
+      return sets;
+    }
+
+    processedKeys.add(setKey);
+    sets.push({
+      startDate: setDays[0].date,
+      endDate: setDays[setDays.length - 1].date,
+    });
+
+    return sets;
+  }, []);
+}
+
+/** Highlights where each team is still carrying uncovered staffing risk this month. */
+function getTeamCoverageRiskMetrics(snapshot: SchedulerSnapshot): TeamCoverageRiskMetric[] {
+  const monthDays = getMonthDays(snapshot.month);
+  const coverageIndex = buildScheduleCoverageIndex(snapshot);
+  const completedSetRangeKeys = new Set(snapshot.completedSets.map(createSetRangeKeyFromEntry));
+
+  return snapshot.schedules.map((schedule) => {
+    const gapDays = new Set<string>();
+    const gapCountsByCompetency = snapshot.competencies.reduce<Record<string, number>>((counts, competency) => {
+      counts[competency.id] = 0;
+      return counts;
+    }, {});
+    let missingSlots = 0;
+
+    for (const day of monthDays) {
+      if (shiftForDate(schedule, day.date) === "OFF") {
+        continue;
+      }
+
+      for (const competency of snapshot.competencies) {
+        if (competency.requiredStaff <= 0) {
+          continue;
+        }
+
+        const filledCount = coverageIndex[`${schedule.id}:${day.date}:${competency.id}`] ?? 0;
+        const missingCount = Math.max(0, competency.requiredStaff - filledCount);
+
+        if (missingCount === 0) {
+          continue;
+        }
+
+        missingSlots += missingCount;
+        gapDays.add(day.date);
+        gapCountsByCompetency[competency.id] = (gapCountsByCompetency[competency.id] ?? 0) + missingCount;
+      }
+    }
+
+    const workedSets = getScheduleWorkedSets(snapshot, schedule);
+    const completedSets = workedSets.filter((setEntry) =>
+      completedSetRangeKeys.has(createSetRangeKey(schedule.id, setEntry.startDate, setEntry.endDate)),
+    ).length;
+    const topGapPosts = snapshot.competencies
+      .map((competency) => ({
+        competencyId: competency.id,
+        code: competency.code,
+        missingSlots: gapCountsByCompetency[competency.id] ?? 0,
+      }))
+      .filter((entry) => entry.missingSlots > 0)
+      .sort(
+        (left, right) =>
+          right.missingSlots - left.missingSlots ||
+          left.code.localeCompare(right.code),
+      )
+      .slice(0, 3);
+
+    return {
+      scheduleId: schedule.id,
+      scheduleName: schedule.name,
+      missingSlots,
+      gapDays: gapDays.size,
+      completedSets,
+      totalSets: workedSets.length,
+      topGapPosts,
+    };
+  });
+}
+
+/** Highlights where each team has the thinnest qualification bench. */
+function getTeamDepthRiskMetrics(snapshot: SchedulerSnapshot): TeamDepthRiskMetric[] {
+  return snapshot.schedules.map((schedule) => {
+    const postDepth = snapshot.competencies
+      .map((competency) => {
+        const qualifiedPeople = schedule.employees.filter((employee) =>
+          employee.competencyIds.includes(competency.id),
+        ).length;
+        const shortfall = Math.max(0, competency.requiredStaff - qualifiedPeople);
+
+        return {
+          competencyId: competency.id,
+          code: competency.code,
+          qualifiedPeople,
+          requiredStaff: competency.requiredStaff,
+          shortfall,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.shortfall - left.shortfall ||
+          left.qualifiedPeople - right.qualifiedPeople ||
+          left.code.localeCompare(right.code),
+      );
+
+    const thinnestPost =
+      [...postDepth].sort(
+        (left, right) =>
+          left.qualifiedPeople - right.qualifiedPeople ||
+          right.requiredStaff - left.requiredStaff ||
+          left.code.localeCompare(right.code),
+      )[0] ?? null;
+
+    return {
+      scheduleId: schedule.id,
+      scheduleName: schedule.name,
+      undercoveredPosts: postDepth.filter((entry) => entry.shortfall > 0).length,
+      singlePointPosts: postDepth.filter((entry) => entry.qualifiedPeople <= 1).length,
+      totalShortfall: postDepth.reduce((total, entry) => total + entry.shortfall, 0),
+      thinnestPostCode: thinnestPost?.code ?? null,
+      thinnestPostSummary: thinnestPost
+        ? `${thinnestPost.qualifiedPeople}/${thinnestPost.requiredStaff} qualified`
+        : null,
+      topThinPosts: postDepth.slice(0, 3),
     };
   });
 }
@@ -420,10 +635,20 @@ export function MetricsPanel({
     () => getTeamMetrics(snapshot, filteredOvertimeHistory),
     [snapshot, filteredOvertimeHistory],
   );
+  const coverageRiskMetrics = useMemo(
+    () => getTeamCoverageRiskMetrics(snapshot),
+    [snapshot],
+  );
+  const depthRiskMetrics = useMemo(
+    () => getTeamDepthRiskMetrics(snapshot),
+    [snapshot],
+  );
   const maxQualifiedPeople = Math.max(
     1,
     ...teamMetrics.flatMap((team) => team.competencyMetrics.map((metric) => metric.qualifiedPeople)),
   );
+  const maxMissingSlots = Math.max(1, ...coverageRiskMetrics.map((team) => team.missingSlots));
+  const maxDepthShortfall = Math.max(1, ...depthRiskMetrics.map((team) => team.totalShortfall));
   const maxOvertimeShifts = Math.max(1, ...teamMetrics.map((team) => team.overtimeShifts));
   const teamTimeCodeMetrics = useMemo(
     () => getTeamTimeCodeMetrics(snapshot, filteredAssignmentHistory, selectedTimeCodeId),
@@ -578,6 +803,118 @@ export function MetricsPanel({
                       </div>
                     </div>
                   ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="metrics-section">
+          <div className="metrics-section__header">
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Coverage Risk By Team</h2>
+              <p className="toolbar-status">Missing staffing coverage inside {formatMonthLabel(snapshot.month)}</p>
+            </div>
+          </div>
+
+          <div className="metrics-team-list">
+            {coverageRiskMetrics.map((team) => (
+              <article key={`${team.scheduleId}-coverage-risk`} className="metrics-card">
+                <div className="metrics-card__header">
+                  <div>
+                    <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
+                    <h3 className="metrics-card__title">
+                      {team.missingSlots} uncovered slot{team.missingSlots === 1 ? "" : "s"}
+                    </h3>
+                  </div>
+                  <div className="metrics-card__stats">
+                    <span>{team.gapDays} day{team.gapDays === 1 ? "" : "s"} exposed</span>
+                    <span>
+                      {team.completedSets}/{team.totalSets} set{team.totalSets === 1 ? "" : "s"} complete
+                    </span>
+                  </div>
+                </div>
+
+                <div className="metrics-bar-track metrics-bar-track--tall">
+                  <span
+                    className="metrics-bar-fill metrics-bar-fill--rose"
+                    style={{
+                      width: `${team.missingSlots === 0 ? 0 : Math.max(10, (team.missingSlots / maxMissingSlots) * 100)}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="metrics-top-list">
+                  <strong className="metrics-top-list__title">Top gap posts</strong>
+                  <div className="metrics-top-list__rows">
+                    {padMetricRows(team.topGapPosts).map((post, index) => (
+                      <div
+                        key={post?.competencyId ?? `coverage-gap-empty-${team.scheduleId}-${index}`}
+                        className={`metrics-top-list__row ${post ? "" : "metrics-top-list__row--empty"}`}
+                      >
+                        <span>{post?.code ?? "\u00A0"}</span>
+                        <strong>{post ? `${post.missingSlots} slot${post.missingSlots === 1 ? "" : "s"}` : "\u00A0"}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="metrics-section">
+          <div className="metrics-section__header">
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Bench Depth By Team</h2>
+              <p className="toolbar-status">Qualification fragility based on current team depth</p>
+            </div>
+          </div>
+
+          <div className="metrics-team-list">
+            {depthRiskMetrics.map((team) => (
+              <article key={`${team.scheduleId}-depth-risk`} className="metrics-card">
+                <div className="metrics-card__header">
+                  <div>
+                    <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
+                    <h3 className="metrics-card__title">
+                      {team.undercoveredPosts} post{team.undercoveredPosts === 1 ? "" : "s"} below required depth
+                    </h3>
+                  </div>
+                  <div className="metrics-card__stats">
+                    <span>{team.singlePointPosts} single-point post{team.singlePointPosts === 1 ? "" : "s"}</span>
+                    <span>
+                      {team.thinnestPostCode
+                        ? `${team.thinnestPostCode} · ${team.thinnestPostSummary}`
+                        : "No bench data"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="metrics-bar-track metrics-bar-track--tall">
+                  <span
+                    className="metrics-bar-fill metrics-bar-fill--orange"
+                    style={{
+                      width: `${team.totalShortfall === 0 ? 0 : Math.max(10, (team.totalShortfall / maxDepthShortfall) * 100)}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="metrics-top-list">
+                  <strong className="metrics-top-list__title">Thinnest posts</strong>
+                  <div className="metrics-top-list__rows">
+                    {padMetricRows(team.topThinPosts).map((post, index) => (
+                      <div
+                        key={post?.competencyId ?? `depth-risk-empty-${team.scheduleId}-${index}`}
+                        className={`metrics-top-list__row ${post ? "" : "metrics-top-list__row--empty"}`}
+                      >
+                        <span>{post?.code ?? "\u00A0"}</span>
+                        <strong>
+                          {post ? `${post.qualifiedPeople}/${post.requiredStaff}` : "\u00A0"}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </article>
             ))}
