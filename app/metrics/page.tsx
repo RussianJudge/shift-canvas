@@ -6,18 +6,16 @@ import { getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
 
-function getCurrentDateKey(timeZone: string) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
 /** Accepts only canonical `YYYY-MM` month keys from the URL. */
 function resolveMetricsMonth(month: string | undefined, fallbackMonth: string) {
   return month && /^\d{4}-\d{2}$/.test(month) ? month : fallbackMonth;
+}
+
+/** Returns the last calendar day inside the selected metrics month. */
+function getMonthEndDateKey(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const monthEnd = new Date(Date.UTC(year, monthNumber, 0));
+  return monthEnd.toISOString().slice(0, 10);
 }
 
 export default async function MetricsPage({
@@ -29,10 +27,10 @@ export default async function MetricsPage({
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = resolveMetricsMonth(resolvedSearchParams?.month, currentMonth);
-  const today = getCurrentDateKey("America/Edmonton");
+  const metricsHistoryEnd = getMonthEndDateKey(month);
   const snapshot = await getSchedulerSnapshot(month, session);
-  const overtimeHistory = await getMetricsOvertimeHistory(today, session);
-  const assignmentHistory = await getMetricsAssignmentHistory(today, session);
+  const overtimeHistory = await getMetricsOvertimeHistory(metricsHistoryEnd, session);
+  const assignmentHistory = await getMetricsAssignmentHistory(metricsHistoryEnd, session);
 
   return (
     <WorkspaceShell viewer={session}>
