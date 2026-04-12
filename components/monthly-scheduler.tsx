@@ -1164,7 +1164,9 @@ export function MonthlyScheduler({
   }, [baselineAssignments, draftAssignments, isDraftHydrated]);
 
   useEffect(() => {
-    if (!canEdit || !isDraftHydrated || !hasChanges) {
+    // Treat an open cell editor like an in-progress edit session: keep the
+    // draft local, then autosave once the modal closes.
+    if (!canEdit || !isDraftHydrated || !hasChanges || editorCell) {
       return;
     }
 
@@ -1200,7 +1202,7 @@ export function MonthlyScheduler({
     }, AUTO_SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [activeSchedule.id, canEdit, dirtyUpdates, draftAssignments, hasChanges, isDraftHydrated]);
+  }, [activeSchedule.id, canEdit, dirtyUpdates, draftAssignments, editorCell, hasChanges, isDraftHydrated]);
 
   useEffect(() => {
     function handlePointerUp() {
