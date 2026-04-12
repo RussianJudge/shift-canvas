@@ -647,13 +647,14 @@ function AssignmentModal({
                 className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
                   selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
                 }`}
-                onClick={() =>
+                onClick={() => {
                   onApply({
                     ...selection,
                     competencyId: null,
                     timeCodeId: timeCode.id,
-                  })
-                }
+                  });
+                  onClose();
+                }}
               >
                 {timeCode.code}
               </button>
