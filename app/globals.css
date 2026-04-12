@@ -3286,6 +3286,7 @@ select {
     left: auto !important;
     top: auto !important;
     min-height: 0;
+    border: 1px solid rgba(71, 85, 105, 0.62);
     box-shadow: none !important;
     background: white !important;
   }
@@ -3320,7 +3321,7 @@ select {
     color: #1f2937;
     font-weight: 700;
     font-size: 0.62rem;
-    border: 1px solid rgba(148, 163, 184, 0.3);
+    border: 1px solid rgba(51, 65, 85, 0.72);
   }
 
   .print-schedule-grid .shift-cell--day {
