@@ -671,13 +671,14 @@ function AssignmentModal({
                 className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
                   selection.competencyId === competency.id ? "legend-pill--selected" : ""
                 }`}
-                onClick={() =>
+                onClick={() => {
                   onApply({
                     ...selection,
                     competencyId: competency.id,
                     timeCodeId: null,
-                  })
-                }
+                  });
+                  onClose();
+                }}
               >
                 {getCompactCode(competency.code)}
               </button>
