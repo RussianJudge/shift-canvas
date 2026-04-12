@@ -1302,6 +1302,10 @@ select {
   background: linear-gradient(90deg, rgba(190, 24, 93, 0.9), rgba(251, 113, 133, 0.42));
 }
 
+.metrics-bar-fill--fragility {
+  background: linear-gradient(90deg, rgba(194, 65, 12, 0.92), rgba(251, 146, 60, 0.42));
+}
+
 .metrics-top-list {
   display: grid;
   gap: 0.45rem;
@@ -1328,6 +1332,18 @@ select {
 
 .metrics-top-list__row strong {
   color: var(--ink);
+}
+
+.metrics-top-list__row--stacked > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.metrics-top-list__row--stacked small {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .metrics-top-list__row--empty {

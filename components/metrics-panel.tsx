@@ -29,6 +29,7 @@ type TeamMetric = {
   scheduleId: string;
   scheduleName: string;
   competencyMetrics: TeamCompetencyMetric[];
+  shiftFragilityMetrics: ShiftFragilityMetric[];
   overtimeShifts: number;
   overtimeWorkers: number;
   topCompetencyCode: string | null;
@@ -42,6 +43,18 @@ type TeamMetric = {
     employeeName: string;
     claimedShifts: number;
   }>;
+};
+
+type ShiftFragilityMetric = {
+  competencyId: string;
+  code: string;
+  colorToken: string;
+  riskScore: number;
+  overtimeClaims: number;
+  recentWeight: number;
+  qualifiedPeople: number;
+  requiredStaff: number;
+  lastClaimDate: string | null;
 };
 
 type TeamTimeCodeMetric = {
@@ -58,6 +71,7 @@ type TeamTimeCodeMetric = {
 
 type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
 type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
+type FragilityWindow = OvertimeWindow;
 
 type TransferProjection = {
   competencyId: string;
@@ -97,6 +111,16 @@ function shiftDateKey(dateKey: string, deltaDays: number) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, day + deltaDays));
   return shifted.toISOString().slice(0, 10);
+}
+
+/** Counts calendar days between two ISO date keys in UTC. */
+function daysBetweenDateKeys(startDate: string, endDate: string) {
+  const [startYear, startMonth, startDay] = startDate.split("-").map(Number);
+  const [endYear, endMonth, endDay] = endDate.split("-").map(Number);
+  const startTime = Date.UTC(startYear, startMonth - 1, startDay);
+  const endTime = Date.UTC(endYear, endMonth - 1, endDay);
+
+  return Math.max(0, Math.round((endTime - startTime) / 86_400_000));
 }
 
 /** Returns the first day included in the selected overtime time window. */
@@ -155,6 +179,10 @@ function formatAnchorDateLabel(isoDate: string) {
   }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
+function formatFragilityScore(score: number) {
+  return score.toFixed(1);
+}
+
 /** Summarizes one chosen time code across teams for the selected history window. */
 function getTeamTimeCodeMetrics(
   snapshot: SchedulerSnapshot,
@@ -199,8 +227,13 @@ function getTeamTimeCodeMetrics(
   });
 }
 
-/** Builds the two main dashboard summaries shown on the metrics screen. */
-function getTeamMetrics(snapshot: SchedulerSnapshot, overtimeClaims: OvertimeClaim[]): TeamMetric[] {
+/** Builds the main dashboard summaries shown on the metrics screen. */
+function getTeamMetrics(
+  snapshot: SchedulerSnapshot,
+  overtimeClaims: OvertimeClaim[],
+  fragilityClaims: OvertimeClaim[],
+  anchorDate: string,
+): TeamMetric[] {
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const competencyMap = Object.fromEntries(
     snapshot.competencies.map((competency) => [competency.id, competency]),
@@ -219,6 +252,14 @@ function getTeamMetrics(snapshot: SchedulerSnapshot, overtimeClaims: OvertimeCla
       .sort((left, right) => right.qualifiedPeople - left.qualifiedPeople || left.code.localeCompare(right.code));
 
     const borrowedClaims = overtimeClaims.filter((claim) => {
+      if (claim.scheduleId !== schedule.id) {
+        return false;
+      }
+
+      const claimEmployee = employeeMap[claim.employeeId];
+      return Boolean(claimEmployee && claimEmployee.scheduleId !== schedule.id);
+    });
+    const borrowedFragilityClaims = fragilityClaims.filter((claim) => {
       if (claim.scheduleId !== schedule.id) {
         return false;
       }
@@ -269,10 +310,64 @@ function getTeamMetrics(snapshot: SchedulerSnapshot, overtimeClaims: OvertimeCla
       )
       .slice(0, 3);
 
+    const shiftFragilityMetrics = snapshot.competencies
+      .map((competency) => {
+        const claims = borrowedFragilityClaims.filter((claim) => claim.competencyId === competency.id);
+        const qualifiedPeople = schedule.employees.filter((employee) =>
+          employee.competencyIds.includes(competency.id),
+        ).length;
+        const requiredStaff = Math.max(1, competency.requiredStaff);
+        const lastClaimDate = claims
+          .map((claim) => claim.date)
+          .sort((left, right) => right.localeCompare(left))[0] ?? null;
+        const recentWeight = claims.reduce((total, claim) => {
+          const daysAgo = daysBetweenDateKeys(claim.date, anchorDate);
+
+          /**
+           * Every claim counts, but recent overtime should move a competency
+           * higher on the fragility list because it represents a risk that has
+           * happened under the current staffing reality.
+           */
+          return total + Math.max(0.25, 1 - daysAgo / 365);
+        }, 0);
+        const coverageRatio = qualifiedPeople / requiredStaff;
+        const depthMultiplier =
+          qualifiedPeople === 0
+            ? 3
+            : coverageRatio < 1
+            ? 2.4
+            : coverageRatio < 1.5
+            ? 1.8
+            : coverageRatio < 2
+            ? 1.35
+            : 1;
+
+        return {
+          competencyId: competency.id,
+          code: competency.code,
+          colorToken: competency.colorToken,
+          riskScore: recentWeight * depthMultiplier,
+          overtimeClaims: claims.length,
+          recentWeight,
+          qualifiedPeople,
+          requiredStaff,
+          lastClaimDate,
+        } satisfies ShiftFragilityMetric;
+      })
+      .filter((metric) => metric.overtimeClaims > 0)
+      .sort(
+        (left, right) =>
+          right.riskScore - left.riskScore ||
+          right.overtimeClaims - left.overtimeClaims ||
+          left.code.localeCompare(right.code),
+      )
+      .slice(0, 3);
+
     return {
       scheduleId: schedule.id,
       scheduleName: schedule.name,
       competencyMetrics,
+      shiftFragilityMetrics,
       overtimeShifts: borrowedClaims.length,
       overtimeWorkers: new Set(borrowedClaims.map((claim) => claim.employeeId)).size,
       topCompetencyCode,
@@ -428,6 +523,7 @@ export function MetricsPanel({
 }) {
   const router = useRouter();
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
+  const [fragilityWindow, setFragilityWindow] = useState<FragilityWindow>("1y");
   const [timeCodeWindow, setTimeCodeWindow] = useState<TimeCodeWindow>("30d");
   const [selectedTimeCodeId, setSelectedTimeCodeId] = useState(snapshot.timeCodes[0]?.id ?? "");
   const metricsAnchorDate = useMemo(
@@ -438,19 +534,27 @@ export function MetricsPanel({
     const start = getWindowStart(metricsAnchorDate, overtimeWindow);
     return overtimeHistory.filter((claim) => claim.date >= start && claim.date <= metricsAnchorDate);
   }, [overtimeHistory, overtimeWindow, metricsAnchorDate]);
+  const filteredFragilityHistory = useMemo(() => {
+    const start = getWindowStart(metricsAnchorDate, fragilityWindow);
+    return overtimeHistory.filter((claim) => claim.date >= start && claim.date <= metricsAnchorDate);
+  }, [overtimeHistory, fragilityWindow, metricsAnchorDate]);
   const filteredAssignmentHistory = useMemo(() => {
     const start = getTimeCodeWindowStart(metricsAnchorDate, timeCodeWindow);
     return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
   }, [assignmentHistory, timeCodeWindow, metricsAnchorDate]);
   const teamMetrics = useMemo(
-    () => getTeamMetrics(snapshot, filteredOvertimeHistory),
-    [snapshot, filteredOvertimeHistory],
+    () => getTeamMetrics(snapshot, filteredOvertimeHistory, filteredFragilityHistory, metricsAnchorDate),
+    [snapshot, filteredOvertimeHistory, filteredFragilityHistory, metricsAnchorDate],
   );
   const maxQualifiedPeople = Math.max(
     1,
     ...teamMetrics.flatMap((team) => team.competencyMetrics.map((metric) => metric.qualifiedPeople)),
   );
   const maxOvertimeShifts = Math.max(1, ...teamMetrics.map((team) => team.overtimeShifts));
+  const maxFragilityScore = Math.max(
+    1,
+    ...teamMetrics.flatMap((team) => team.shiftFragilityMetrics.map((metric) => metric.riskScore)),
+  );
   const teamTimeCodeMetrics = useMemo(
     () => getTeamTimeCodeMetrics(snapshot, filteredAssignmentHistory, selectedTimeCodeId),
     [snapshot, filteredAssignmentHistory, selectedTimeCodeId],
@@ -686,6 +790,93 @@ export function MetricsPanel({
                 </div>
               </article>
             ))}
+          </div>
+        </section>
+
+        <section className="metrics-section">
+          <div className="metrics-section__header">
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Shift Fragility</h2>
+              <p className="toolbar-status">
+                Historical overtime risk, anchored to {formatAnchorDateLabel(metricsAnchorDate)}
+              </p>
+            </div>
+            <div className="metrics-window-toggle" aria-label="Shift fragility history window">
+              {(["30d", "90d", "1y", "ytd"] as FragilityWindow[]).map((window) => (
+                <button
+                  key={window}
+                  type="button"
+                  className={`ghost-button ${fragilityWindow === window ? "ghost-button--active" : ""}`}
+                  onClick={() => setFragilityWindow(window)}
+                >
+                  {window.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="metrics-team-list">
+            {teamMetrics.map((team) => {
+              const topFragilityScore = team.shiftFragilityMetrics[0]?.riskScore ?? 0;
+
+              return (
+                <article key={`${team.scheduleId}-fragility`} className="metrics-card">
+                  <div className="metrics-card__header">
+                    <div>
+                      <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
+                      <h3 className="metrics-card__title">
+                        {topFragilityScore > 0
+                          ? `${formatFragilityScore(topFragilityScore)} risk score`
+                          : "No historical fragility"}
+                      </h3>
+                    </div>
+                    <div className="metrics-card__stats">
+                      <span>Recent OT weighted</span>
+                      <span>Depth adjusted</span>
+                    </div>
+                  </div>
+
+                  <div className="metrics-bar-track metrics-bar-track--tall">
+                    <span
+                      className="metrics-bar-fill metrics-bar-fill--fragility"
+                      style={{
+                        width: `${topFragilityScore === 0 ? 0 : Math.max(10, (topFragilityScore / maxFragilityScore) * 100)}%`,
+                      }}
+                    />
+                  </div>
+
+                  <div className="metrics-top-list">
+                    <strong className="metrics-top-list__title">Top risk competencies</strong>
+                    <div className="metrics-top-list__rows">
+                      {padMetricRows(team.shiftFragilityMetrics).map((metric, index) => (
+                        <div
+                          key={metric?.competencyId ?? `fragility-empty-${team.scheduleId}-${index}`}
+                          className={`metrics-top-list__row metrics-top-list__row--stacked ${
+                            metric ? "" : "metrics-top-list__row--empty"
+                          }`}
+                        >
+                          <span>
+                            {metric ? (
+                              <>
+                                <span className={`legend-pill legend-pill--${metric.colorToken.toLowerCase()}`}>
+                                  {metric.code}
+                                </span>
+                                <small>
+                                  {metric.overtimeClaims} OT · {metric.qualifiedPeople}/{metric.requiredStaff} qualified
+                                </small>
+                              </>
+                            ) : (
+                              "\u00A0"
+                            )}
+                          </span>
+                          <strong>{metric ? formatFragilityScore(metric.riskScore) : "\u00A0"}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
 
