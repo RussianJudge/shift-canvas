@@ -533,9 +533,40 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     }));
 
   if (rowsToUpsert.length > 0) {
-    const { error } = await supabase.from("schedule_assignments").upsert(rowsToUpsert, {
-      onConflict: "employee_id,assignment_date",
-    });
+    const saveResults = await Promise.all(
+      rowsToUpsert.map(async (row) => {
+        /**
+         * Use update-then-insert instead of `upsert(... onConflict)`.
+         *
+         * Why: older and live databases have moved through a few versions of
+         * `schedule_assignments` while schedule scoping was added. If the
+         * physical unique constraint does not exactly match the conflict target
+         * the client specifies, Postgres rejects the entire save. Updating by
+         * the business key first keeps schedule edits durable even when the
+         * supporting index/constraint shape is slightly different.
+         */
+        const updateResult = await supabase
+          .from("schedule_assignments")
+          .update(row)
+          .eq("employee_id", row.employee_id)
+          .eq("assignment_date", row.assignment_date)
+          .select("employee_id");
+
+        if (updateResult.error) {
+          return updateResult.error;
+        }
+
+        if ((updateResult.data ?? []).length > 0) {
+          return null;
+        }
+
+        const insertResult = await supabase.from("schedule_assignments").insert(row);
+
+        return insertResult.error;
+      }),
+    );
+
+    const error = saveResults.find(Boolean);
 
     if (error) {
       return {

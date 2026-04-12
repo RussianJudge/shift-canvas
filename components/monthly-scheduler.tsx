@@ -24,7 +24,15 @@ import {
   shiftForDate,
   toggleCompletedSetEntries,
 } from "@/lib/scheduling";
-import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
+import type {
+  Competency,
+  Employee,
+  Schedule,
+  SchedulerSnapshot,
+  ShiftKind,
+  StoredAssignment,
+  TimeCode,
+} from "@/lib/types";
 
 /**
  * The scheduler is the most interaction-heavy screen in the app.
@@ -320,6 +328,30 @@ function applySavedUpdatesToBaseline(
     }
 
     delete nextAssignments[key];
+  }
+
+  return nextAssignments;
+}
+
+function applyStoredUpdatesToAssignments(
+  assignments: Record<string, AssignmentSelection>,
+  updates: StoredAssignment[],
+) {
+  const nextAssignments = { ...assignments };
+
+  for (const update of updates) {
+    const key = createAssignmentKey(update.employeeId, update.date);
+
+    if (!update.competencyId && !update.timeCodeId && !update.notes) {
+      delete nextAssignments[key];
+      continue;
+    }
+
+    nextAssignments[key] = {
+      competencyId: update.competencyId,
+      timeCodeId: update.timeCodeId,
+      notes: update.notes ?? null,
+    };
   }
 
   return nextAssignments;
@@ -769,6 +801,8 @@ export function MonthlyScheduler({
   const [isSavingPins, startPinSaveTransition] = useTransition();
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const latestAutoSaveTokenRef = useRef(0);
+  const baselineAssignmentsRef = useRef(baselineAssignments);
+  const draftAssignmentsRef = useRef(draftAssignments);
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
   const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
@@ -1036,7 +1070,19 @@ export function MonthlyScheduler({
   }, [forcedScheduleId, selectedScheduleId]);
 
   useEffect(() => {
+    baselineAssignmentsRef.current = baselineAssignments;
+  }, [baselineAssignments]);
+
+  useEffect(() => {
+    draftAssignmentsRef.current = draftAssignments;
+  }, [draftAssignments]);
+
+  useEffect(() => {
     const nextAssignments = buildAssignmentIndex(initialSnapshot.assignments);
+    const unsavedDraftDelta = buildDraftDelta(
+      baselineAssignmentsRef.current,
+      draftAssignmentsRef.current,
+    );
 
     setSnapshot(initialSnapshot);
     setCurrentMonth(initialSnapshot.month);
@@ -1048,7 +1094,25 @@ export function MonthlyScheduler({
         : initialSnapshot.schedules[0]?.id ?? "",
     );
     setBaselineAssignments(nextAssignments);
-    setDraftAssignments(nextAssignments);
+    setDraftAssignments(() => {
+      const mergedAssignments = { ...nextAssignments };
+
+      /**
+       * A fresh server snapshot can arrive while the browser still has local
+       * work that has not been confirmed by autosave yet. Preserve that delta
+       * on top of the incoming server rows so pasted cross-month set/column
+       * work does not briefly appear and then vanish during a refresh/reload.
+       */
+      for (const [key, selection] of Object.entries(unsavedDraftDelta)) {
+        if (selection) {
+          mergedAssignments[key] = { ...selection };
+        } else {
+          delete mergedAssignments[key];
+        }
+      }
+
+      return mergedAssignments;
+    });
     setStatusMessage("");
     setDragRange(null);
 
@@ -1064,7 +1128,6 @@ export function MonthlyScheduler({
      * visibility/completion effects below decide whether that cell is still
      * valid in the refreshed month data.
      */
-    window.localStorage.removeItem(STORAGE_KEY);
   }, [forcedScheduleId, initialSnapshot]);
 
   useEffect(() => {
@@ -1405,6 +1468,38 @@ export function MonthlyScheduler({
     });
   }
 
+  function saveBulkAssignmentUpdates(updates: StoredAssignment[], successMessage: string) {
+    if (!canEdit || updates.length === 0) {
+      return;
+    }
+
+    const scheduledUpdates = updates.map((update) => ({ ...update }));
+    const autoSaveToken = latestAutoSaveTokenRef.current + 1;
+
+    latestAutoSaveTokenRef.current = autoSaveToken;
+
+    startSaveTransition(async () => {
+      if (latestAutoSaveTokenRef.current === autoSaveToken) {
+        setStatusMessage(
+          `Saving ${scheduledUpdates.length} pasted cell${scheduledUpdates.length === 1 ? "" : "s"}...`,
+        );
+      }
+
+      const result = await saveAssignments({
+        scheduleId: activeSchedule.id,
+        updates: scheduledUpdates,
+      });
+
+      if (result.ok) {
+        setBaselineAssignments((current) => applyStoredUpdatesToAssignments(current, scheduledUpdates));
+      }
+
+      if (latestAutoSaveTokenRef.current === autoSaveToken) {
+        setStatusMessage(result.ok ? successMessage : result.message);
+      }
+    });
+  }
+
   function handlePinToggle(employeeId: string) {
     const currentPins = pinnedEmployeesBySchedule[activeSchedule.id] ?? [];
     const nextPins = currentPins.includes(employeeId)
@@ -1620,39 +1715,38 @@ export function MonthlyScheduler({
       return;
     }
 
-    startTransition(() => {
-      setDraftAssignments((current) => {
-        const nextAssignments = { ...current };
+    const pasteUpdates = activeSchedule.employees.flatMap<StoredAssignment>((employee) => {
+      const copiedSelections = copiedSetTemplate.selectionsByEmployeeId[employee.id];
 
-        for (const employee of activeSchedule.employees) {
-          const copiedSelections = copiedSetTemplate.selectionsByEmployeeId[employee.id];
+      if (!copiedSelections) {
+        return [];
+      }
 
-          if (!copiedSelections) {
-            continue;
-          }
+      return selectedSetDays.map((day, index) => {
+        const copiedSelection =
+          copiedSelections[index] ?? getDefaultSelection(shiftForDate(activeSchedule, day.date), snapshot.timeCodes);
 
-          selectedSetDays.forEach((day, index) => {
-            const copiedSelection = copiedSelections[index] ?? getDefaultSelection(shiftForDate(activeSchedule, day.date), snapshot.timeCodes);
-            const key = createAssignmentKey(employee.id, day.date);
-
-            if (!copiedSelection.competencyId && !copiedSelection.timeCodeId) {
-              delete nextAssignments[key];
-              return;
-            }
-
-            nextAssignments[key] = { ...copiedSelection };
-          });
-        }
-
-        return nextAssignments;
+        return {
+          employeeId: employee.id,
+          scheduleId: activeSchedule.id,
+          date: day.date,
+          competencyId: copiedSelection.competencyId,
+          timeCodeId: copiedSelection.timeCodeId,
+          notes: copiedSelection.notes ?? null,
+          shiftKind: shiftForDate(activeSchedule, day.date),
+        };
       });
-
-      setStatusMessage(
-        `Pasted set onto ${formatShortDate(selectedSetDays[0].date)}-${formatShortDate(
-          selectedSetDays[selectedSetDays.length - 1].date,
-        )}.`,
-      );
     });
+    const successMessage = `Pasted set onto ${formatShortDate(selectedSetDays[0].date)}-${formatShortDate(
+      selectedSetDays[selectedSetDays.length - 1].date,
+    )} and saved.`;
+
+    startTransition(() => {
+      setDraftAssignments((current) => applyStoredUpdatesToAssignments(current, pasteUpdates));
+      setStatusMessage(successMessage.replace(" and saved.", "."));
+    });
+
+    saveBulkAssignmentUpdates(pasteUpdates, successMessage);
   }
 
   function handleCopyColumn() {
@@ -1686,32 +1780,30 @@ export function MonthlyScheduler({
       return;
     }
 
-    startTransition(() => {
-      setDraftAssignments((current) => {
-        const nextAssignments = { ...current };
+    const pasteUpdates = activeSchedule.employees.map<StoredAssignment>((employee) => {
+      const copiedSelection = copiedColumnTemplate.selectionsByEmployeeId[employee.id];
+      const nextSelection =
+        copiedSelection ??
+        getDefaultSelection(shiftForDate(activeSchedule, selectedColumnDate), snapshot.timeCodes);
 
-        for (const employee of activeSchedule.employees) {
-          const copiedSelection = copiedColumnTemplate.selectionsByEmployeeId[employee.id];
-          const nextSelection =
-            copiedSelection ??
-            getDefaultSelection(shiftForDate(activeSchedule, selectedColumnDate), snapshot.timeCodes);
-          const key = createAssignmentKey(employee.id, selectedColumnDate);
-
-          if (!nextSelection.competencyId && !nextSelection.timeCodeId && !nextSelection.notes) {
-            delete nextAssignments[key];
-            continue;
-          }
-
-          nextAssignments[key] = { ...nextSelection };
-        }
-
-        return nextAssignments;
-      });
-
-      setStatusMessage(
-        `Pasted column onto ${formatShortDate(selectedColumnDate)}.`,
-      );
+      return {
+        employeeId: employee.id,
+        scheduleId: activeSchedule.id,
+        date: selectedColumnDate,
+        competencyId: nextSelection.competencyId,
+        timeCodeId: nextSelection.timeCodeId,
+        notes: nextSelection.notes ?? null,
+        shiftKind: shiftForDate(activeSchedule, selectedColumnDate),
+      };
     });
+    const successMessage = `Pasted column onto ${formatShortDate(selectedColumnDate)} and saved.`;
+
+    startTransition(() => {
+      setDraftAssignments((current) => applyStoredUpdatesToAssignments(current, pasteUpdates));
+      setStatusMessage(successMessage.replace(" and saved.", "."));
+    });
+
+    saveBulkAssignmentUpdates(pasteUpdates, successMessage);
   }
 
   function handleClearSet() {
