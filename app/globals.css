@@ -1306,6 +1306,71 @@ select {
   background: linear-gradient(90deg, rgba(194, 65, 12, 0.92), rgba(251, 146, 60, 0.42));
 }
 
+.metrics-fatigue-bands {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.75rem, 1fr));
+  gap: 0.45rem;
+}
+
+.metrics-fatigue-band {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metrics-fatigue-band strong {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.metrics-fatigue-band--green {
+  background: rgba(22, 163, 74, 0.12);
+  color: #166534;
+}
+
+.metrics-fatigue-band--amber {
+  background: rgba(217, 119, 6, 0.14);
+  color: #92400e;
+}
+
+.metrics-fatigue-band--red {
+  background: rgba(220, 38, 38, 0.13);
+  color: #991b1b;
+}
+
+.metrics-fatigue-band--critical {
+  background: rgba(88, 28, 135, 0.14);
+  color: #581c87;
+}
+
+.metrics-fatigue-dot {
+  width: 0.72rem;
+  height: 0.72rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.metrics-fatigue-dot--green {
+  background: #16a34a;
+}
+
+.metrics-fatigue-dot--amber {
+  background: #d97706;
+}
+
+.metrics-fatigue-dot--red {
+  background: #dc2626;
+}
+
+.metrics-fatigue-dot--critical {
+  background: #7e22ce;
+}
+
 .metrics-top-list {
   display: grid;
   gap: 0.45rem;

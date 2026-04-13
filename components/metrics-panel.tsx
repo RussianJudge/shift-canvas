@@ -7,9 +7,11 @@ import { useRouter } from "next/navigation";
 import {
   formatMonthLabel,
   getEmployeeMap,
+  getMonthDays,
   shiftMonthKey,
+  shiftForDate,
 } from "@/lib/scheduling";
-import type { Competency, OvertimeClaim, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
+import type { Competency, OvertimeClaim, SchedulerSnapshot, StoredAssignment, TimeCode } from "@/lib/types";
 
 /**
  * Metrics dashboard and planning sandbox.
@@ -57,6 +59,30 @@ type ShiftFragilityMetric = {
   lastClaimDate: string | null;
 };
 
+type FatigueBand = "green" | "amber" | "red" | "critical";
+
+type EmployeeFatigueMetric = {
+  employeeId: string;
+  employeeName: string;
+  consecutiveShifts: number;
+  band: FatigueBand;
+  excessOverNormalCycle: number;
+};
+
+type TeamFatigueMetric = {
+  scheduleId: string;
+  scheduleName: string;
+  totalScheduledEmployees: number;
+  greenCount: number;
+  amberCount: number;
+  redCount: number;
+  criticalCount: number;
+  highestStreak: number;
+  countAboveNormalCycle: number;
+  averageConsecutiveShifts: number;
+  topEmployees: EmployeeFatigueMetric[];
+};
+
 type TeamTimeCodeMetric = {
   scheduleId: string;
   scheduleName: string;
@@ -72,6 +98,8 @@ type TeamTimeCodeMetric = {
 type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
 type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
 type FragilityWindow = OvertimeWindow;
+const NORMAL_FATIGUE_CYCLE = 6;
+const FATIGUE_LOOKBACK_DAYS = 30;
 
 type TransferProjection = {
   competencyId: string;
@@ -104,6 +132,13 @@ function padMetricPeopleRows<T extends { employeeId: string; employeeName: strin
 /** Generic version used for non-person metric rows that still need stable height. */
 function padMetricRows<T>(rows: T[], size = 3) {
   return Array.from({ length: size }, (_, index) => rows[index] ?? null);
+}
+
+/** Creates an inclusive UTC date list for streak scans. */
+function getDateRange(startDate: string, endDate: string) {
+  const days = daysBetweenDateKeys(startDate, endDate);
+
+  return Array.from({ length: days + 1 }, (_, index) => shiftDateKey(startDate, index));
 }
 
 /** Shifts an ISO date string by whole days while keeping the result in UTC. */
@@ -183,6 +218,46 @@ function formatFragilityScore(score: number) {
   return score.toFixed(1);
 }
 
+function getFatigueBand(consecutiveShifts: number): FatigueBand {
+  if (consecutiveShifts <= 6) {
+    return "green";
+  }
+
+  if (consecutiveShifts <= 12) {
+    return "amber";
+  }
+
+  if (consecutiveShifts < 18) {
+    return "red";
+  }
+
+  return "critical";
+}
+
+function formatFatigueBandLabel(band: FatigueBand) {
+  return band[0].toUpperCase() + band.slice(1);
+}
+
+function isNonWorkingTimeCode(timeCode: TimeCode | undefined) {
+  if (!timeCode) {
+    return false;
+  }
+
+  const code = timeCode.code.trim().toUpperCase();
+  const label = timeCode.label.trim().toUpperCase();
+
+  return (
+    code === "OFF" ||
+    code === "V" ||
+    code === "VAC" ||
+    code === "VACATION" ||
+    code === "BOT" ||
+    label.includes("BOOKED OFF") ||
+    label.includes("VACATION") ||
+    label.includes("LEAVE")
+  );
+}
+
 /** Summarizes one chosen time code across teams for the selected history window. */
 function getTeamTimeCodeMetrics(
   snapshot: SchedulerSnapshot,
@@ -223,6 +298,107 @@ function getTeamTimeCodeMetrics(
       entryCount: scheduleAssignments.length,
       peopleCount: Object.keys(countsByEmployee).length,
       topPeople,
+    };
+  });
+}
+
+function getTeamFatigueMetrics({
+  snapshot,
+  assignmentHistory,
+  overtimeHistory,
+  month,
+}: {
+  snapshot: SchedulerSnapshot;
+  assignmentHistory: StoredAssignment[];
+  overtimeHistory: OvertimeClaim[];
+  month: string;
+}): TeamFatigueMetric[] {
+  const monthDays = getMonthDays(month);
+  const monthStart = monthDays[0]?.date ?? `${month}-01`;
+  const monthEnd = monthDays[monthDays.length - 1]?.date ?? getMonthEndDateKey(month);
+  const scanStart = shiftDateKey(monthStart, -FATIGUE_LOOKBACK_DAYS);
+  const scanDates = getDateRange(scanStart, monthEnd);
+  const timeCodeMap = Object.fromEntries(
+    snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode]),
+  ) as Record<string, TimeCode>;
+  const assignmentsByEmployeeDate = new Map(
+    assignmentHistory.map((assignment) => [`${assignment.employeeId}:${assignment.date}`, assignment]),
+  );
+  const overtimeClaimDatesByEmployee = overtimeHistory.reduce<Record<string, Set<string>>>((map, claim) => {
+    map[claim.employeeId] ??= new Set<string>();
+    map[claim.employeeId].add(claim.date);
+    return map;
+  }, {});
+
+  return snapshot.schedules.map((schedule) => {
+    const employeeMetrics = schedule.employees.map<EmployeeFatigueMetric>((employee) => {
+      let currentStreak = 0;
+      let highestStreak = 0;
+
+      for (const date of scanDates) {
+        const assignment = assignmentsByEmployeeDate.get(`${employee.id}:${date}`);
+        const timeCode = assignment?.timeCodeId ? timeCodeMap[assignment.timeCodeId] : undefined;
+        const defaultWorkedShift = shiftForDate(schedule, date) !== "OFF";
+        const hasOvertimeClaim = overtimeClaimDatesByEmployee[employee.id]?.has(date) ?? false;
+
+        /**
+         * Fatigue is intentionally based on worked-day exposure only. The base
+         * rotation counts as work, overtime/mutual/saved work entries add work
+         * exposure, and obvious leave/off time codes break the streak.
+         */
+        const workedDate =
+          !isNonWorkingTimeCode(timeCode) &&
+          (defaultWorkedShift || hasOvertimeClaim || Boolean(assignment?.competencyId || assignment?.timeCodeId));
+
+        currentStreak = workedDate ? currentStreak + 1 : 0;
+
+        if (date >= monthStart) {
+          highestStreak = Math.max(highestStreak, currentStreak);
+        }
+      }
+
+      return {
+        employeeId: employee.id,
+        employeeName: employee.name,
+        consecutiveShifts: highestStreak,
+        band: getFatigueBand(highestStreak),
+        excessOverNormalCycle: Math.max(0, highestStreak - NORMAL_FATIGUE_CYCLE),
+      };
+    });
+    const bandCounts = employeeMetrics.reduce<Record<FatigueBand, number>>(
+      (counts, employee) => {
+        counts[employee.band] += 1;
+        return counts;
+      },
+      { green: 0, amber: 0, red: 0, critical: 0 },
+    );
+    const topEmployees = [...employeeMetrics]
+      .sort(
+        (left, right) =>
+          right.consecutiveShifts - left.consecutiveShifts ||
+          left.employeeName.localeCompare(right.employeeName),
+      )
+      .slice(0, 3);
+    const totalConsecutiveShifts = employeeMetrics.reduce(
+      (total, employee) => total + employee.consecutiveShifts,
+      0,
+    );
+
+    return {
+      scheduleId: schedule.id,
+      scheduleName: schedule.name,
+      totalScheduledEmployees: schedule.employees.length,
+      greenCount: bandCounts.green,
+      amberCount: bandCounts.amber,
+      redCount: bandCounts.red,
+      criticalCount: bandCounts.critical,
+      highestStreak: topEmployees[0]?.consecutiveShifts ?? 0,
+      countAboveNormalCycle: employeeMetrics.filter(
+        (employee) => employee.consecutiveShifts > NORMAL_FATIGUE_CYCLE,
+      ).length,
+      averageConsecutiveShifts:
+        employeeMetrics.length === 0 ? 0 : totalConsecutiveShifts / employeeMetrics.length,
+      topEmployees,
     };
   });
 }
@@ -555,6 +731,16 @@ export function MetricsPanel({
     1,
     ...teamMetrics.flatMap((team) => team.shiftFragilityMetrics.map((metric) => metric.riskScore)),
   );
+  const teamFatigueMetrics = useMemo(
+    () =>
+      getTeamFatigueMetrics({
+        snapshot,
+        assignmentHistory,
+        overtimeHistory,
+        month: snapshot.month,
+      }),
+    [snapshot, assignmentHistory, overtimeHistory],
+  );
   const teamTimeCodeMetrics = useMemo(
     () => getTeamTimeCodeMetrics(snapshot, filteredAssignmentHistory, selectedTimeCodeId),
     [snapshot, filteredAssignmentHistory, selectedTimeCodeId],
@@ -784,6 +970,84 @@ export function MetricsPanel({
                       >
                         <span>{competency?.code ?? "\u00A0"}</span>
                         <strong>{competency ? competency.claimedShifts : "\u00A0"}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="metrics-section">
+          <div className="metrics-section__header">
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Fatigue Potential</h2>
+              <p className="toolbar-status">
+                Consecutive shifts worked in {formatMonthLabel(snapshot.month)}
+              </p>
+            </div>
+          </div>
+
+          <div className="metrics-team-list">
+            {teamFatigueMetrics.map((team) => (
+              <article key={`${team.scheduleId}-fatigue`} className="metrics-card">
+                <div className="metrics-card__header">
+                  <div>
+                    <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
+                    <h3 className="metrics-card__title">
+                      {team.totalScheduledEmployees} scheduled employee{team.totalScheduledEmployees === 1 ? "" : "s"}
+                    </h3>
+                  </div>
+                  <div className="metrics-card__stats">
+                    <span>Highest streak {team.highestStreak}</span>
+                    <span>{team.countAboveNormalCycle} above normal cycle</span>
+                    <span>Avg {team.averageConsecutiveShifts.toFixed(1)}</span>
+                  </div>
+                </div>
+
+                <div className="metrics-fatigue-bands" aria-label={`Fatigue bands for shift ${team.scheduleName}`}>
+                  <span className="metrics-fatigue-band metrics-fatigue-band--green">
+                    Green <strong>{team.greenCount}</strong>
+                  </span>
+                  <span className="metrics-fatigue-band metrics-fatigue-band--amber">
+                    Amber <strong>{team.amberCount}</strong>
+                  </span>
+                  <span className="metrics-fatigue-band metrics-fatigue-band--red">
+                    Red <strong>{team.redCount}</strong>
+                  </span>
+                  <span className="metrics-fatigue-band metrics-fatigue-band--critical">
+                    Critical <strong>{team.criticalCount}</strong>
+                  </span>
+                </div>
+
+                <div className="metrics-top-list">
+                  <strong className="metrics-top-list__title">Top 3 fatigue potential</strong>
+                  <div className="metrics-top-list__rows">
+                    {padMetricRows(team.topEmployees).map((employee, index) => (
+                      <div
+                        key={employee?.employeeId ?? `fatigue-empty-${team.scheduleId}-${index}`}
+                        className={`metrics-top-list__row metrics-top-list__row--stacked ${
+                          employee ? "" : "metrics-top-list__row--empty"
+                        }`}
+                        title={
+                          employee
+                            ? `${employee.employeeName}: ${employee.consecutiveShifts} consecutive shifts worked. Normal cycle = ${NORMAL_FATIGUE_CYCLE}. Excess = ${employee.excessOverNormalCycle}. Exposure band = ${formatFatigueBandLabel(employee.band)}.`
+                            : undefined
+                        }
+                      >
+                        <span>
+                          {employee ? (
+                            <>
+                              <span className={`metrics-fatigue-dot metrics-fatigue-dot--${employee.band}`} />
+                              <span>{employee.employeeName}</span>
+                              <small>{formatFatigueBandLabel(employee.band)}</small>
+                            </>
+                          ) : (
+                            "\u00A0"
+                          )}
+                        </span>
+                        <strong>{employee ? employee.consecutiveShifts : "\u00A0"}</strong>
                       </div>
                     ))}
                   </div>
