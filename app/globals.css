@@ -1714,6 +1714,14 @@ select {
   border-top: 1px solid var(--line);
 }
 
+.schedule-wrap--locked {
+  cursor: wait;
+}
+
+.schedule-wrap--locked .shift-cell-button {
+  pointer-events: none;
+}
+
 .print-schedule-stack {
   display: none;
 }

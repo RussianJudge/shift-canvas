@@ -799,6 +799,7 @@ export function MonthlyScheduler({
   const [isSaving, startSaveTransition] = useTransition();
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const [isSavingPins, startPinSaveTransition] = useTransition();
+  const isScheduleLocked = isSaving || isUpdatingSetCompletion;
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const latestAutoSaveTokenRef = useRef(0);
   const baselineAssignmentsRef = useRef(baselineAssignments);
@@ -845,12 +846,6 @@ export function MonthlyScheduler({
     selectedColumnDate !== null &&
     copiedColumnTemplate.sourceDate !== selectedColumnDate &&
     !completedSetDates.has(selectedColumnDate);
-  const canRepeatColumn =
-    canEdit &&
-    canManageSetBuilder &&
-    selectedColumnDate !== null &&
-    selectedSetDays.length > 1 &&
-    !isSelectedSetComplete;
   const competencyCoverage = useMemo(() => {
     if (!activeSchedule) {
       return {};
@@ -1236,7 +1231,7 @@ export function MonthlyScheduler({
   useEffect(() => {
     // Treat an open cell editor like an in-progress edit session: keep the
     // draft local, then autosave once the modal closes.
-    if (!canEdit || !isDraftHydrated || !hasChanges || editorCell) {
+    if (!canEdit || isSaving || !isDraftHydrated || !hasChanges || editorCell) {
       return;
     }
 
@@ -1272,7 +1267,7 @@ export function MonthlyScheduler({
     }, AUTO_SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [activeSchedule.id, canEdit, dirtyUpdates, draftAssignments, editorCell, hasChanges, isDraftHydrated]);
+  }, [activeSchedule.id, canEdit, dirtyUpdates, draftAssignments, editorCell, hasChanges, isDraftHydrated, isSaving]);
 
   useEffect(() => {
     function handlePointerUp() {
@@ -1404,6 +1399,10 @@ export function MonthlyScheduler({
   }, [currentMonth, snapshot.month]);
 
   function handleAssignmentChange(employeeId: string, date: string, selection: AssignmentSelection) {
+    if (isScheduleLocked) {
+      return;
+    }
+
     const employee = employeeMap[employeeId];
     const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
 
@@ -1441,6 +1440,10 @@ export function MonthlyScheduler({
     dayIndex: number,
     selection: AssignmentSelection,
   ) {
+    if (isScheduleLocked) {
+      return;
+    }
+
     setSelectedCell({ employeeId, date });
     setDragRange({
       employeeId,
@@ -1451,6 +1454,10 @@ export function MonthlyScheduler({
   }
 
   function handleDragHover(employeeId: string, dayIndex: number) {
+    if (isScheduleLocked) {
+      return;
+    }
+
     setDragRange((current) => {
       if (!current || current.employeeId !== employeeId || current.currentIndex === dayIndex) {
         return current;
@@ -1475,7 +1482,7 @@ export function MonthlyScheduler({
   }
 
   function saveBulkAssignmentUpdates(updates: StoredAssignment[], successMessage: string) {
-    if (!canEdit || updates.length === 0) {
+    if (!canEdit || isScheduleLocked || updates.length === 0) {
       return;
     }
 
@@ -1547,7 +1554,7 @@ export function MonthlyScheduler({
   }
 
   function handleSetCompletion() {
-    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
       return;
     }
 
@@ -1656,7 +1663,7 @@ export function MonthlyScheduler({
   }
 
   function handleAutofillSet() {
-    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
     }
 
@@ -1688,7 +1695,7 @@ export function MonthlyScheduler({
   }
 
   function handleCopySet() {
-    if (!canManageSetBuilder || selectedSetDays.length === 0 || !isSelectedSetComplete) {
+    if (isScheduleLocked || !canManageSetBuilder || selectedSetDays.length === 0 || !isSelectedSetComplete) {
       return;
     }
 
@@ -1717,7 +1724,7 @@ export function MonthlyScheduler({
   }
 
   function handlePasteSet() {
-    if (!canEdit || !canManageSetBuilder || !copiedSetTemplate || !canPasteSet) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || !copiedSetTemplate || !canPasteSet) {
       return;
     }
 
@@ -1756,7 +1763,7 @@ export function MonthlyScheduler({
   }
 
   function handleCopyColumn() {
-    if (!canManageSetBuilder || !selectedColumnDate) {
+    if (isScheduleLocked || !canManageSetBuilder || !selectedColumnDate) {
       return;
     }
 
@@ -1782,7 +1789,7 @@ export function MonthlyScheduler({
   }
 
   function handlePasteColumn() {
-    if (!canEdit || !canManageSetBuilder || !copiedColumnTemplate || !selectedColumnDate || !canPasteColumn) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || !copiedColumnTemplate || !selectedColumnDate || !canPasteColumn) {
       return;
     }
 
@@ -1812,58 +1819,8 @@ export function MonthlyScheduler({
     saveBulkAssignmentUpdates(pasteUpdates, successMessage);
   }
 
-  function handleRepeatColumn() {
-    if (!canRepeatColumn || !selectedColumnDate) {
-      return;
-    }
-
-    const targetDays = selectedSetDays.filter((day) => day.date !== selectedColumnDate);
-
-    if (targetDays.length === 0) {
-      return;
-    }
-
-    const sourceSelectionsByEmployeeId = Object.fromEntries(
-      activeSchedule.employees.map((employee) => [
-        employee.id,
-        getSelectionForCell(
-          employee.id,
-          selectedColumnDate,
-          shiftForDate(activeSchedule, selectedColumnDate),
-          draftAssignments,
-          snapshot.timeCodes,
-        ),
-      ]),
-    );
-    const repeatUpdates = activeSchedule.employees.flatMap<StoredAssignment>((employee) => {
-      const sourceSelection =
-        sourceSelectionsByEmployeeId[employee.id] ??
-        getDefaultSelection(shiftForDate(activeSchedule, selectedColumnDate), snapshot.timeCodes);
-
-      return targetDays.map((day) => ({
-        employeeId: employee.id,
-        scheduleId: activeSchedule.id,
-        date: day.date,
-        competencyId: sourceSelection.competencyId,
-        timeCodeId: sourceSelection.timeCodeId,
-        notes: sourceSelection.notes ?? null,
-        shiftKind: shiftForDate(activeSchedule, day.date),
-      }));
-    });
-    const successMessage = `Repeated ${formatShortDate(selectedColumnDate)} column across ${targetDays.length} set day${
-      targetDays.length === 1 ? "" : "s"
-    } and saved.`;
-
-    startTransition(() => {
-      setDraftAssignments((current) => applyStoredUpdatesToAssignments(current, repeatUpdates));
-      setStatusMessage(successMessage.replace(" and saved.", "."));
-    });
-
-    saveBulkAssignmentUpdates(repeatUpdates, successMessage);
-  }
-
   function handleClearSet() {
-    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
     }
 
@@ -1969,7 +1926,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleCopyColumn}
-                  disabled={!selectedColumnDate}
+                  disabled={isScheduleLocked || !selectedColumnDate}
                 >
                   Copy column
                 </button>
@@ -1977,24 +1934,15 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handlePasteColumn}
-                  disabled={!canPasteColumn}
+                  disabled={isScheduleLocked || !canPasteColumn}
                 >
                   Paste column
                 </button>
                 <button
                   type="button"
                   className="ghost-button"
-                  onClick={handleRepeatColumn}
-                  disabled={!canRepeatColumn}
-                  title="Copy the selected day's column across the rest of this set."
-                >
-                  Repeat column
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
                   onClick={handleCopySet}
-                  disabled={selectedSetDays.length === 0 || !isSelectedSetComplete}
+                  disabled={isScheduleLocked || selectedSetDays.length === 0 || !isSelectedSetComplete}
                 >
                   Copy set
                 </button>
@@ -2002,7 +1950,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handlePasteSet}
-                  disabled={!canPasteSet}
+                  disabled={isScheduleLocked || !canPasteSet}
                 >
                   Paste set
                 </button>
@@ -2010,7 +1958,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleClearSet}
-                  disabled={selectedSetDays.length === 0 || isSelectedSetComplete}
+                  disabled={isScheduleLocked || selectedSetDays.length === 0 || isSelectedSetComplete}
                 >
                   Clear set
                 </button>
@@ -2019,7 +1967,10 @@ export function MonthlyScheduler({
                   className="ghost-button"
                   onClick={handleAutofillSet}
                   disabled={
-                    selectedSetDays.length === 0 || isSelectedSetComplete || fullyBlankSetWorkers.length === 0
+                    isScheduleLocked ||
+                    selectedSetDays.length === 0 ||
+                    isSelectedSetComplete ||
+                    fullyBlankSetWorkers.length === 0
                   }
                 >
                   Auto-fill set
@@ -2028,7 +1979,7 @@ export function MonthlyScheduler({
                   type="button"
                   className={`ghost-button ${isSelectedSetComplete ? "ghost-button--active" : ""}`}
                   onClick={handleSetCompletion}
-                  disabled={selectedSetDays.length === 0 || isUpdatingSetCompletion}
+                  disabled={isScheduleLocked || selectedSetDays.length === 0}
                 >
                   {isUpdatingSetCompletion
                     ? isSelectedSetComplete
@@ -2067,7 +2018,7 @@ export function MonthlyScheduler({
                       selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
                     } ${selectedCoverageCompetencyId === competency.id ? "set-builder-pill--active" : ""}`}
                     title={`${competency.label} · ${coverage?.filledCells ?? 0}/${coverage?.requiredCells ?? 0} cells filled in this set`}
-                    disabled={selectedSetDays.length === 0}
+                    disabled={isScheduleLocked || selectedSetDays.length === 0}
                   >
                     <strong>{getCompactCode(competency.code)}</strong>
                     <span>{formatStaffCount(coverage?.assignedPeople ?? 0)}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
@@ -2079,7 +2030,11 @@ export function MonthlyScheduler({
         </section>
       ) : null}
 
-      <section className="schedule-wrap" aria-label="Monthly schedule grid">
+      <section
+        className={`schedule-wrap ${isScheduleLocked ? "schedule-wrap--locked" : ""}`}
+        aria-label="Monthly schedule grid"
+        aria-busy={isScheduleLocked}
+      >
         <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
           <div className="employee-header sticky-column">
             <span>{formatMonthLabel(currentMonth)}</span>
@@ -2101,7 +2056,7 @@ export function MonthlyScheduler({
                 } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
                 title={`${day.dayName} ${day.date}`}
                 onClick={
-                  canManageSetBuilder
+                  canManageSetBuilder && !isScheduleLocked
                     ? () => {
                         setSelectedSetAnchorDate(day.date);
                         setSelectedCoverageCompetencyId(null);
@@ -2132,12 +2087,12 @@ export function MonthlyScheduler({
               highlightedMissingDates={highlightedMissingDates}
               selectedCoverageCompetencyId={selectedCoverageCompetencyId}
               selectedSetDays={selectedSetDays}
-              canEdit={canEdit}
+              canEdit={canEdit && !isScheduleLocked}
               onPinToggle={handlePinToggle}
               onCellPointerDown={handleCellPointerDown}
               onDragHover={handleDragHover}
               onCellClick={(cell) => {
-                if (!canEdit) {
+                if (!canEdit || isScheduleLocked) {
                   return;
                 }
 
@@ -2159,7 +2114,7 @@ export function MonthlyScheduler({
         </div>
       </section>
 
-      {canEdit ? (
+      {canEdit && !isScheduleLocked ? (
         <AssignmentModal
           selectedEmployee={editorEmployee}
           selectedDate={editorCell?.date ?? null}
