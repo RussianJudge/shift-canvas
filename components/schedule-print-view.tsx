@@ -288,6 +288,9 @@ function PrintScheduleSheet({
                   ? timeCodeMap[effectiveSelection.timeCodeId]
                   : null;
                 const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
+                const selectionCode = isBorrowedCellVisible
+                  ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)
+                  : "";
 
                 return (
                   <div
@@ -296,9 +299,10 @@ function PrintScheduleSheet({
                     day.isWeekend ? "shift-cell--weekend" : ""
                   } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
                     activeColorToken ? "shift-cell--coded" : ""
+                  } ${selectionCode ? "" : "shift-cell--blank"
                   }`}
                 >
-                    {isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""}
+                    {selectionCode}
                   </div>
                 );
               })}

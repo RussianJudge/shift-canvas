@@ -3349,7 +3349,7 @@ select {
   }
 
   .print-schedule-sheet {
-    padding: 0.35in 0.25in;
+    padding: 0.35in 0.18in 0.35in 0.12in;
     break-after: page;
     page-break-after: always;
   }
@@ -3382,6 +3382,13 @@ select {
 
   .print-schedule-grid .employee-cell {
     padding: 0.35rem 0.45rem;
+    background: #eef0f2 !important;
+    font-size: 0.72rem;
+  }
+
+  .print-schedule-grid .employee-cell__main strong {
+    font-size: 0.72rem;
+    line-height: 1.05;
   }
 
   .print-schedule-grid .employee-pin-button {
@@ -3415,6 +3422,10 @@ select {
 
   .print-schedule-grid .shift-cell--off {
     background: #f2f1ef !important;
+  }
+
+  .print-schedule-grid .shift-cell--blank {
+    background: #f7f7f6 !important;
   }
 
   .print-schedule-grid .shift-cell--weekend {

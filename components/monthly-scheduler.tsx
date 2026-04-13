@@ -845,6 +845,12 @@ export function MonthlyScheduler({
     selectedColumnDate !== null &&
     copiedColumnTemplate.sourceDate !== selectedColumnDate &&
     !completedSetDates.has(selectedColumnDate);
+  const canRepeatColumn =
+    canEdit &&
+    canManageSetBuilder &&
+    selectedColumnDate !== null &&
+    selectedSetDays.length > 1 &&
+    !isSelectedSetComplete;
   const competencyCoverage = useMemo(() => {
     if (!activeSchedule) {
       return {};
@@ -1806,6 +1812,56 @@ export function MonthlyScheduler({
     saveBulkAssignmentUpdates(pasteUpdates, successMessage);
   }
 
+  function handleRepeatColumn() {
+    if (!canRepeatColumn || !selectedColumnDate) {
+      return;
+    }
+
+    const targetDays = selectedSetDays.filter((day) => day.date !== selectedColumnDate);
+
+    if (targetDays.length === 0) {
+      return;
+    }
+
+    const sourceSelectionsByEmployeeId = Object.fromEntries(
+      activeSchedule.employees.map((employee) => [
+        employee.id,
+        getSelectionForCell(
+          employee.id,
+          selectedColumnDate,
+          shiftForDate(activeSchedule, selectedColumnDate),
+          draftAssignments,
+          snapshot.timeCodes,
+        ),
+      ]),
+    );
+    const repeatUpdates = activeSchedule.employees.flatMap<StoredAssignment>((employee) => {
+      const sourceSelection =
+        sourceSelectionsByEmployeeId[employee.id] ??
+        getDefaultSelection(shiftForDate(activeSchedule, selectedColumnDate), snapshot.timeCodes);
+
+      return targetDays.map((day) => ({
+        employeeId: employee.id,
+        scheduleId: activeSchedule.id,
+        date: day.date,
+        competencyId: sourceSelection.competencyId,
+        timeCodeId: sourceSelection.timeCodeId,
+        notes: sourceSelection.notes ?? null,
+        shiftKind: shiftForDate(activeSchedule, day.date),
+      }));
+    });
+    const successMessage = `Repeated ${formatShortDate(selectedColumnDate)} column across ${targetDays.length} set day${
+      targetDays.length === 1 ? "" : "s"
+    } and saved.`;
+
+    startTransition(() => {
+      setDraftAssignments((current) => applyStoredUpdatesToAssignments(current, repeatUpdates));
+      setStatusMessage(successMessage.replace(" and saved.", "."));
+    });
+
+    saveBulkAssignmentUpdates(repeatUpdates, successMessage);
+  }
+
   function handleClearSet() {
     if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
@@ -1924,6 +1980,15 @@ export function MonthlyScheduler({
                   disabled={!canPasteColumn}
                 >
                   Paste column
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handleRepeatColumn}
+                  disabled={!canRepeatColumn}
+                  title="Copy the selected day's column across the rest of this set."
+                >
+                  Repeat column
                 </button>
                 <button
                   type="button"
