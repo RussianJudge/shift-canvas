@@ -170,27 +170,20 @@ export function SignInPanel({
           </button>
         </form>
 
-        <div className="auth-mode-switch">
-          <span>
-            {isCreateMode
-              ? "Already have an account?"
-              : isResetMode
-                ? "Remember your password?"
-                : "Need an account?"}
-          </span>
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => setMode(isCreateMode || isResetMode ? "sign-in" : "create")}
-          >
-            {isCreateMode || isResetMode ? "Sign in" : "Create account"}
-          </button>
-          {!isCreateMode && !isResetMode ? (
-            <button type="button" className="ghost-button" onClick={() => setMode("reset")}>
+        {isCreateMode || isResetMode ? (
+          <div className="auth-mode-switch">
+            <span>{isCreateMode ? "Already have an account?" : "Remember your password?"}</span>
+            <button type="button" className="ghost-button" onClick={() => setMode("sign-in")}>
+              Sign in
+            </button>
+          </div>
+        ) : (
+          <div className="auth-mode-switch auth-mode-switch--single">
+            <button type="button" className="ghost-button auth-mode-switch__full-button" onClick={() => setMode("reset")}>
               Forgot password?
             </button>
-          ) : null}
-        </div>
+          </div>
+        )}
       </div>
     </section>
   );

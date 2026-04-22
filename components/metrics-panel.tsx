@@ -95,6 +95,13 @@ type TeamTimeCodeMetric = {
   }>;
 };
 
+type OvertimeMetricEntry = {
+  scheduleId: string;
+  employeeId: string;
+  competencyId: string | null;
+  date: string;
+};
+
 type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
 type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
 type FragilityWindow = OvertimeWindow;
@@ -258,6 +265,95 @@ function isNonWorkingTimeCode(timeCode: TimeCode | undefined) {
   );
 }
 
+function isWorkingAssignment(assignment: StoredAssignment, timeCodeMap: Record<string, TimeCode>) {
+  if (assignment.competencyId) {
+    return true;
+  }
+
+  if (!assignment.timeCodeId) {
+    return false;
+  }
+
+  return !isNonWorkingTimeCode(timeCodeMap[assignment.timeCodeId]);
+}
+
+/**
+ * Converts schedule rows entered on a worker's rostered day off into overtime
+ * metric events.
+ *
+ * Claimed overtime already has an `overtime_claims` row and an assignment row,
+ * so those claim-backed assignment rows are skipped here. This keeps metrics
+ * from double-counting normal claimed OT while still counting leader-entered
+ * work that was keyed straight into the schedule.
+ */
+function getManualOffDayOvertimeEntries(
+  snapshot: SchedulerSnapshot,
+  assignmentHistory: StoredAssignment[],
+  claimEntries: OvertimeMetricEntry[],
+): OvertimeMetricEntry[] {
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const scheduleMap = Object.fromEntries(
+    snapshot.schedules.map((schedule) => [schedule.id, schedule]),
+  );
+  const timeCodeMap = Object.fromEntries(
+    snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode]),
+  ) as Record<string, TimeCode>;
+  const claimKeys = new Set(
+    claimEntries.map((claim) => `${claim.employeeId}:${claim.date}:${claim.competencyId ?? ""}`),
+  );
+
+  return assignmentHistory.flatMap((assignment) => {
+    const employee = employeeMap[assignment.employeeId];
+    const homeSchedule = employee ? scheduleMap[employee.scheduleId] : null;
+
+    if (!employee || !homeSchedule) {
+      return [];
+    }
+
+    if (shiftForDate(homeSchedule, assignment.date) !== "OFF") {
+      return [];
+    }
+
+    if (!isWorkingAssignment(assignment, timeCodeMap)) {
+      return [];
+    }
+
+    const claimKey = `${assignment.employeeId}:${assignment.date}:${assignment.competencyId ?? ""}`;
+
+    if (claimKeys.has(claimKey) || assignment.notes?.startsWith("OT|")) {
+      return [];
+    }
+
+    return [
+      {
+        scheduleId: assignment.scheduleId ?? employee.scheduleId,
+        employeeId: assignment.employeeId,
+        competencyId: assignment.competencyId,
+        date: assignment.date,
+      },
+    ];
+  });
+}
+
+/** Builds the overtime events used by metrics cards from claims plus manual schedule work. */
+function getOvertimeMetricEntries(
+  snapshot: SchedulerSnapshot,
+  overtimeClaims: OvertimeClaim[],
+  assignmentHistory: StoredAssignment[],
+) {
+  const claimEntries = overtimeClaims.map<OvertimeMetricEntry>((claim) => ({
+    scheduleId: claim.scheduleId,
+    employeeId: claim.employeeId,
+    competencyId: claim.competencyId,
+    date: claim.date,
+  }));
+
+  return [
+    ...claimEntries,
+    ...getManualOffDayOvertimeEntries(snapshot, assignmentHistory, claimEntries),
+  ];
+}
+
 /** Summarizes one chosen time code across teams for the selected history window. */
 function getTeamTimeCodeMetrics(
   snapshot: SchedulerSnapshot,
@@ -406,8 +502,8 @@ function getTeamFatigueMetrics({
 /** Builds the main dashboard summaries shown on the metrics screen. */
 function getTeamMetrics(
   snapshot: SchedulerSnapshot,
-  overtimeClaims: OvertimeClaim[],
-  fragilityClaims: OvertimeClaim[],
+  overtimeEntries: OvertimeMetricEntry[],
+  fragilityEntries: OvertimeMetricEntry[],
   anchorDate: string,
 ): TeamMetric[] {
   const employeeMap = getEmployeeMap(snapshot.schedules);
@@ -427,24 +523,28 @@ function getTeamMetrics(
       }))
       .sort((left, right) => right.qualifiedPeople - left.qualifiedPeople || left.code.localeCompare(right.code));
 
-    const borrowedClaims = overtimeClaims.filter((claim) => {
+    const incurredOvertimeEntries = overtimeEntries.filter((claim) => {
       if (claim.scheduleId !== schedule.id) {
         return false;
       }
 
       const claimEmployee = employeeMap[claim.employeeId];
-      return Boolean(claimEmployee && claimEmployee.scheduleId !== schedule.id);
+      return Boolean(claimEmployee);
     });
-    const borrowedFragilityClaims = fragilityClaims.filter((claim) => {
+    const fragilityOvertimeEntries = fragilityEntries.filter((claim) => {
       if (claim.scheduleId !== schedule.id) {
         return false;
       }
 
       const claimEmployee = employeeMap[claim.employeeId];
-      return Boolean(claimEmployee && claimEmployee.scheduleId !== schedule.id);
+      return Boolean(claimEmployee && claim.competencyId);
     });
 
-    const overtimeCounts = borrowedClaims.reduce<Record<string, number>>((counts, claim) => {
+    const overtimeCounts = incurredOvertimeEntries.reduce<Record<string, number>>((counts, claim) => {
+      if (!claim.competencyId) {
+        return counts;
+      }
+
       counts[claim.competencyId] = (counts[claim.competencyId] ?? 0) + 1;
       return counts;
     }, {});
@@ -468,7 +568,7 @@ function getTeamMetrics(
       )
       .slice(0, 3);
 
-    const overtimePeopleCounts = borrowedClaims.reduce<Record<string, number>>((counts, claim) => {
+    const overtimePeopleCounts = incurredOvertimeEntries.reduce<Record<string, number>>((counts, claim) => {
       counts[claim.employeeId] = (counts[claim.employeeId] ?? 0) + 1;
       return counts;
     }, {});
@@ -488,7 +588,7 @@ function getTeamMetrics(
 
     const shiftFragilityMetrics = snapshot.competencies
       .map((competency) => {
-        const claims = borrowedFragilityClaims.filter((claim) => claim.competencyId === competency.id);
+        const claims = fragilityOvertimeEntries.filter((claim) => claim.competencyId === competency.id);
         const qualifiedPeople = schedule.employees.filter((employee) =>
           employee.competencyIds.includes(competency.id),
         ).length;
@@ -544,8 +644,8 @@ function getTeamMetrics(
       scheduleName: schedule.name,
       competencyMetrics,
       shiftFragilityMetrics,
-      overtimeShifts: borrowedClaims.length,
-      overtimeWorkers: new Set(borrowedClaims.map((claim) => claim.employeeId)).size,
+      overtimeShifts: incurredOvertimeEntries.length,
+      overtimeWorkers: new Set(incurredOvertimeEntries.map((claim) => claim.employeeId)).size,
       topCompetencyCode,
       topOvertimeCompetencies,
       topOvertimePeople,
@@ -718,9 +818,25 @@ export function MetricsPanel({
     const start = getTimeCodeWindowStart(metricsAnchorDate, timeCodeWindow);
     return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
   }, [assignmentHistory, timeCodeWindow, metricsAnchorDate]);
+  const filteredOvertimeAssignmentHistory = useMemo(() => {
+    const start = getWindowStart(metricsAnchorDate, overtimeWindow);
+    return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
+  }, [assignmentHistory, overtimeWindow, metricsAnchorDate]);
+  const filteredFragilityAssignmentHistory = useMemo(() => {
+    const start = getWindowStart(metricsAnchorDate, fragilityWindow);
+    return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
+  }, [assignmentHistory, fragilityWindow, metricsAnchorDate]);
+  const filteredOvertimeEntries = useMemo(
+    () => getOvertimeMetricEntries(snapshot, filteredOvertimeHistory, filteredOvertimeAssignmentHistory),
+    [snapshot, filteredOvertimeHistory, filteredOvertimeAssignmentHistory],
+  );
+  const filteredFragilityEntries = useMemo(
+    () => getOvertimeMetricEntries(snapshot, filteredFragilityHistory, filteredFragilityAssignmentHistory),
+    [snapshot, filteredFragilityHistory, filteredFragilityAssignmentHistory],
+  );
   const teamMetrics = useMemo(
-    () => getTeamMetrics(snapshot, filteredOvertimeHistory, filteredFragilityHistory, metricsAnchorDate),
-    [snapshot, filteredOvertimeHistory, filteredFragilityHistory, metricsAnchorDate],
+    () => getTeamMetrics(snapshot, filteredOvertimeEntries, filteredFragilityEntries, metricsAnchorDate),
+    [snapshot, filteredOvertimeEntries, filteredFragilityEntries, metricsAnchorDate],
   );
   const maxQualifiedPeople = Math.max(
     1,
