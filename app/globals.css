@@ -611,6 +611,12 @@ select {
   gap: 0.95rem;
 }
 
+.auth-name-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
 .auth-error {
   margin: 0;
   color: #b91c1c;
@@ -3028,6 +3034,10 @@ select {
 
   .auth-panel {
     padding: 1.2rem;
+  }
+
+  .auth-name-grid {
+    grid-template-columns: 1fr;
   }
 
   .planner-actions {

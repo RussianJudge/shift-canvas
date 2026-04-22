@@ -48,6 +48,7 @@ export interface Employee extends OrganizationScope {
   id: string;
   firstName: string;
   lastName: string;
+  email: string | null;
   name: string;
   role: string;
   scheduleId: string;
@@ -227,6 +228,7 @@ export interface SetScheduleCompletionInput {
 export interface PersonnelUpdate {
   employeeId: string;
   name: string;
+  email: string;
   role: string;
   scheduleId: string;
   competencyIds: string[];

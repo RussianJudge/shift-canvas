@@ -23,10 +23,7 @@ import type {
   WithdrawMutualPostingInput,
 } from "@/lib/types";
 import { getSchedulerSnapshot } from "@/lib/data";
-import {
-  formatEmployeeDisplayName,
-  splitEmployeeDisplayName,
-} from "@/lib/employee-names";
+import { splitEmployeeDisplayName } from "@/lib/employee-names";
 import {
   buildOvertimeAssignmentNote,
   buildSwapOvertimeAssignmentRows,
@@ -2482,7 +2479,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
       id: update.employeeId,
       first_name: nameParts.firstName,
       last_name: nameParts.lastName,
-      full_name: formatEmployeeDisplayName(nameParts),
+      email: update.email.trim().toLowerCase() || null,
       role_title: update.role.trim(),
       schedule_id: update.scheduleId,
       is_active: true,

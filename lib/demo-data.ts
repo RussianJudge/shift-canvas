@@ -4,7 +4,7 @@ import {
 } from "@/lib/employee-names";
 import type { SchedulerSnapshot } from "@/lib/types";
 
-type DemoEmployee = Omit<SchedulerSnapshot["schedules"][number]["employees"][number], "firstName" | "lastName">;
+type DemoEmployee = Omit<SchedulerSnapshot["schedules"][number]["employees"][number], "firstName" | "lastName" | "email">;
 
 /** Adds split name fields to compact demo rows while preserving display labels. */
 function demoEmployee(employee: DemoEmployee): SchedulerSnapshot["schedules"][number]["employees"][number] {
@@ -12,6 +12,7 @@ function demoEmployee(employee: DemoEmployee): SchedulerSnapshot["schedules"][nu
 
   return {
     ...employee,
+    email: null,
     firstName: nameParts.firstName,
     lastName: nameParts.lastName,
     name: formatEmployeeDisplayName(nameParts),

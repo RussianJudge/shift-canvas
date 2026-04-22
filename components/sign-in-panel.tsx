@@ -16,6 +16,10 @@ function getErrorMessage(error: string | undefined) {
     return "Enter your password to sign in.";
   }
 
+  if (error === "missing-name") {
+    return "Enter your first and last name to create an account.";
+  }
+
   if (error === "auth-unavailable") {
     return "Supabase authentication is unavailable right now. Try again in a moment.";
   }
@@ -88,15 +92,29 @@ export function SignInPanel({
 
         <form action={isCreateMode ? signUp : signIn} className="auth-form">
           {isCreateMode ? (
-            <label className="field">
-              <span>Name</span>
-              <input
-                type="text"
-                name="displayName"
-                placeholder="First Last"
-                autoComplete="name"
-              />
-            </label>
+            <div className="auth-name-grid">
+              <label className="field">
+                <span>First Name</span>
+                <input
+                  type="text"
+                  name="firstName"
+                  placeholder="First name"
+                  autoComplete="given-name"
+                  required
+                />
+              </label>
+
+              <label className="field">
+                <span>Last Name</span>
+                <input
+                  type="text"
+                  name="lastName"
+                  placeholder="Last name"
+                  autoComplete="family-name"
+                  required
+                />
+              </label>
+            </div>
           ) : null}
 
           <label className="field">

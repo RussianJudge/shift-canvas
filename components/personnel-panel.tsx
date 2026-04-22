@@ -16,6 +16,7 @@ import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/l
 type EditableEmployee = {
   id: string;
   name: string;
+  email: string;
   role: string;
   scheduleId: string;
   competencyIds: string[];
@@ -44,6 +45,7 @@ function createDraftEmployee() {
   return {
     id: `emp-${crypto.randomUUID().slice(0, 8)}`,
     name: "",
+    email: "",
     role: "",
     scheduleId: "",
     competencyIds: [],
@@ -240,6 +242,7 @@ function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   return {
     employeeId: employee.id,
     name: employee.name.trim(),
+    email: employee.email.trim().toLowerCase(),
     role: employee.role.trim(),
     scheduleId: employee.scheduleId,
     competencyIds: [...employee.competencyIds].sort(),
@@ -277,6 +280,7 @@ export function PersonnelPanel({
         schedule.employees.map((employee) => ({
           id: employee.id,
           name: employee.name,
+          email: employee.email ?? "",
           role: employee.role,
           scheduleId: employee.scheduleId,
           competencyIds: employee.competencyIds,
@@ -351,6 +355,8 @@ export function PersonnelPanel({
         "full_name",
         "first_name",
         "last_name",
+        "email",
+        "email_address",
         "employee",
         "employee_name",
         "role",
@@ -411,7 +417,7 @@ export function PersonnelPanel({
           return true;
         }
 
-        return `${employee.name} ${employee.role} ${scheduleNameById[employee.scheduleId] ?? ""}`
+        return `${employee.name} ${employee.email} ${employee.role} ${scheduleNameById[employee.scheduleId] ?? ""}`
           .toLowerCase()
           .includes(query);
       })
@@ -551,6 +557,7 @@ export function PersonnelPanel({
       const csvName = pickCsvValue(row, ["name", "full_name", "employee", "employee_name"]);
       const csvFirstName = pickCsvValue(row, ["first_name", "first"]);
       const csvLastName = pickCsvValue(row, ["last_name", "last", "surname"]);
+      const csvEmail = pickCsvValue(row, ["email", "email_address"]);
       const resolvedCsvName =
         csvName ||
         (csvFirstName || csvLastName
@@ -631,6 +638,7 @@ export function PersonnelPanel({
       const nextEmployee: EditableEmployee = {
         id: existing?.id ?? (csvId || `emp-${crypto.randomUUID().slice(0, 8)}`),
         name: resolvedCsvName || existing?.name || "New Employee",
+        email: csvEmail.toLowerCase() || existing?.email || "",
         role: csvRole || existing?.role || "Operator",
         scheduleId: resolvedScheduleId || existing?.scheduleId || defaultSchedule.id,
         competencyIds:
@@ -825,6 +833,7 @@ export function PersonnelPanel({
           <thead>
             <tr>
               <th>Name</th>
+              <th>Email</th>
               <th>Role</th>
               <th className="column-shift">Shift</th>
               <th>Competencies</th>
@@ -845,6 +854,24 @@ export function PersonnelPanel({
                           ? {
                               ...current,
                               name: event.target.value,
+                            }
+                          : current,
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="table-input"
+                    type="email"
+                    placeholder="email@company.com"
+                    value={draftEmployee.email}
+                    onChange={(event) =>
+                      setDraftEmployee((current) =>
+                        current
+                          ? {
+                              ...current,
+                              email: event.target.value,
                             }
                           : current,
                       )
@@ -952,7 +979,7 @@ export function PersonnelPanel({
             {groupedEmployees.map((entry) =>
               entry.type === "group" ? (
                 <tr key={`group-${entry.label}`} className="table-group-row">
-                  <td colSpan={5}>{entry.label}</td>
+                  <td colSpan={6}>{entry.label}</td>
                 </tr>
               ) : (
                 <tr
@@ -969,6 +996,20 @@ export function PersonnelPanel({
                         updateEmployee(entry.value.id, (current) => ({
                           ...current,
                           name: event.target.value,
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="table-input"
+                      type="email"
+                      value={entry.value.email}
+                      placeholder="email@company.com"
+                      onChange={(event) =>
+                        updateEmployee(entry.value.id, (current) => ({
+                          ...current,
+                          email: event.target.value,
                         }))
                       }
                     />
@@ -1043,7 +1084,7 @@ export function PersonnelPanel({
             )}
             {groupedEmployees.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="empty-state">
                     <strong>No employees matched that filter.</strong>
                     <span>Try a different search term, shift, or competency filter.</span>

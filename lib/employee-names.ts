@@ -48,9 +48,9 @@ export function splitEmployeeDisplayName(displayName: string): EmployeeNameParts
 /**
  * Formats split database fields into the display label used by the scheduler.
  *
- * When both fields are present we intentionally use `Last, First`, matching the
- * legacy `full_name` convention. If one side is blank, returning the available
- * value is friendlier than showing extra punctuation.
+ * When both fields are present we intentionally use `Last, First` because the
+ * operations screens sort and scan workers by family name. If one side is
+ * blank, returning the available value is friendlier than showing punctuation.
  */
 export function formatEmployeeDisplayName(nameParts: EmployeeNameParts) {
   const firstName = nameParts.firstName.trim();

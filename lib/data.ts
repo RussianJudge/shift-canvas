@@ -2,7 +2,6 @@ import "server-only";
 
 import {
   formatEmployeeDisplayName,
-  splitEmployeeDisplayName,
   type EmployeeNameParts,
 } from "@/lib/employee-names";
 import {
@@ -53,7 +52,7 @@ type EmployeeRow = {
   schedule_id: string;
   first_name: string | null;
   last_name: string | null;
-  full_name: string | null;
+  email: string | null;
   role_title: string | null;
   company_id: string;
   site_id: string;
@@ -61,7 +60,7 @@ type EmployeeRow = {
 };
 
 const EMPLOYEE_SELECT_COLUMNS =
-  "id, schedule_id, first_name, last_name, full_name, role_title, company_id, site_id, business_area_id";
+  "id, schedule_id, first_name, last_name, email, role_title, company_id, site_id, business_area_id";
 
 type CompetencyRow = {
   id: string;
@@ -437,19 +436,17 @@ function buildEmployeesBySchedule(
   }, {});
 
   return employeeRows.reduce<Record<string, Employee[]>>((map, row) => {
-    const nameParts: EmployeeNameParts =
-      row.first_name || row.last_name
-        ? {
-            firstName: row.first_name ?? "",
-            lastName: row.last_name ?? "",
-          }
-        : splitEmployeeDisplayName(row.full_name ?? "");
+    const nameParts: EmployeeNameParts = {
+      firstName: row.first_name ?? "",
+      lastName: row.last_name ?? "",
+    };
 
     map[row.schedule_id] ??= [];
     map[row.schedule_id].push({
       id: row.id,
       firstName: nameParts.firstName,
       lastName: nameParts.lastName,
+      email: row.email,
       name: formatEmployeeDisplayName(nameParts),
       role: row.role_title ?? "Operator",
       scheduleId: row.schedule_id,

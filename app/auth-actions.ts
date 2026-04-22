@@ -170,10 +170,15 @@ export async function signUp(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
-  const displayName = String(formData.get("displayName") ?? "").trim();
+  const firstName = String(formData.get("firstName") ?? "").trim();
+  const lastName = String(formData.get("lastName") ?? "").trim();
 
   if (!email) {
     redirect("/sign-in?mode=create&error=missing-email");
+  }
+
+  if (!firstName || !lastName) {
+    redirect("/sign-in?mode=create&error=missing-name");
   }
 
   if (!password) {
@@ -195,7 +200,9 @@ export async function signUp(formData: FormData) {
     password,
     options: {
       data: {
-        display_name: displayName || email.split("@")[0],
+        first_name: firstName,
+        last_name: lastName,
+        display_name: `${firstName} ${lastName}`,
         role: "worker",
       },
     },
