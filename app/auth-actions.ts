@@ -159,6 +159,65 @@ export async function signIn(formData: FormData) {
   redirect("/sign-in?error=auth-unavailable");
 }
 
+/**
+ * Creates a Supabase Auth account from the sign-in screen.
+ *
+ * Supabase owns the password storage and hashing. The database trigger on
+ * `auth.users` creates the matching `profiles` row, which keeps the app's role
+ * and scope setup in one database-side place instead of duplicating it here.
+ */
+export async function signUp(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const password = String(formData.get("password") ?? "");
+  const confirmPassword = String(formData.get("confirmPassword") ?? "");
+  const displayName = String(formData.get("displayName") ?? "").trim();
+
+  if (!email) {
+    redirect("/sign-in?mode=create&error=missing-email");
+  }
+
+  if (!password) {
+    redirect("/sign-in?mode=create&error=missing-password");
+  }
+
+  if (password !== confirmPassword) {
+    redirect("/sign-in?mode=create&error=password-mismatch");
+  }
+
+  const authClient = getSupabaseServerClient();
+
+  if (!authClient) {
+    redirect("/sign-in?mode=create&error=auth-unavailable");
+  }
+
+  const { error } = await authClient.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        display_name: displayName || email.split("@")[0],
+        role: "worker",
+      },
+    },
+  });
+
+  if (error) {
+    const message = error.message.toLowerCase();
+
+    if (message.includes("already") || message.includes("registered")) {
+      redirect("/sign-in?mode=create&error=account-exists");
+    }
+
+    if (message.includes("password")) {
+      redirect("/sign-in?mode=create&error=weak-password");
+    }
+
+    redirect("/sign-in?mode=create&error=signup-failed");
+  }
+
+  redirect("/sign-in?notice=account-created");
+}
+
 /** Ends the current app session and sends the browser back to sign-in. */
 export async function signOut() {
   await clearAppSession();
