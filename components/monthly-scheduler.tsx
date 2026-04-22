@@ -27,6 +27,7 @@ import {
 import type {
   Competency,
   Employee,
+  SaveAssignmentsInput,
   Schedule,
   SchedulerSnapshot,
   ShiftKind,
@@ -52,6 +53,7 @@ import type {
  */
 const STORAGE_KEY = "shift-canvas-drafts-v2";
 const AUTO_SAVE_DEBOUNCE_MS = 2500;
+const STALE_SNAPSHOT_PROTECTION_MS = 12000;
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes: string | null };
 type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
 type SelectedCell = { employeeId: string; date: string };
@@ -378,6 +380,24 @@ function buildDraftDelta(
     delta[key] = draft ? { ...draft } : null;
     return delta;
   }, {});
+}
+
+/** Applies a nullable assignment delta to a copy of an assignment map. */
+function applyAssignmentDelta(
+  assignments: Record<string, AssignmentSelection>,
+  delta: PersistedDraftAssignments,
+) {
+  const nextAssignments = { ...assignments };
+
+  for (const [key, selection] of Object.entries(delta)) {
+    if (selection) {
+      nextAssignments[key] = { ...selection };
+    } else {
+      delete nextAssignments[key];
+    }
+  }
+
+  return nextAssignments;
 }
 
 /** Small display helper for schedule header and set messages. */
@@ -796,14 +816,18 @@ export function MonthlyScheduler({
   );
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
-  const [isSaving, startSaveTransition] = useTransition();
+  const [isSavingTransition, startSaveTransition] = useTransition();
+  const [activeSaveCount, setActiveSaveCount] = useState(0);
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const [isSavingPins, startPinSaveTransition] = useTransition();
+  const isSaving = isSavingTransition || activeSaveCount > 0;
   const isScheduleLocked = isSaving || isUpdatingSetCompletion;
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const latestAutoSaveTokenRef = useRef(0);
   const baselineAssignmentsRef = useRef(baselineAssignments);
   const draftAssignmentsRef = useRef(draftAssignments);
+  const activeSaveCountRef = useRef(0);
+  const preserveLocalBaselineUntilRef = useRef(0);
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
   const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
@@ -1079,11 +1103,36 @@ export function MonthlyScheduler({
   }, [draftAssignments]);
 
   useEffect(() => {
+    activeSaveCountRef.current = activeSaveCount;
+  }, [activeSaveCount]);
+
+  function protectLocalBaselineFromStaleSnapshots() {
+    preserveLocalBaselineUntilRef.current = Date.now() + STALE_SNAPSHOT_PROTECTION_MS;
+  }
+
+  async function runTrackedAssignmentSave(input: SaveAssignmentsInput) {
+    activeSaveCountRef.current += 1;
+    setActiveSaveCount((current) => current + 1);
+
+    try {
+      return await saveAssignments(input);
+    } finally {
+      activeSaveCountRef.current = Math.max(0, activeSaveCountRef.current - 1);
+      setActiveSaveCount((current) => Math.max(0, current - 1));
+    }
+  }
+
+  useEffect(() => {
     const nextAssignments = buildAssignmentIndex(initialSnapshot.assignments);
-    const unsavedDraftDelta = buildDraftDelta(
-      baselineAssignmentsRef.current,
-      draftAssignmentsRef.current,
-    );
+    const currentBaselineAssignments = baselineAssignmentsRef.current;
+    const currentDraftAssignments = draftAssignmentsRef.current;
+    const unsavedDraftDelta = buildDraftDelta(currentBaselineAssignments, currentDraftAssignments);
+    const shouldProtectLocalBaseline =
+      activeSaveCountRef.current > 0 || Date.now() < preserveLocalBaselineUntilRef.current;
+    const locallyConfirmedDelta = shouldProtectLocalBaseline
+      ? buildDraftDelta(nextAssignments, currentBaselineAssignments)
+      : {};
+    const mergedBaselineAssignments = applyAssignmentDelta(nextAssignments, locallyConfirmedDelta);
 
     setSnapshot(initialSnapshot);
     setCurrentMonth(initialSnapshot.month);
@@ -1094,26 +1143,10 @@ export function MonthlyScheduler({
         ? current
         : initialSnapshot.schedules[0]?.id ?? "",
     );
-    setBaselineAssignments(nextAssignments);
-    setDraftAssignments(() => {
-      const mergedAssignments = { ...nextAssignments };
-
-      /**
-       * A fresh server snapshot can arrive while the browser still has local
-       * work that has not been confirmed by autosave yet. Preserve that delta
-       * on top of the incoming server rows so pasted cross-month set/column
-       * work does not briefly appear and then vanish during a refresh/reload.
-       */
-      for (const [key, selection] of Object.entries(unsavedDraftDelta)) {
-        if (selection) {
-          mergedAssignments[key] = { ...selection };
-        } else {
-          delete mergedAssignments[key];
-        }
-      }
-
-      return mergedAssignments;
-    });
+    setBaselineAssignments(mergedBaselineAssignments);
+    setDraftAssignments(() =>
+      applyAssignmentDelta(mergedBaselineAssignments, unsavedDraftDelta),
+    );
     setStatusMessage("");
     setDragRange(null);
 
@@ -1249,12 +1282,13 @@ export function MonthlyScheduler({
           );
         }
 
-        const result = await saveAssignments({
+        const result = await runTrackedAssignmentSave({
           scheduleId: activeSchedule.id,
           updates: scheduledUpdates,
         });
 
         if (result.ok) {
+          protectLocalBaselineFromStaleSnapshots();
           setBaselineAssignments((current) =>
             applySavedUpdatesToBaseline(current, scheduledDraftAssignments, scheduledUpdates),
           );
@@ -1498,12 +1532,13 @@ export function MonthlyScheduler({
         );
       }
 
-      const result = await saveAssignments({
+      const result = await runTrackedAssignmentSave({
         scheduleId: activeSchedule.id,
         updates: scheduledUpdates,
       });
 
       if (result.ok) {
+        protectLocalBaselineFromStaleSnapshots();
         setBaselineAssignments((current) => applyStoredUpdatesToAssignments(current, scheduledUpdates));
       }
 
@@ -1588,7 +1623,7 @@ export function MonthlyScheduler({
        * competencies in sync with the completion toggle.
        */
       if (dirtyUpdates.length > 0) {
-        const saveResult = await saveAssignments({
+        const saveResult = await runTrackedAssignmentSave({
           scheduleId: activeSchedule.id,
           updates: dirtyUpdates,
         });
@@ -1599,6 +1634,7 @@ export function MonthlyScheduler({
           return;
         }
 
+        protectLocalBaselineFromStaleSnapshots();
         setBaselineAssignments(cloneAssignments(draftAssignments));
       }
 

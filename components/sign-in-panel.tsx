@@ -8,8 +8,20 @@ function getErrorMessage(error: string | undefined) {
     return "Enter an email address to sign in.";
   }
 
+  if (error === "missing-password") {
+    return "Enter your password to sign in.";
+  }
+
   if (error === "auth-unavailable") {
-    return "Supabase auth lookup is unavailable right now. Try again in a moment.";
+    return "Supabase authentication is unavailable right now. Try again in a moment.";
+  }
+
+  if (error === "invalid-credentials") {
+    return "That email or password is not correct.";
+  }
+
+  if (error === "profile-missing") {
+    return "Your login works, but your workspace profile is missing. Ask an admin to finish setting up your access.";
   }
 
   if (error === "unknown-email") {
@@ -32,13 +44,24 @@ export function SignInPanel({
         <div className="auth-panel__copy">
           <BrandLockup size="compact" />
           <h1 className="auth-title">Sign In</h1>
-          <p className="auth-subtitle">Use your email to enter the workspace.</p>
+          <p className="auth-subtitle">Use your Supabase account to enter the workspace.</p>
         </div>
 
         <form action={signIn} className="auth-form">
           <label className="field">
             <span>Email</span>
             <input type="email" name="email" placeholder="you@company.com" required />
+          </label>
+
+          <label className="field">
+            <span>Password</span>
+            <input
+              type="password"
+              name="password"
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              required
+            />
           </label>
 
           {errorMessage ? <p className="auth-error">{errorMessage}</p> : null}

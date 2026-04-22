@@ -4,14 +4,15 @@ import { redirect } from "next/navigation";
 
 import { clearAppSession, getAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
 import type { AppSession } from "@/lib/types";
-import { getSupabaseAdminClient } from "@/lib/supabase";
+import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
 
 /**
- * Server actions for the current email-only sign-in flow.
+ * Server actions for the Supabase-backed sign-in flow.
  *
- * The sign-in form looks up a row in `public.profiles`, derives the
- * application-scoped role information from that record, and then persists it
- * into the signed app cookie handled by `lib/auth.ts`.
+ * Supabase Auth verifies that the visitor owns the email/password pair. The app
+ * then loads `public.profiles` for authorization details like role, linked
+ * employee, company, site, and business area before writing the signed app
+ * cookie handled by `lib/auth.ts`.
  */
 type ProfileRow = {
   email: string;
@@ -35,27 +36,42 @@ type NamedScopeRow = {
 };
 
 /**
- * Signs a user in by email using `public.profiles` as the application identity
- * source of truth.
+ * Signs a user in with Supabase Auth, then loads app-specific authorization
+ * details from `public.profiles`.
  *
- * The action resolves the profile row, builds the role-aware app session used
- * by the workspace, stores that session in the signed cookie, and then sends
- * the browser to the correct landing page for that role.
+ * This two-step design keeps authentication and authorization separate:
+ * Supabase confirms the password, while `profiles` decides what workspace data
+ * the authenticated person is allowed to see.
  */
 export async function signIn(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const password = String(formData.get("password") ?? "");
 
   if (!email) {
     redirect("/sign-in?error=missing-email");
   }
 
+  if (!password) {
+    redirect("/sign-in?error=missing-password");
+  }
+
+  const authClient = getSupabaseServerClient();
   const supabase = getSupabaseAdminClient();
 
-  if (supabase) {
+  if (authClient && supabase) {
+    const authResult = await authClient.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (authResult.error || !authResult.data.user) {
+      redirect("/sign-in?error=invalid-credentials");
+    }
+
     const profileResult = await supabase
       .from("profiles")
       .select("email, display_name, role, schedule_id, employee_id, company_id, site_id, business_area_id")
-      .eq("email", email)
+      .eq("id", authResult.data.user.id)
       .maybeSingle();
 
     if (profileResult.error) {
@@ -136,9 +152,11 @@ export async function signIn(formData: FormData) {
 
       redirect(getSessionHomePath(session));
     }
+
+    redirect("/sign-in?error=profile-missing");
   }
 
-  redirect("/sign-in?error=unknown-email");
+  redirect("/sign-in?error=auth-unavailable");
 }
 
 /** Ends the current app session and sends the browser back to sign-in. */

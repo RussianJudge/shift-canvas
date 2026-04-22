@@ -4,6 +4,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { savePersonnel } from "@/app/actions";
+import { formatEmployeeDisplayName } from "@/lib/employee-names";
 import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
 
 /**
@@ -348,6 +349,8 @@ export function PersonnelPanel({
         "personnel_id",
         "name",
         "full_name",
+        "first_name",
+        "last_name",
         "employee",
         "employee_name",
         "role",
@@ -546,6 +549,16 @@ export function PersonnelPanel({
     for (const row of csvRows) {
       const csvId = pickCsvValue(row, ["id", "employee_id", "personnel_id"]);
       const csvName = pickCsvValue(row, ["name", "full_name", "employee", "employee_name"]);
+      const csvFirstName = pickCsvValue(row, ["first_name", "first"]);
+      const csvLastName = pickCsvValue(row, ["last_name", "last", "surname"]);
+      const resolvedCsvName =
+        csvName ||
+        (csvFirstName || csvLastName
+          ? formatEmployeeDisplayName({
+              firstName: csvFirstName,
+              lastName: csvLastName,
+            })
+          : "");
       const csvRole = pickCsvValue(row, ["role", "role_title", "title", "position"]);
       const csvShift = pickCsvValue(row, ["shift", "schedule", "shift_code", "schedule_code", "pattern"]);
       const csvCompetencies = pickCsvValue(row, [
@@ -571,7 +584,7 @@ export function PersonnelPanel({
         return competencyId;
       });
 
-      if (!csvName && !csvId) {
+      if (!resolvedCsvName && !csvId) {
         skippedCount += 1;
         previewRows.push({
           key: `skip-${previewRows.length}`,
@@ -585,7 +598,7 @@ export function PersonnelPanel({
       }
 
       const matchedIndexById = csvId ? indexById.get(csvId) : undefined;
-      const matchedIndexByName = csvName ? indexByName.get(normalizeLookupValue(csvName)) : undefined;
+      const matchedIndexByName = resolvedCsvName ? indexByName.get(normalizeLookupValue(resolvedCsvName)) : undefined;
       const matchedIndex = matchedIndexById ?? matchedIndexByName;
       const existing = matchedIndex === undefined ? null : nextEmployees[matchedIndex];
       const resolvedScheduleId = csvShift
@@ -617,7 +630,7 @@ export function PersonnelPanel({
 
       const nextEmployee: EditableEmployee = {
         id: existing?.id ?? (csvId || `emp-${crypto.randomUUID().slice(0, 8)}`),
-        name: csvName || existing?.name || "New Employee",
+        name: resolvedCsvName || existing?.name || "New Employee",
         role: csvRole || existing?.role || "Operator",
         scheduleId: resolvedScheduleId || existing?.scheduleId || defaultSchedule.id,
         competencyIds:

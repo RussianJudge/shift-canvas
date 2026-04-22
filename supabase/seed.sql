@@ -91,26 +91,27 @@ set
   site_id = excluded.site_id,
   business_area_id = excluded.business_area_id;
 
-insert into employees (id, schedule_id, full_name, role_title, company_id, site_id, business_area_id)
+insert into employees (id, schedule_id, first_name, last_name, role_title, company_id, site_id, business_area_id)
 values
-  ('emp-ava', 'schedule-601', 'Ava Patel', 'Senior Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-noah', 'schedule-602', 'Noah Kim', 'Relief Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-jules', 'schedule-603', 'Jules Martin', 'Coordinator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-mika', 'schedule-604', 'Mika Stone', 'Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-siena', 'schedule-601', 'Siena Morales', 'Team Lead', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-owen', 'schedule-602', 'Owen Clarke', 'Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-cam', 'schedule-601', 'Cam Russell', 'Dispatch Lead', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-lena', 'schedule-602', 'Lena Abbas', 'Yard Specialist', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-eli', 'schedule-603', 'Eli Foster', 'Coordinator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-zara', 'schedule-604', 'Zara Shah', 'Relief Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-kira', 'schedule-601', 'Kira Walsh', 'Packaging Lead', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-joel', 'schedule-602', 'Joel Park', 'Case Packer', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-maia', 'schedule-603', 'Maia Chen', 'QA Tech', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('emp-rhett', 'schedule-604', 'Rhett Cole', 'Forklift Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd')
+  ('emp-ava', 'schedule-601', 'Ava', 'Patel', 'Senior Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-noah', 'schedule-602', 'Noah', 'Kim', 'Relief Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-jules', 'schedule-603', 'Jules', 'Martin', 'Coordinator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-mika', 'schedule-604', 'Mika', 'Stone', 'Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-siena', 'schedule-601', 'Siena', 'Morales', 'Team Lead', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-owen', 'schedule-602', 'Owen', 'Clarke', 'Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-cam', 'schedule-601', 'Cam', 'Russell', 'Dispatch Lead', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-lena', 'schedule-602', 'Lena', 'Abbas', 'Yard Specialist', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-eli', 'schedule-603', 'Eli', 'Foster', 'Coordinator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-zara', 'schedule-604', 'Zara', 'Shah', 'Relief Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-kira', 'schedule-601', 'Kira', 'Walsh', 'Packaging Lead', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-joel', 'schedule-602', 'Joel', 'Park', 'Case Packer', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-maia', 'schedule-603', 'Maia', 'Chen', 'QA Tech', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('emp-rhett', 'schedule-604', 'Rhett', 'Cole', 'Forklift Operator', 'company-suncor', 'site-mildred-lake', 'business-area-sgd')
 on conflict (id) do update
 set
   schedule_id = excluded.schedule_id,
-  full_name = excluded.full_name,
+  first_name = excluded.first_name,
+  last_name = excluded.last_name,
   role_title = excluded.role_title,
   company_id = excluded.company_id,
   site_id = excluded.site_id,

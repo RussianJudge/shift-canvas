@@ -1,6 +1,11 @@
 import "server-only";
 
 import {
+  formatEmployeeDisplayName,
+  splitEmployeeDisplayName,
+  type EmployeeNameParts,
+} from "@/lib/employee-names";
+import {
   getEmployeeMap,
   shiftMonthKey,
 } from "@/lib/scheduling";
@@ -46,12 +51,17 @@ type ScheduleRow = {
 type EmployeeRow = {
   id: string;
   schedule_id: string;
-  full_name: string;
+  first_name: string | null;
+  last_name: string | null;
+  full_name: string | null;
   role_title: string | null;
   company_id: string;
   site_id: string;
   business_area_id: string;
 };
+
+const EMPLOYEE_SELECT_COLUMNS =
+  "id, schedule_id, first_name, last_name, full_name, role_title, company_id, site_id, business_area_id";
 
 type CompetencyRow = {
   id: string;
@@ -427,10 +437,20 @@ function buildEmployeesBySchedule(
   }, {});
 
   return employeeRows.reduce<Record<string, Employee[]>>((map, row) => {
+    const nameParts: EmployeeNameParts =
+      row.first_name || row.last_name
+        ? {
+            firstName: row.first_name ?? "",
+            lastName: row.last_name ?? "",
+          }
+        : splitEmployeeDisplayName(row.full_name ?? "");
+
     map[row.schedule_id] ??= [];
     map[row.schedule_id].push({
       id: row.id,
-      name: row.full_name,
+      firstName: nameParts.firstName,
+      lastName: nameParts.lastName,
+      name: formatEmployeeDisplayName(nameParts),
       role: row.role_title ?? "Operator",
       scheduleId: row.schedule_id,
       competencyIds: competenciesByEmployee[row.id] ?? [],
@@ -546,7 +566,6 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     schedulesResult,
     employeesResult,
     employeeCompetenciesResult,
-    assignmentsResult,
     overtimeClaimsResult,
     manualOvertimePostingsResult,
     completedSetsResult,
@@ -568,25 +587,18 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       session,
     ).order("name"),
     applySessionScope(
-        supabase
+      supabase
       .from("employees")
-      .select("id, schedule_id, full_name, role_title, company_id, site_id, business_area_id"),
+      .select(EMPLOYEE_SELECT_COLUMNS),
         session,
       )
       .eq("is_active", true)
-      .order("full_name"),
+      .order("last_name")
+      .order("first_name"),
     applySessionScope(
       supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
       session,
     ),
-    applySessionScope(
-      supabase
-      .from("schedule_assignments")
-      .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
-      session,
-    )
-      .gte("assignment_date", monthStart)
-      .lte("assignment_date", monthEnd),
     applySessionScope(
       supabase
       .from("overtime_claims")
@@ -616,6 +628,84 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     return emptySnapshot(month);
   }
 
+  const employeeRows = (employeesResult.data as EmployeeRow[] | null) ?? [];
+  const visibleEmployeeIds = employeeRows.map((employee) => employee.id);
+  /**
+   * Assignment rows are intentionally loaded through the already-scoped
+   * employee ids instead of `applySessionScope(schedule_assignments, session)`.
+   *
+   * Why this matters: the app gained company/site/business-area columns after
+   * schedules were already in use. Older or manually repaired assignment rows
+   * can have valid `employee_id` + `assignment_date` data but stale scope
+   * columns. If we filter those rows by their own scope, Supabase contains the
+   * squares but the schedule grid cannot see them. The employee query above is
+   * still authority-scoped, so this remains permission-safe while making the
+   * renderer resilient to legacy assignment metadata.
+   */
+  const assignmentsResult =
+    visibleEmployeeIds.length > 0
+      ? await supabase
+          .from("schedule_assignments")
+          .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
+          .in("employee_id", visibleEmployeeIds)
+          .gte("assignment_date", monthStart)
+          .lte("assignment_date", monthEnd)
+      : { data: [], error: null };
+  const assignmentRows = (assignmentsResult.data as AssignmentRow[] | null) ?? [];
+  const scopedCompetencyRows = (competenciesResult.data as CompetencyRow[] | null) ?? [];
+  const scopedTimeCodeRows = (timeCodesResult.data as TimeCodeRow[] | null) ?? [];
+  const loadedCompetencyIds = new Set(scopedCompetencyRows.map((competency) => competency.id));
+  const loadedTimeCodeIds = new Set(scopedTimeCodeRows.map((timeCode) => timeCode.id));
+  const missingReferencedCompetencyIds = [
+    ...new Set(
+      assignmentRows
+        .map((assignment) => assignment.competency_id)
+        .filter((competencyId): competencyId is string => Boolean(competencyId)),
+    ),
+  ].filter((competencyId) => !loadedCompetencyIds.has(competencyId));
+  const missingReferencedTimeCodeIds = [
+    ...new Set(
+      assignmentRows
+        .map((assignment) => assignment.time_code_id)
+        .filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId)),
+    ),
+  ].filter((timeCodeId) => !loadedTimeCodeIds.has(timeCodeId));
+  /**
+   * If a visible assignment references a code whose scope columns are stale, the
+   * assignment row loads but the cell still appears blank because the renderer
+   * cannot resolve the code label/color. Pull the exact referenced codes back
+   * into the snapshot, constrained to the same company, so legacy cell rows can
+   * render while we repair their metadata.
+   */
+  const referencedCompetenciesResult =
+    missingReferencedCompetencyIds.length > 0
+      ? await supabase
+          .from("competencies")
+          .select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id")
+          .in("id", missingReferencedCompetencyIds)
+          .eq("company_id", session?.companyId ?? "")
+      : { data: [], error: null };
+  const referencedTimeCodesResult =
+    missingReferencedTimeCodeIds.length > 0
+      ? await supabase
+          .from("time_codes")
+          .select("id, code, label, color_token, company_id, site_id, business_area_id")
+          .in("id", missingReferencedTimeCodeIds)
+          .eq("company_id", session?.companyId ?? "")
+      : { data: [], error: null };
+  const competencyRowsById = new Map(
+    [
+      ...scopedCompetencyRows,
+      ...((referencedCompetenciesResult.data as CompetencyRow[] | null) ?? []),
+    ].map((competency) => [competency.id, competency]),
+  );
+  const timeCodeRowsById = new Map(
+    [
+      ...scopedTimeCodeRows,
+      ...((referencedTimeCodesResult.data as TimeCodeRow[] | null) ?? []),
+    ].map((timeCode) => [timeCode.id, timeCode]),
+  );
+
   const queryErrors = [
     ["production_units", unitsResult.error],
     ["competencies", competenciesResult.error],
@@ -623,6 +713,8 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     ["employees", employeesResult.error],
     ["employee_competencies", employeeCompetenciesResult.error],
     ["schedule_assignments", assignmentsResult.error],
+    ["referenced_competencies", referencedCompetenciesResult.error],
+    ["referenced_time_codes", referencedTimeCodesResult.error],
     ["overtime_claims", overtimeClaimsResult.error],
     ["manual_overtime_postings", manualOvertimePostingsResult.error],
     ["completed_sets", completedSetsResult.error],
@@ -636,17 +728,17 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
   }
 
   const employeesBySchedule = buildEmployeesBySchedule(
-    (employeesResult.data as EmployeeRow[] | null) ?? [],
+    employeeRows,
     (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
 
   return {
     month,
     productionUnits: mapProductionUnits((unitsResult.data as ProductionUnitRow[] | null) ?? []),
-    competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
-    timeCodes: mapTimeCodes((timeCodesResult.data as TimeCodeRow[] | null) ?? []),
+    competencies: mapCompetencies([...competencyRowsById.values()]),
+    timeCodes: mapTimeCodes([...timeCodeRowsById.values()]),
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
-    assignments: mapAssignments((assignmentsResult.data as AssignmentRow[] | null) ?? []),
+    assignments: mapAssignments(assignmentRows),
     overtimeClaims: mapOvertimeClaims((overtimeClaimsResult.data as OvertimeClaimRow[] | null) ?? []),
     manualOvertimePostings: mapManualOvertimePostings(
       (manualOvertimePostingsResult.data as ManualOvertimePostingRow[] | null) ?? [],
@@ -680,11 +772,12 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
       applySessionScope(
         supabase
         .from("employees")
-        .select("id, schedule_id, full_name, role_title, company_id, site_id, business_area_id"),
+        .select(EMPLOYEE_SELECT_COLUMNS),
         session,
       )
         .eq("is_active", true)
-        .order("full_name"),
+        .order("last_name")
+        .order("first_name"),
       applySessionScope(
         supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
         session,
@@ -789,7 +882,7 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
       session,
     ).order("name"),
     applySessionScope(
-      supabase.from("employees").select("id, schedule_id, full_name, role_title, company_id, site_id, business_area_id"),
+      supabase.from("employees").select(EMPLOYEE_SELECT_COLUMNS),
       session,
     ).eq("is_active", true),
   ]);
@@ -846,11 +939,12 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     applySessionScope(
       supabase
       .from("employees")
-      .select("id, schedule_id, full_name, role_title, company_id, site_id, business_area_id"),
+      .select(EMPLOYEE_SELECT_COLUMNS),
       session,
     )
       .eq("is_active", true)
-      .order("full_name"),
+      .order("last_name")
+      .order("first_name"),
     applySessionScope(
       supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
       session,

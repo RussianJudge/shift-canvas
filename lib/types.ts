@@ -46,6 +46,8 @@ export interface TimeCode extends OrganizationScope {
 
 export interface Employee extends OrganizationScope {
   id: string;
+  firstName: string;
+  lastName: string;
   name: string;
   role: string;
   scheduleId: string;

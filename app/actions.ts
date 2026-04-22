@@ -24,6 +24,10 @@ import type {
 } from "@/lib/types";
 import { getSchedulerSnapshot } from "@/lib/data";
 import {
+  formatEmployeeDisplayName,
+  splitEmployeeDisplayName,
+} from "@/lib/employee-names";
+import {
   buildOvertimeAssignmentNote,
   buildSwapOvertimeAssignmentRows,
   parseOvertimeAssignmentNote,
@@ -2470,14 +2474,20 @@ export async function savePersonnel(input: SavePersonnelInput) {
     }
   }
 
-  const employeeRows = input.updates.map((update) => ({
-    ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
-    id: update.employeeId,
-    full_name: update.name.trim(),
-    role_title: update.role.trim(),
-    schedule_id: update.scheduleId,
-    is_active: true,
-  }));
+  const employeeRows = input.updates.map((update) => {
+    const nameParts = splitEmployeeDisplayName(update.name);
+
+    return {
+      ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
+      id: update.employeeId,
+      first_name: nameParts.firstName,
+      last_name: nameParts.lastName,
+      full_name: formatEmployeeDisplayName(nameParts),
+      role_title: update.role.trim(),
+      schedule_id: update.scheduleId,
+      is_active: true,
+    };
+  });
 
   const employeeError =
     employeeRows.length > 0
