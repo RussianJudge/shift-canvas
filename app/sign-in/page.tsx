@@ -22,7 +22,13 @@ export default async function SignInPage({
     <SignInPanel
       error={resolvedSearchParams?.error}
       notice={resolvedSearchParams?.notice}
-      initialMode={resolvedSearchParams?.mode === "create" ? "create" : "sign-in"}
+      initialMode={
+        resolvedSearchParams?.mode === "create"
+          ? "create"
+          : resolvedSearchParams?.mode === "reset"
+            ? "reset"
+            : "sign-in"
+      }
     />
   );
 }

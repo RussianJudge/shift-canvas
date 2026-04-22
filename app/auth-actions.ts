@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 
 import { clearAppSession, getAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
 import type { AppSession } from "@/lib/types";
@@ -34,6 +35,26 @@ type NamedScopeRow = {
   id: string;
   name: string;
 };
+
+/** Builds the public URL Supabase should send users back to after auth emails. */
+async function getAuthRedirectOrigin() {
+  const headerStore = await headers();
+  const requestOrigin = headerStore.get("origin");
+
+  if (requestOrigin) {
+    return requestOrigin;
+  }
+
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
+    return process.env.NEXT_PUBLIC_SITE_URL;
+  }
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return "http://localhost:3000";
+}
 
 /**
  * Signs a user in with Supabase Auth, then loads app-specific authorization
@@ -223,6 +244,38 @@ export async function signUp(formData: FormData) {
   }
 
   redirect("/sign-in?notice=account-created");
+}
+
+/**
+ * Sends Supabase's password recovery email from the sign-in screen.
+ *
+ * This action only starts the reset. Supabase creates a temporary recovery
+ * session when the emailed link is opened, and the `/reset-password` page uses
+ * that browser-side session to write the new password.
+ */
+export async function requestPasswordReset(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+
+  if (!email) {
+    redirect("/sign-in?mode=reset&error=missing-email");
+  }
+
+  const authClient = getSupabaseServerClient();
+
+  if (!authClient) {
+    redirect("/sign-in?mode=reset&error=auth-unavailable");
+  }
+
+  const origin = await getAuthRedirectOrigin();
+  const { error } = await authClient.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/reset-password`,
+  });
+
+  if (error) {
+    redirect("/sign-in?mode=reset&error=reset-failed");
+  }
+
+  redirect("/sign-in?mode=reset&notice=reset-sent");
 }
 
 /** Ends the current app session and sends the browser back to sign-in. */
