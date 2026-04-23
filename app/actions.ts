@@ -37,6 +37,7 @@ import {
 } from "@/lib/mutuals";
 import {
   buildAssignmentIndex,
+  createAssignmentKey,
   createSetRangeKey,
   getEmployeeMap,
   getExtendedMonthDays,
@@ -142,16 +143,17 @@ function canAccessScope(
  */
 async function restoreSwappedAssignmentsForClaims(
   supabase: SupabaseAdminClient,
-  claims: Array<{ employeeId: string; competencyId: string; date: string }>,
+  claims: Array<{ scheduleId: string; employeeId: string; competencyId: string; date: string }>,
 ) {
   if (claims.length === 0) {
     return { ok: true as const };
   }
 
-  const groupedClaims = claims.reduce<Record<string, { employeeId: string; competencyId: string; dates: string[] }>>(
+  const groupedClaims = claims.reduce<Record<string, { scheduleId: string; employeeId: string; competencyId: string; dates: string[] }>>(
     (map, claim) => {
-      const key = `${claim.employeeId}:${claim.competencyId}`;
+      const key = `${claim.scheduleId}:${claim.employeeId}:${claim.competencyId}`;
       map[key] ??= {
+        scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
         dates: [],
@@ -167,6 +169,7 @@ async function restoreSwappedAssignmentsForClaims(
     const { data, error } = await supabase
       .from("schedule_assignments")
       .select("employee_id, schedule_id, assignment_date, notes, shift_kind, company_id, site_id, business_area_id")
+      .eq("schedule_id", group.scheduleId)
       .in("assignment_date", group.dates)
       .like("notes", `${notePrefix}%`);
 
@@ -197,20 +200,22 @@ async function restoreSwappedAssignmentsForClaims(
           return [];
         }
 
-        return [
-          {
-            employee_id: row.employee_id,
-            schedule_id: row.schedule_id ?? undefined,
-            assignment_date: row.assignment_date,
-            competency_id: parsed.originalCompetencyId,
-            time_code_id: null,
-            notes: null,
-            shift_kind: row.shift_kind,
-            company_id: row.company_id,
-            site_id: row.site_id,
-            business_area_id: row.business_area_id,
-          } satisfies OvertimeAssignmentRow,
-        ];
+        if (!row.schedule_id) {
+          return [];
+        }
+
+        return [{
+          employee_id: row.employee_id,
+          schedule_id: row.schedule_id,
+          assignment_date: row.assignment_date,
+          competency_id: parsed.originalCompetencyId,
+          time_code_id: null,
+          notes: null,
+          shift_kind: row.shift_kind,
+          company_id: row.company_id,
+          site_id: row.site_id,
+          business_area_id: row.business_area_id,
+        } satisfies OvertimeAssignmentRow];
       });
 
     if (restoreRows.length === 0) {
@@ -218,7 +223,7 @@ async function restoreSwappedAssignmentsForClaims(
     }
 
     const { error: restoreError } = await supabase.from("schedule_assignments").upsert(restoreRows, {
-      onConflict: "employee_id,assignment_date",
+      onConflict: "schedule_id,employee_id,assignment_date",
     });
 
     if (restoreError) {
@@ -239,16 +244,17 @@ async function restoreSwappedAssignmentsForClaims(
  */
 async function clearClaimantAssignmentsForClaims(
   supabase: SupabaseAdminClient,
-  claims: Array<{ employeeId: string; competencyId: string; date: string }>,
+  claims: Array<{ scheduleId: string; employeeId: string; competencyId: string; date: string }>,
 ) {
   if (claims.length === 0) {
     return { ok: true as const };
   }
 
-  const groupedClaims = claims.reduce<Record<string, { employeeId: string; competencyId: string; dates: string[] }>>(
+  const groupedClaims = claims.reduce<Record<string, { scheduleId: string; employeeId: string; competencyId: string; dates: string[] }>>(
     (map, claim) => {
-      const key = `${claim.employeeId}:${claim.competencyId}`;
+      const key = `${claim.scheduleId}:${claim.employeeId}:${claim.competencyId}`;
       map[key] ??= {
+        scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
         dates: [],
@@ -268,6 +274,7 @@ async function clearClaimantAssignmentsForClaims(
           .from("schedule_assignments")
           .delete()
           .eq("employee_id", group.employeeId)
+          .eq("schedule_id", group.scheduleId)
           .eq("assignment_date", date)
           .like("notes", `${notePrefix}%`),
       ),
@@ -287,6 +294,7 @@ async function clearClaimantAssignmentsForClaims(
           .from("schedule_assignments")
           .delete()
           .eq("employee_id", group.employeeId)
+          .eq("schedule_id", group.scheduleId)
           .eq("assignment_date", date)
           .eq("competency_id", group.competencyId),
       ),
@@ -394,7 +402,7 @@ async function removeStaleOvertimeClaims(
           }
 
           const regularFilled = schedule.employees.reduce((count, employee) => {
-            const selection = assignmentIndex[`${employee.id}:${day.date}`];
+            const selection = assignmentIndex[createAssignmentKey(schedule.id, employee.id, day.date)];
             return count + Number(selection?.competencyId === competency.id);
           }, 0);
           const allowedClaims = Math.max(0, competency.requiredStaff - regularFilled);
@@ -411,6 +419,7 @@ async function removeStaleOvertimeClaims(
     const restoreResult = await restoreSwappedAssignmentsForClaims(
       supabase,
       claimsToRemove.map((claim) => ({
+        scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
         date: claim.date,
@@ -439,6 +448,7 @@ async function removeStaleOvertimeClaims(
     const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
       supabase,
       claimsToRemove.map((claim) => ({
+        scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
         date: claim.date,
@@ -516,7 +526,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
 
       return {
         employee_id: update.employeeId,
-        schedule_id: input.scheduleId,
+        schedule_id: update.scheduleId,
         assignment_date: update.date,
         competency_id: update.competencyId,
         time_code_id: update.timeCodeId,
@@ -529,6 +539,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   const rowsToDelete = input.updates
     .filter((update) => !update.competencyId && !update.timeCodeId && !(update.notes?.trim().length ?? 0))
     .map((update) => ({
+      schedule_id: update.scheduleId,
       employee_id: update.employeeId,
       assignment_date: update.date,
     }));
@@ -550,6 +561,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
           .from("schedule_assignments")
           .update(row)
           .eq("employee_id", row.employee_id)
+          .eq("schedule_id", row.schedule_id)
           .eq("assignment_date", row.assignment_date)
           .select("employee_id");
 
@@ -584,6 +596,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
           .from("schedule_assignments")
           .delete()
           .eq("employee_id", row.employee_id)
+          .eq("schedule_id", row.schedule_id)
           .eq("assignment_date", row.assignment_date),
       ),
     );
@@ -1228,7 +1241,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     }
 
     for (const date of normalizedDates) {
-      const swapSelection = assignmentIndex[`${swapEmployee.id}:${date}`] ?? {
+      const swapSelection = assignmentIndex[createAssignmentKey(input.scheduleId, swapEmployee.id, date)] ?? {
         competencyId: null,
         timeCodeId: null,
       };
@@ -1277,12 +1290,14 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
   for (const date of normalizedDates) {
     const shiftKind = shiftForDate(employeeSchedule, date);
-    const currentAssignment = assignmentIndex[`${employee.id}:${date}`] ?? {
-      competencyId: null,
-      timeCodeId: null,
-    };
+    const hasExistingAssignment = snapshot.assignments.some(
+      (assignment) =>
+        assignment.employeeId === employee.id &&
+        assignment.date === date &&
+        Boolean(assignment.competencyId || assignment.timeCodeId),
+    );
 
-    if (shiftKind !== "OFF" || currentAssignment.competencyId || currentAssignment.timeCodeId) {
+    if (shiftKind !== "OFF" || hasExistingAssignment) {
       return {
         ok: false,
         message: `${employee.name} is not available for every shift in that posting.`,
@@ -1335,7 +1350,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   }));
 
   const { error: assignmentError } = await supabase.from("schedule_assignments").upsert([...assignmentRows, ...swapAssignmentRows], {
-    onConflict: "employee_id,assignment_date",
+    onConflict: "schedule_id,employee_id,assignment_date",
   });
 
   if (assignmentError) {
@@ -1405,6 +1420,7 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
   const restoreResult = await restoreSwappedAssignmentsForClaims(
     supabase,
     input.dates.map((date) => ({
+      scheduleId: input.scheduleId,
       employeeId: input.employeeId,
       competencyId: input.competencyId,
       date,
@@ -1436,6 +1452,7 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
   const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
     supabase,
     input.dates.map((date) => ({
+      scheduleId: input.scheduleId,
       employeeId: input.employeeId,
       competencyId: input.competencyId,
       date,
@@ -1932,10 +1949,13 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
   const existingAssignments = new Map(
     (((existingAssignmentsResult.data as Array<{
       employee_id: string;
+      schedule_id: string | null;
       assignment_date: string;
       competency_id: string | null;
       time_code_id: string | null;
-    }> | null) ?? [])).map((row) => [`${row.employee_id}:${row.assignment_date}`, row]),
+    }> | null) ?? []))
+      .filter((row) => Boolean(row.schedule_id))
+      .map((row) => [createAssignmentKey(row.schedule_id ?? "", row.employee_id, row.assignment_date), row]),
   );
 
   const mutualRows: MutualAssignmentRow[] = buildAcceptedMutualAssignmentRows({
@@ -1959,7 +1979,7 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
   });
 
   const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
-    onConflict: "employee_id,assignment_date",
+    onConflict: "schedule_id,employee_id,assignment_date",
   });
 
   if (mutualRowsError) {
@@ -2269,7 +2289,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
 
   if (restoreRows.length > 0) {
     const { error: restoreError } = await supabase.from("schedule_assignments").upsert(restoreRows, {
-      onConflict: "employee_id,assignment_date",
+      onConflict: "schedule_id,employee_id,assignment_date",
     });
 
     if (restoreError) {
@@ -2286,6 +2306,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
         .from("schedule_assignments")
         .delete()
         .eq("employee_id", row.employee_id)
+        .eq("schedule_id", row.schedule_id ?? parseMutualAssignmentNote(row.notes).targetScheduleId ?? "")
         .eq("assignment_date", row.assignment_date)
         .like("notes", `MUT|posting:${input.postingId}|%`);
 

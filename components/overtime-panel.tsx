@@ -12,6 +12,7 @@ import {
 } from "@/app/actions";
 import {
   buildAssignmentIndex,
+  createAssignmentKey,
   createSetRangeKey,
   createSetRangeKeyFromEntry,
   getEmployeeMap,
@@ -176,10 +177,11 @@ function getWorkedSets(
 
 function getCellSelection(
   employee: Employee,
+  scheduleId: string,
   date: string,
   assignments: Record<string, { competencyId: string | null; timeCodeId: string | null }>,
 ) {
-  return assignments[`${employee.id}:${date}`] ?? {
+  return assignments[createAssignmentKey(scheduleId, employee.id, date)] ?? {
     competencyId: null,
     timeCodeId: null,
   };
@@ -208,9 +210,14 @@ function getClaimStatus(
   const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
 
   for (const date of posting.dates) {
-    const selection = getCellSelection(employee, date, assignments);
+    const hasExistingAssignment = snapshot.assignments.some(
+      (assignment) =>
+        assignment.employeeId === employee.id &&
+        assignment.date === date &&
+        Boolean(assignment.competencyId || assignment.timeCodeId),
+    );
 
-    if (selection.competencyId || selection.timeCodeId) {
+    if (hasExistingAssignment) {
       return { canClaim: false, reason: "Employee already has an assignment on one or more posting dates." };
     }
 
@@ -370,7 +377,9 @@ export function OvertimePanel({
   const assignmentMetaIndex = useMemo(
     () =>
       snapshot.assignments.reduce<Record<string, AssignmentMeta>>((map, assignment) => {
-        map[`${assignment.employeeId}:${assignment.date}`] = parseAssignmentMeta(assignment.notes);
+        map[createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date)] = parseAssignmentMeta(
+          assignment.notes,
+        );
         return map;
       }, {}),
     [snapshot.assignments],
@@ -445,7 +454,7 @@ export function OvertimePanel({
               let filledCount = 0;
 
               for (const employee of schedule.employees) {
-                const selection = getCellSelection(employee, date, assignmentIndex);
+                const selection = getCellSelection(employee, schedule.id, date, assignmentIndex);
 
                 if (selection.competencyId === competency.id) {
                   filledCount += 1;
@@ -500,7 +509,7 @@ export function OvertimePanel({
               const orderedDates = setDates.filter((date) => employeeDates.includes(date));
               const claimEmployee = employeeMap[employeeId];
               const assignmentMeta = orderedDates[0]
-                ? assignmentMetaIndex[`${employeeId}:${orderedDates[0]}`]
+                ? assignmentMetaIndex[createAssignmentKey(schedule.id, employeeId, orderedDates[0])]
                 : undefined;
               const coverageCompetencyId = assignmentMeta?.coverageCompetencyId ?? competency.id;
               const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
@@ -569,7 +578,7 @@ export function OvertimePanel({
                 }
 
                 const assignedCompetencyIds = postingDates.reduce<string[]>((ids, date) => {
-                  const selection = getCellSelection(teamEmployee, date, assignmentIndex);
+                  const selection = getCellSelection(teamEmployee, schedule.id, date, assignmentIndex);
 
                   if (selection.competencyId) {
                     ids.push(selection.competencyId);
@@ -680,7 +689,7 @@ export function OvertimePanel({
         let filledCount = 0;
 
         for (const employee of schedule.employees) {
-          const selection = getCellSelection(employee, date, assignmentIndex);
+          const selection = getCellSelection(employee, schedule.id, date, assignmentIndex);
 
           if (selection.competencyId === competency.id) {
             filledCount += 1;

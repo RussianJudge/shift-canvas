@@ -20,6 +20,7 @@ import {
   getTimeCodeMap,
   getWorkedSetDays,
   isCompletedSetRange,
+  parseAssignmentKey,
   shiftMonthKey,
   shiftForDate,
   toggleCompletedSetEntries,
@@ -120,38 +121,77 @@ function buildDisplayEmployeesForSchedule({
     competencyIds: employee.competencyIds,
   }));
 
-  const overtimeRows = Object.values(
-    snapshot.overtimeClaims
-      .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
-      .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
-        const employee = employeeMap[claim.employeeId];
+  const borrowedRowsByEmployee = snapshot.overtimeClaims
+    .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
+    .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
+      const employee = employeeMap[claim.employeeId];
 
-        if (!employee || employee.scheduleId === schedule.id) {
-          return rows;
-        }
-
-        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
-        const existingDates = rows[employee.id]?.overtimeDates ?? [];
-        const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
-
-        rows[employee.id] = {
-          rowId: `ot:${schedule.id}:${employee.id}`,
-          sourceEmployeeId: employee.id,
-          name: employee.name,
-          role: `${employee.role} · OT from ${homeSchedule.name}`,
-          competencyIds: employee.competencyIds,
-          overtimeDates: existingDates.includes(claim.date)
-            ? existingDates
-            : [...existingDates, claim.date].sort(),
-          overtimeCompetencyByDate: {
-            ...existingCompetencies,
-            [claim.date]: claim.competencyId,
-          },
-        };
-
+      if (!employee || employee.scheduleId === schedule.id) {
         return rows;
-      }, {}),
-  ).sort((left, right) => left.name.localeCompare(right.name));
+      }
+
+      const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+      const existingDates = rows[employee.id]?.overtimeDates ?? [];
+      const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
+
+      rows[employee.id] = {
+        rowId: `ot:${schedule.id}:${employee.id}`,
+        sourceEmployeeId: employee.id,
+        name: employee.name,
+        role: `${employee.role} · OT from ${homeSchedule.name}`,
+        competencyIds: employee.competencyIds,
+        overtimeDates: existingDates.includes(claim.date)
+          ? existingDates
+          : [...existingDates, claim.date].sort(),
+        overtimeCompetencyByDate: {
+          ...existingCompetencies,
+          [claim.date]: claim.competencyId,
+        },
+      };
+
+      return rows;
+    }, {});
+
+  /**
+   * Manual borrowed assignments are saved directly in `schedule_assignments`
+   * without an `overtime_claims` row. They still need a temporary visible row on
+   * the target shift, or the cell exists in Supabase but has nowhere to render
+   * after a refresh.
+   */
+  for (const assignment of snapshot.assignments) {
+    if (assignment.scheduleId !== schedule.id || assignment.date.slice(0, 7) !== currentMonth) {
+      continue;
+    }
+
+    const employee = employeeMap[assignment.employeeId];
+
+    if (!employee || employee.scheduleId === schedule.id) {
+      continue;
+    }
+
+    const parsed = parseMutualAssignmentNote(assignment.notes);
+
+    if (parsed.targetScheduleId === schedule.id) {
+      continue;
+    }
+
+    const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+    const existingDates = borrowedRowsByEmployee[employee.id]?.overtimeDates ?? [];
+
+    borrowedRowsByEmployee[employee.id] = {
+      rowId: borrowedRowsByEmployee[employee.id]?.rowId ?? `manual:${schedule.id}:${employee.id}`,
+      sourceEmployeeId: employee.id,
+      name: employee.name,
+      role: borrowedRowsByEmployee[employee.id]?.role ?? `${employee.role} · Manual from ${homeSchedule.name}`,
+      competencyIds: employee.competencyIds,
+      overtimeDates: existingDates.includes(assignment.date)
+        ? existingDates
+        : [...existingDates, assignment.date].sort(),
+      overtimeCompetencyByDate: borrowedRowsByEmployee[employee.id]?.overtimeCompetencyByDate,
+    };
+  }
+
+  const borrowedRows = Object.values(borrowedRowsByEmployee).sort((left, right) => left.name.localeCompare(right.name));
 
   const mutualRows = Object.values(
     snapshot.assignments
@@ -187,7 +227,7 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  const rows = [...baseRows, ...overtimeRows, ...mutualRows];
+  const rows = [...baseRows, ...borrowedRows, ...mutualRows];
   const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
   const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
 
@@ -228,7 +268,10 @@ function stripMonthWindowEntries(assignments: Record<string, AssignmentSelection
   const months = new Set([shiftMonthKey(monthKey, -1), monthKey, shiftMonthKey(monthKey, 1)]);
 
   return Object.fromEntries(
-    Object.entries(assignments).filter((entry) => !months.has(entry[0].slice(-10, -3))),
+    Object.entries(assignments).filter((entry) => {
+      const parsed = parseAssignmentKey(entry[0]);
+      return parsed ? !months.has(parsed.date.slice(0, 7)) : true;
+    }),
   );
 }
 
@@ -236,7 +279,10 @@ function pickMonthWindowEntries(assignments: Record<string, AssignmentSelection>
   const months = new Set([shiftMonthKey(monthKey, -1), monthKey, shiftMonthKey(monthKey, 1)]);
 
   return Object.fromEntries(
-    Object.entries(assignments).filter((entry) => months.has(entry[0].slice(-10, -3))),
+    Object.entries(assignments).filter((entry) => {
+      const parsed = parseAssignmentKey(entry[0]);
+      return parsed ? months.has(parsed.date.slice(0, 7)) : false;
+    }),
   );
 }
 
@@ -316,12 +362,12 @@ function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
 function applySavedUpdatesToBaseline(
   baselineAssignments: Record<string, AssignmentSelection>,
   savedAssignments: Record<string, AssignmentSelection>,
-  savedUpdates: Array<{ employeeId: string; date: string }>,
+  savedUpdates: Array<{ scheduleId: string; employeeId: string; date: string }>,
 ) {
   const nextAssignments = { ...baselineAssignments };
 
   for (const update of savedUpdates) {
-    const key = createAssignmentKey(update.employeeId, update.date);
+    const key = createAssignmentKey(update.scheduleId, update.employeeId, update.date);
     const savedSelection = savedAssignments[key];
 
     if (savedSelection) {
@@ -342,7 +388,7 @@ function applyStoredUpdatesToAssignments(
   const nextAssignments = { ...assignments };
 
   for (const update of updates) {
-    const key = createAssignmentKey(update.employeeId, update.date);
+    const key = createAssignmentKey(update.scheduleId, update.employeeId, update.date);
 
     if (!update.competencyId && !update.timeCodeId && !update.notes) {
       delete nextAssignments[key];
@@ -437,13 +483,14 @@ function getDefaultSelection(_shiftKind: ShiftKind, _timeCodes: TimeCode[]): Ass
 }
 
 function getSelectionForCell(
+  scheduleId: string,
   employeeId: string,
   date: string,
   shiftKind: ShiftKind,
   assignments: Record<string, AssignmentSelection>,
   timeCodes: TimeCode[],
 ) {
-  const key = createAssignmentKey(employeeId, date);
+  const key = createAssignmentKey(scheduleId, employeeId, date);
 
   if (key in assignments) {
     return assignments[key];
@@ -507,11 +554,12 @@ function buildSingleSetAutofillPlan({
     for (const day of setDays) {
       for (const employee of schedule.employees) {
         const shiftKind = shiftForDate(schedule, day.date);
-        const selection = getSelectionForCell(
-          employee.id,
-          day.date,
-          shiftKind,
-          nextAssignments,
+          const selection = getSelectionForCell(
+            schedule.id,
+            employee.id,
+            day.date,
+            shiftKind,
+            nextAssignments,
           timeCodes,
         );
 
@@ -530,7 +578,14 @@ function buildSingleSetAutofillPlan({
   const fullyBlankWorkers = schedule.employees.filter((employee) =>
     setDays.every((day) => {
       const shiftKind = shiftForDate(schedule, day.date);
-      const selection = getSelectionForCell(employee.id, day.date, shiftKind, nextAssignments, timeCodes);
+      const selection = getSelectionForCell(
+        schedule.id,
+        employee.id,
+        day.date,
+        shiftKind,
+        nextAssignments,
+        timeCodes,
+      );
       return !selection.competencyId && !selection.timeCodeId;
     }),
   );
@@ -555,7 +610,7 @@ function buildSingleSetAutofillPlan({
       availableCompetencyIds[Math.floor(Math.random() * availableCompetencyIds.length)];
 
     for (const day of setDays) {
-      nextAssignments[createAssignmentKey(employee.id, day.date)] = {
+      nextAssignments[createAssignmentKey(schedule.id, employee.id, day.date)] = {
         competencyId: bestCompetencyId,
         timeCodeId: null,
         notes: null,
@@ -886,6 +941,7 @@ export function MonthlyScheduler({
         for (const employee of activeSchedule.employees) {
           const shiftKind = shiftForDate(activeSchedule, day.date);
           const selection = getSelectionForCell(
+            activeSchedule.id,
             employee.id,
             day.date,
             shiftKind,
@@ -944,6 +1000,7 @@ export function MonthlyScheduler({
       selectedSetDays.flatMap((day) => {
         const shiftKind = shiftForDate(activeSchedule, day.date);
         const selection = getSelectionForCell(
+          activeSchedule.id,
           employee.id,
           day.date,
           shiftKind,
@@ -973,6 +1030,7 @@ export function MonthlyScheduler({
       selectedSetDays.every((day) => {
         const shiftKind = shiftForDate(activeSchedule, day.date);
         const selection = getSelectionForCell(
+          activeSchedule.id,
           employee.id,
           day.date,
           shiftKind,
@@ -1028,15 +1086,15 @@ export function MonthlyScheduler({
       Array.from(
         new Set([...Object.keys(baselineAssignments), ...Object.keys(draftAssignments)]),
       ).flatMap((key) => {
-        const [employeeId, date] = key.split(":");
-        const employee = employeeMap[employeeId];
-        const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+        const parsed = parseAssignmentKey(key);
+        const employee = parsed ? employeeMap[parsed.employeeId] : null;
+        const targetSchedule = parsed ? getScheduleById(snapshot, parsed.scheduleId) : null;
 
-        if (!employee || !employeeSchedule) {
+        if (!parsed || !employee || !targetSchedule) {
           return [];
         }
 
-        const shiftKind = shiftForDate(employeeSchedule, date);
+        const shiftKind = shiftForDate(targetSchedule, parsed.date);
         const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
         const draft = draftAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
 
@@ -1050,8 +1108,9 @@ export function MonthlyScheduler({
 
         return [
           {
-            employeeId,
-            date,
+            employeeId: parsed.employeeId,
+            scheduleId: parsed.scheduleId,
+            date: parsed.date,
             competencyId: draft.competencyId,
             timeCodeId: draft.timeCodeId,
             notes: draft.notes,
@@ -1070,6 +1129,7 @@ export function MonthlyScheduler({
   const editorSelection =
     editorCell && editorEmployee
       ? getSelectionForCell(
+          activeSchedule.id,
           editorEmployee.sourceEmployeeId,
           editorCell.date,
           editorShiftKind,
@@ -1083,6 +1143,17 @@ export function MonthlyScheduler({
   const highlightedMissingDates = selectedCoverageCompetencyId
     ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
     : new Set<string>();
+  const activeDirtyUpdates = useMemo(
+    () =>
+      dirtyUpdates.filter(
+        (update) =>
+          update.scheduleId === activeSchedule.id &&
+          displayEmployeeMap[update.employeeId] &&
+          monthDays.some((day) => day.date === update.date),
+      ),
+    [dirtyUpdates, displayEmployeeMap, monthDays],
+  );
+  const hasActiveChanges = activeDirtyUpdates.length > 0;
 
   const gridColumns = `var(--schedule-name-column-width, 10.5rem) repeat(${monthDays.length}, minmax(3rem, 1fr))`;
 
@@ -1264,11 +1335,11 @@ export function MonthlyScheduler({
   useEffect(() => {
     // Treat an open cell editor like an in-progress edit session: keep the
     // draft local, then autosave once the modal closes.
-    if (!canEdit || isSaving || !isDraftHydrated || !hasChanges || editorCell) {
+    if (!canEdit || isSaving || !isDraftHydrated || !hasActiveChanges || editorCell) {
       return;
     }
 
-    const scheduledUpdates = dirtyUpdates.map((update) => ({ ...update }));
+    const scheduledUpdates = activeDirtyUpdates.map((update) => ({ ...update }));
     const scheduledDraftAssignments = cloneAssignments(draftAssignments);
     const autoSaveToken = latestAutoSaveTokenRef.current + 1;
 
@@ -1301,7 +1372,7 @@ export function MonthlyScheduler({
     }, AUTO_SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [activeSchedule.id, canEdit, dirtyUpdates, draftAssignments, editorCell, hasChanges, isDraftHydrated, isSaving]);
+  }, [activeDirtyUpdates, activeSchedule.id, canEdit, draftAssignments, editorCell, hasActiveChanges, isDraftHydrated, isSaving]);
 
   useEffect(() => {
     function handlePointerUp() {
@@ -1329,7 +1400,7 @@ export function MonthlyScheduler({
 
               const shiftKind = shiftForDate(employeeSchedule, date);
               const defaultSelection = getDefaultSelection(shiftKind, snapshot.timeCodes);
-              const key = createAssignmentKey(dragRange.employeeId, date);
+              const key = createAssignmentKey(activeSchedule.id, dragRange.employeeId, date);
 
               if (
                 defaultSelection.competencyId === dragRange.selection.competencyId &&
@@ -1446,7 +1517,7 @@ export function MonthlyScheduler({
 
     const shiftKind = shiftForDate(employeeSchedule, date);
     const defaultSelection = getDefaultSelection(shiftKind, snapshot.timeCodes);
-    const key = createAssignmentKey(employeeId, date);
+    const key = createAssignmentKey(activeSchedule.id, employeeId, date);
     const shouldResetToDefault =
       defaultSelection.competencyId === selection.competencyId &&
       defaultSelection.timeCodeId === selection.timeCodeId &&
@@ -1622,10 +1693,10 @@ export function MonthlyScheduler({
        * appear to "turn into OFF". Saving first keeps time codes and
        * competencies in sync with the completion toggle.
        */
-      if (dirtyUpdates.length > 0) {
+      if (activeDirtyUpdates.length > 0) {
         const saveResult = await runTrackedAssignmentSave({
           scheduleId: activeSchedule.id,
-          updates: dirtyUpdates,
+          updates: activeDirtyUpdates,
         });
 
         setStatusMessage(saveResult.message);
@@ -1659,7 +1730,7 @@ export function MonthlyScheduler({
           claim.date <= endDate,
       );
       const removedClaimKeys = new Set(
-        removedClaims.map((claim) => createAssignmentKey(claim.employeeId, claim.date)),
+        removedClaims.map((claim) => createAssignmentKey(claim.scheduleId, claim.employeeId, claim.date)),
       );
 
       startTransition(() => {
@@ -1740,6 +1811,7 @@ export function MonthlyScheduler({
         employee.id,
         selectedSetDays.map((day) =>
           getSelectionForCell(
+            activeSchedule.id,
             employee.id,
             day.date,
             shiftForDate(activeSchedule, day.date),
@@ -1807,6 +1879,7 @@ export function MonthlyScheduler({
       activeSchedule.employees.map((employee) => [
         employee.id,
         getSelectionForCell(
+          activeSchedule.id,
           employee.id,
           selectedColumnDate,
           shiftForDate(activeSchedule, selectedColumnDate),
@@ -1866,7 +1939,7 @@ export function MonthlyScheduler({
 
         for (const employee of activeSchedule.employees) {
           for (const day of selectedSetDays) {
-            delete nextAssignments[createAssignmentKey(employee.id, day.date)];
+            delete nextAssignments[createAssignmentKey(activeSchedule.id, employee.id, day.date)];
           }
         }
 
@@ -2265,6 +2338,7 @@ function EmployeeRow({
         const shiftKind = isBorrowedCellVisible ? shiftForDate(schedule, day.date) : "OFF";
         const selection = isBorrowedCellVisible
           ? getSelectionForCell(
+              schedule.id,
               employee.sourceEmployeeId,
               day.date,
               shiftKind,

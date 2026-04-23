@@ -34,6 +34,18 @@ import type {
  * the UI mostly unaware of table layouts and row naming conventions.
  */
 type DataClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
+type SupabaseQueryError = { message: string };
+type PaginatedQuery<T> = {
+  range: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{
+    data: T[] | null;
+    error: SupabaseQueryError | null;
+  }>;
+};
+
+const SUPABASE_PAGE_SIZE = 1000;
 
 type ScheduleRow = {
   id: string;
@@ -137,6 +149,40 @@ type ManualOvertimePostingRow = {
   site_id: string;
   business_area_id: string;
 };
+
+/**
+ * Reads every row from a Supabase query that may exceed PostgREST's page cap.
+ *
+ * Supabase commonly returns at most 1,000 rows for a single select. A fully
+ * populated month of schedule cells can be larger than that, so assignment
+ * loaders must page explicitly or late-month/late-roster cells can appear to
+ * vanish after refresh even though the rows are saved in the database.
+ */
+async function fetchAllRows<T>(query: PaginatedQuery<T>) {
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+    const to = from + SUPABASE_PAGE_SIZE - 1;
+    const result = await query.range(from, to);
+
+    if (result.error) {
+      return {
+        data: rows,
+        error: result.error,
+      };
+    }
+
+    const pageRows = result.data ?? [];
+    rows.push(...pageRows);
+
+    if (pageRows.length < SUPABASE_PAGE_SIZE) {
+      return {
+        data: rows,
+        error: null,
+      };
+    }
+  }
+}
 
 type CompletedSetRow = {
   schedule_id: string;
@@ -477,7 +523,7 @@ function mapSchedules(scheduleRows: ScheduleRow[], employeesBySchedule: Record<s
 function mapAssignments(rows: AssignmentRow[]) {
   return rows.map<StoredAssignment>((row) => ({
     employeeId: row.employee_id,
-    scheduleId: row.schedule_id,
+    scheduleId: row.schedule_id ?? "",
     date: row.assignment_date,
     competencyId: row.competency_id,
     timeCodeId: row.time_code_id,
@@ -596,14 +642,18 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
       session,
     ),
-    applySessionScope(
-      supabase
-      .from("overtime_claims")
-      .select("id, schedule_id, employee_id, competency_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
-      session,
-    )
-      .gte("assignment_date", monthStart)
-      .lte("assignment_date", monthEnd),
+    fetchAllRows<OvertimeClaimRow>(
+      applySessionScope(
+        supabase
+        .from("overtime_claims")
+        .select("id, schedule_id, employee_id, competency_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+        session,
+      )
+        .gte("assignment_date", monthStart)
+        .lte("assignment_date", monthEnd)
+        .order("assignment_date")
+        .order("id"),
+    ),
     applySessionScope(
       supabase
       .from("manual_overtime_postings")
@@ -641,12 +691,17 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
    */
   const assignmentsResult =
     visibleEmployeeIds.length > 0
-      ? await supabase
-          .from("schedule_assignments")
-          .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
-          .in("employee_id", visibleEmployeeIds)
-          .gte("assignment_date", monthStart)
-          .lte("assignment_date", monthEnd)
+      ? await fetchAllRows<AssignmentRow>(
+          supabase
+            .from("schedule_assignments")
+            .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
+            .in("employee_id", visibleEmployeeIds)
+            .gte("assignment_date", monthStart)
+            .lte("assignment_date", monthEnd)
+            .order("assignment_date")
+            .order("employee_id")
+            .order("schedule_id", { nullsFirst: false }),
+        )
       : { data: [], error: null };
   const assignmentRows = (assignmentsResult.data as AssignmentRow[] | null) ?? [];
   const scopedCompetencyRows = (competenciesResult.data as CompetencyRow[] | null) ?? [];
@@ -825,14 +880,18 @@ export async function getMetricsOvertimeHistory(today: string, session?: AppSess
     return [];
   }
 
-  const result = await applySessionScope(
-    supabase
-    .from("overtime_claims")
-    .select("id, schedule_id, employee_id, competency_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
-    session,
-  )
-    .gte("assignment_date", getYearStart(today))
-    .lte("assignment_date", today);
+  const result = await fetchAllRows<OvertimeClaimRow>(
+    applySessionScope(
+      supabase
+      .from("overtime_claims")
+      .select("id, schedule_id, employee_id, competency_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+      session,
+    )
+      .gte("assignment_date", getYearStart(today))
+      .lte("assignment_date", today)
+      .order("assignment_date")
+      .order("id"),
+  );
 
   if (result.error) {
     return [];
@@ -849,14 +908,19 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
     return [];
   }
 
-  const result = await applySessionScope(
-    supabase
-    .from("schedule_assignments")
-    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
-    session,
-  )
-    .gte("assignment_date", getYearStart(today))
-    .lte("assignment_date", today);
+  const result = await fetchAllRows<AssignmentRow>(
+    applySessionScope(
+      supabase
+      .from("schedule_assignments")
+      .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
+      session,
+    )
+      .gte("assignment_date", getYearStart(today))
+      .lte("assignment_date", today)
+      .order("assignment_date")
+      .order("employee_id")
+      .order("schedule_id", { nullsFirst: false }),
+  );
 
   if (result.error) {
     return [];

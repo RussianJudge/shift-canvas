@@ -278,7 +278,11 @@ export function getSuggestedCompetencyId(employee: Pick<Employee, "id" | "compet
 export function buildAssignmentIndex(assignments: StoredAssignment[]) {
   return assignments.reduce<Record<string, { competencyId: string | null; timeCodeId: string | null; notes: string | null }>>(
     (index, assignment) => {
-      index[createAssignmentKey(assignment.employeeId, assignment.date)] = {
+      if (!assignment.scheduleId) {
+        return index;
+      }
+
+      index[createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date)] = {
         competencyId: assignment.competencyId,
         timeCodeId: assignment.timeCodeId,
         notes: assignment.notes ?? null,
@@ -290,8 +294,23 @@ export function buildAssignmentIndex(assignments: StoredAssignment[]) {
 }
 
 /** Stable key shared by server and client for assignment lookups. */
-export function createAssignmentKey(employeeId: string, date: string) {
-  return `${employeeId}:${date}`;
+export function createAssignmentKey(scheduleId: string, employeeId: string, date: string) {
+  return `${scheduleId}:${employeeId}:${date}`;
+}
+
+/** Parses the shared assignment lookup key back into schedule/employee/date parts. */
+export function parseAssignmentKey(key: string) {
+  const [scheduleId, employeeId, date] = key.split(":");
+
+  if (!scheduleId || !employeeId || !date) {
+    return null;
+  }
+
+  return {
+    scheduleId,
+    employeeId,
+    date,
+  };
 }
 
 /** Finds one schedule from the current snapshot, falling back to the first entry. */

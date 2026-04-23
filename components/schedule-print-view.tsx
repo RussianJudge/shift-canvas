@@ -79,11 +79,12 @@ function getSelectionCode(
 }
 
 function getSelectionForCell(
+  scheduleId: string,
   employeeId: string,
   date: string,
   assignments: Record<string, AssignmentSelection>,
 ) {
-  const key = createAssignmentKey(employeeId, date);
+  const key = createAssignmentKey(scheduleId, employeeId, date);
 
   return assignments[key] ?? {
     competencyId: null,
@@ -112,38 +113,71 @@ function buildDisplayEmployeesForSchedule({
     competencyIds: employee.competencyIds,
   }));
 
-  const overtimeRows = Object.values(
-    snapshot.overtimeClaims
-      .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
-      .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
-        const employee = employeeMap[claim.employeeId];
+  const borrowedRowsByEmployee = snapshot.overtimeClaims
+    .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
+    .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
+      const employee = employeeMap[claim.employeeId];
 
-        if (!employee || employee.scheduleId === schedule.id) {
-          return rows;
-        }
-
-        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
-        const existingDates = rows[employee.id]?.overtimeDates ?? [];
-        const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
-
-        rows[employee.id] = {
-          rowId: `ot:${schedule.id}:${employee.id}`,
-          sourceEmployeeId: employee.id,
-          name: employee.name,
-          role: `${employee.role} · OT from ${homeSchedule.name}`,
-          competencyIds: employee.competencyIds,
-          overtimeDates: existingDates.includes(claim.date)
-            ? existingDates
-            : [...existingDates, claim.date].sort(),
-          overtimeCompetencyByDate: {
-            ...existingCompetencies,
-            [claim.date]: claim.competencyId,
-          },
-        };
-
+      if (!employee || employee.scheduleId === schedule.id) {
         return rows;
-      }, {}),
-  ).sort((left, right) => left.name.localeCompare(right.name));
+      }
+
+      const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+      const existingDates = rows[employee.id]?.overtimeDates ?? [];
+      const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
+
+      rows[employee.id] = {
+        rowId: `ot:${schedule.id}:${employee.id}`,
+        sourceEmployeeId: employee.id,
+        name: employee.name,
+        role: `${employee.role} · OT from ${homeSchedule.name}`,
+        competencyIds: employee.competencyIds,
+        overtimeDates: existingDates.includes(claim.date)
+          ? existingDates
+          : [...existingDates, claim.date].sort(),
+        overtimeCompetencyByDate: {
+          ...existingCompetencies,
+          [claim.date]: claim.competencyId,
+        },
+      };
+
+      return rows;
+    }, {});
+
+  for (const assignment of snapshot.assignments) {
+    if (assignment.scheduleId !== schedule.id || assignment.date.slice(0, 7) !== currentMonth) {
+      continue;
+    }
+
+    const employee = employeeMap[assignment.employeeId];
+
+    if (!employee || employee.scheduleId === schedule.id) {
+      continue;
+    }
+
+    const parsed = parseMutualAssignmentNote(assignment.notes);
+
+    if (parsed.targetScheduleId === schedule.id) {
+      continue;
+    }
+
+    const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+    const existingDates = borrowedRowsByEmployee[employee.id]?.overtimeDates ?? [];
+
+    borrowedRowsByEmployee[employee.id] = {
+      rowId: borrowedRowsByEmployee[employee.id]?.rowId ?? `manual:${schedule.id}:${employee.id}`,
+      sourceEmployeeId: employee.id,
+      name: employee.name,
+      role: borrowedRowsByEmployee[employee.id]?.role ?? `${employee.role} · Manual from ${homeSchedule.name}`,
+      competencyIds: employee.competencyIds,
+      overtimeDates: existingDates.includes(assignment.date)
+        ? existingDates
+        : [...existingDates, assignment.date].sort(),
+      overtimeCompetencyByDate: borrowedRowsByEmployee[employee.id]?.overtimeCompetencyByDate,
+    };
+  }
+
+  const borrowedRows = Object.values(borrowedRowsByEmployee).sort((left, right) => left.name.localeCompare(right.name));
 
   const mutualRows = Object.values(
     snapshot.assignments
@@ -179,7 +213,7 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  const rows = [...baseRows, ...overtimeRows, ...mutualRows];
+  const rows = [...baseRows, ...borrowedRows, ...mutualRows];
   const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
   const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
 
@@ -269,7 +303,7 @@ function PrintScheduleSheet({
                   (!mutualDateSet || mutualDateSet.has(day.date));
                 const shiftKind = isBorrowedCellVisible ? shiftForDate(schedule, day.date) : "OFF";
                 const selection = isBorrowedCellVisible
-                  ? getSelectionForCell(employee.sourceEmployeeId, day.date, assignments)
+                  ? getSelectionForCell(schedule.id, employee.sourceEmployeeId, day.date, assignments)
                   : {
                       competencyId: null,
                       timeCodeId: null,

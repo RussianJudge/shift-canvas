@@ -1,3 +1,4 @@
+import { createAssignmentKey } from "@/lib/scheduling";
 import type { ShiftKind } from "@/lib/types";
 
 /**
@@ -137,7 +138,7 @@ export function buildAcceptedMutualAssignmentRows({
     targetScheduleId: string;
     partnerEmployeeId: string;
   }) => {
-    const original = existingAssignments.get(`${employeeId}:${date}`);
+    const original = existingAssignments.get(createAssignmentKey(targetScheduleId, employeeId, date));
 
     return {
       employee_id: employeeId,

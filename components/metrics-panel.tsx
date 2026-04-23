@@ -299,7 +299,9 @@ function getManualOffDayOvertimeEntries(
     snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode]),
   ) as Record<string, TimeCode>;
   const claimKeys = new Set(
-    claimEntries.map((claim) => `${claim.employeeId}:${claim.date}:${claim.competencyId ?? ""}`),
+    claimEntries.map(
+      (claim) => `${claim.scheduleId}:${claim.employeeId}:${claim.date}:${claim.competencyId ?? ""}`,
+    ),
   );
 
   return assignmentHistory.flatMap((assignment) => {
@@ -318,7 +320,7 @@ function getManualOffDayOvertimeEntries(
       return [];
     }
 
-    const claimKey = `${assignment.employeeId}:${assignment.date}:${assignment.competencyId ?? ""}`;
+    const claimKey = `${assignment.scheduleId}:${assignment.employeeId}:${assignment.date}:${assignment.competencyId ?? ""}`;
 
     if (claimKeys.has(claimKey) || assignment.notes?.startsWith("OT|")) {
       return [];
@@ -417,9 +419,18 @@ function getTeamFatigueMetrics({
   const timeCodeMap = Object.fromEntries(
     snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode]),
   ) as Record<string, TimeCode>;
-  const assignmentsByEmployeeDate = new Map(
-    assignmentHistory.map((assignment) => [`${assignment.employeeId}:${assignment.date}`, assignment]),
-  );
+  const assignmentsByEmployeeDate = assignmentHistory.reduce<Map<string, StoredAssignment[]>>((map, assignment) => {
+    const key = `${assignment.employeeId}:${assignment.date}`;
+    const existing = map.get(key);
+
+    if (existing) {
+      existing.push(assignment);
+      return map;
+    }
+
+    map.set(key, [assignment]);
+    return map;
+  }, new Map<string, StoredAssignment[]>());
   const overtimeClaimDatesByEmployee = overtimeHistory.reduce<Record<string, Set<string>>>((map, claim) => {
     map[claim.employeeId] ??= new Set<string>();
     map[claim.employeeId].add(claim.date);
@@ -432,8 +443,18 @@ function getTeamFatigueMetrics({
       let highestStreak = 0;
 
       for (const date of scanDates) {
-        const assignment = assignmentsByEmployeeDate.get(`${employee.id}:${date}`);
-        const timeCode = assignment?.timeCodeId ? timeCodeMap[assignment.timeCodeId] : undefined;
+        const assignmentEntries = assignmentsByEmployeeDate.get(`${employee.id}:${date}`) ?? [];
+        const hasWorkedAssignment = assignmentEntries.some((assignment) => {
+          if (assignment.competencyId) {
+            return true;
+          }
+
+          if (!assignment.timeCodeId) {
+            return false;
+          }
+
+          return !isNonWorkingTimeCode(timeCodeMap[assignment.timeCodeId]);
+        });
         const defaultWorkedShift = shiftForDate(schedule, date) !== "OFF";
         const hasOvertimeClaim = overtimeClaimDatesByEmployee[employee.id]?.has(date) ?? false;
 
@@ -443,8 +464,7 @@ function getTeamFatigueMetrics({
          * exposure, and obvious leave/off time codes break the streak.
          */
         const workedDate =
-          !isNonWorkingTimeCode(timeCode) &&
-          (defaultWorkedShift || hasOvertimeClaim || Boolean(assignment?.competencyId || assignment?.timeCodeId));
+          defaultWorkedShift || hasOvertimeClaim || hasWorkedAssignment;
 
         currentStreak = workedDate ? currentStreak + 1 : 0;
 
