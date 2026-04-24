@@ -499,6 +499,8 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     };
   }
 
+  const supabaseAdmin = supabase;
+
   const sessionScope = getSessionScope(session);
 
   if (!sessionScope) {
@@ -544,6 +546,50 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
       assignment_date: update.date,
     }));
 
+  /**
+   * The home/original schedule is the source of truth for borrowed work. If a
+   * planner clears that source row, any same-day borrowed rows for the worker on
+   * other schedules should disappear as well so the person is not still shown as
+   * covering elsewhere.
+   */
+  async function propagateBorrowedDeletes() {
+    const propagationTargets = Array.from(
+      new Map(
+        rowsToDelete.flatMap((row) => {
+          const employee = scopedEmployeeMap[row.employee_id];
+
+          if (!employee || employee.scheduleId !== row.schedule_id) {
+            return [];
+          }
+
+          const propagationKey = `${row.employee_id}:${row.assignment_date}:${employee.scheduleId}`;
+          return [[propagationKey, {
+            employeeId: row.employee_id,
+            assignmentDate: row.assignment_date,
+            homeScheduleId: employee.scheduleId,
+          }]];
+        }),
+      ).values(),
+    );
+
+    if (propagationTargets.length === 0) {
+      return null;
+    }
+
+    const propagationResults = await Promise.all(
+      propagationTargets.map((target) =>
+        supabaseAdmin
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", target.employeeId)
+          .eq("assignment_date", target.assignmentDate)
+          .neq("schedule_id", target.homeScheduleId),
+      ),
+    );
+
+    return propagationResults.find((result) => result.error)?.error ?? null;
+  }
+
   if (rowsToUpsert.length > 0) {
     const saveResults = await Promise.all(
       rowsToUpsert.map(async (row) => {
@@ -557,7 +603,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
          * the business key first keeps schedule edits durable even when the
          * supporting index/constraint shape is slightly different.
          */
-        const updateResult = await supabase
+        const updateResult = await supabaseAdmin
           .from("schedule_assignments")
           .update(row)
           .eq("employee_id", row.employee_id)
@@ -573,7 +619,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
           return null;
         }
 
-        const insertResult = await supabase.from("schedule_assignments").insert(row);
+        const insertResult = await supabaseAdmin.from("schedule_assignments").insert(row);
 
         return insertResult.error;
       }),
@@ -592,7 +638,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   if (rowsToDelete.length > 0) {
     const deleteResults = await Promise.all(
       rowsToDelete.map((row) =>
-        supabase
+        supabaseAdmin
           .from("schedule_assignments")
           .delete()
           .eq("employee_id", row.employee_id)
@@ -609,6 +655,15 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
         message: `Could not clear assignments: ${firstDeleteError.message}`,
       };
     }
+
+    const propagatedDeleteError = await propagateBorrowedDeletes();
+
+    if (propagatedDeleteError) {
+      return {
+        ok: false,
+        message: `Cleared the original assignment, but borrowed-row cleanup failed: ${propagatedDeleteError.message}`,
+      };
+    }
   }
 
   const cleanupResult = await removeStaleOvertimeClaims(
@@ -618,6 +673,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   );
 
   revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
   revalidatePath("/overtime");
 
   return {

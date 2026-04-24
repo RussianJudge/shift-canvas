@@ -21,7 +21,7 @@ import type {
   TimeCode,
 } from "@/lib/types";
 
-type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
+type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes?: string | null };
 
 type DisplayEmployee = {
   rowId: string;
@@ -68,7 +68,15 @@ function getSelectionCode(
   timeCodeMap: Record<string, TimeCode>,
 ) {
   if (selection.timeCodeId) {
-    return timeCodeMap[selection.timeCodeId]?.code ?? "";
+    const timeCode = timeCodeMap[selection.timeCodeId];
+    const baseCode = timeCode?.code ?? "";
+
+    if (baseCode.trim().toUpperCase() === "T") {
+      const noteDigits = selection.notes?.match(/\d/g)?.slice(0, 3).join("") ?? "";
+      return noteDigits ? `${baseCode}${noteDigits}` : baseCode;
+    }
+
+    return baseCode;
   }
 
   if (selection.competencyId) {

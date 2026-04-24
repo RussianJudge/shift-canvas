@@ -503,13 +503,29 @@ function isCompetency(competency: Competency | undefined): competency is Compete
   return Boolean(competency);
 }
 
+/**
+ * `T` cells often carry a numeric training/reference note. Showing the first
+ * three digits directly in the cell keeps the schedule readable without
+ * forcing leaders to open the note every time.
+ */
+function getTimeCodeDisplayCode(timeCode: TimeCode | undefined, notes: string | null) {
+  const baseCode = timeCode?.code ?? "";
+
+  if (baseCode.trim().toUpperCase() !== "T") {
+    return baseCode;
+  }
+
+  const noteDigits = notes?.match(/\d/g)?.slice(0, 3).join("") ?? "";
+  return noteDigits ? `${baseCode}${noteDigits}` : baseCode;
+}
+
 function getSelectionCode(
   selection: AssignmentSelection,
   competencyMap: Record<string, Competency>,
   timeCodeMap: Record<string, TimeCode>,
 ) {
   if (selection.timeCodeId) {
-    return timeCodeMap[selection.timeCodeId]?.code ?? "";
+    return getTimeCodeDisplayCode(timeCodeMap[selection.timeCodeId], selection.notes);
   }
 
   if (selection.competencyId) {
@@ -1155,7 +1171,7 @@ export function MonthlyScheduler({
   );
   const hasActiveChanges = activeDirtyUpdates.length > 0;
 
-  const gridColumns = `var(--schedule-name-column-width, 10.5rem) repeat(${monthDays.length}, minmax(3rem, 1fr))`;
+  const gridColumns = `var(--schedule-name-column-width, 7.75rem) repeat(${monthDays.length}, minmax(var(--schedule-day-column-width, 1.72rem), 1fr))`;
 
   useEffect(() => {
     if (!forcedScheduleId || selectedScheduleId === forcedScheduleId) {

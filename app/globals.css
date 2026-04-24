@@ -1995,7 +1995,8 @@ select {
 }
 
 .schedule-grid {
-  --schedule-name-column-width: 10.5rem;
+  --schedule-name-column-width: 7.75rem;
+  --schedule-day-column-width: clamp(1.72rem, calc((100vw - 18rem) / 31), 2.35rem);
   display: grid;
   align-items: stretch;
   width: max-content;
@@ -2134,8 +2135,8 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 0.45rem;
-  min-height: 3.6rem;
-  padding: 0.45rem 0.55rem 0.45rem 0.8rem;
+  min-height: 3.15rem;
+  padding: 0.4rem 0.45rem 0.4rem 0.65rem;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 242, 230, 0.9));
 }
@@ -2149,7 +2150,7 @@ select {
 }
 
 .employee-cell strong {
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   line-height: 1.1;
 }
 
@@ -2165,7 +2166,7 @@ select {
 .employee-cell span,
 .employee-cell small {
   color: var(--muted);
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   line-height: 1.1;
 }
 
@@ -2212,7 +2213,7 @@ select {
   justify-items: center;
   align-content: center;
   gap: 0;
-  min-height: 3.6rem;
+  min-height: 3.15rem;
   padding: 0;
   content-visibility: auto;
   contain-intrinsic-size: 58px;
@@ -2327,12 +2328,12 @@ select {
   justify-content: center;
   width: 100%;
   min-height: 100%;
-  padding: 0.28rem 0.14rem;
+  padding: 0.22rem 0.08rem;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   font-weight: 700;
   line-height: 1;
   text-align: center;
@@ -3064,15 +3065,17 @@ select {
   }
 
   .schedule-grid {
-    --schedule-name-column-width: 6.7rem;
+    --schedule-name-column-width: 6.15rem;
+    --schedule-day-column-width: 1.92rem;
   }
 
   .employee-header {
-    padding-inline: 0.65rem;
+    padding-inline: 0.55rem;
   }
 
   .employee-cell {
-    padding: 0.4rem 0.35rem 0.4rem 0.55rem;
+    min-height: 2.95rem;
+    padding: 0.34rem 0.28rem 0.34rem 0.45rem;
   }
 
   .employee-cell {
@@ -3080,12 +3083,12 @@ select {
   }
 
   .employee-cell strong {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
   }
 
   .employee-cell span,
   .employee-cell small {
-    font-size: 0.58rem;
+    font-size: 0.54rem;
   }
 
   .employee-name-full {
@@ -3100,6 +3103,14 @@ select {
     min-width: 2.1rem;
     padding-inline: 0.35rem;
     font-size: 0.52rem;
+  }
+
+  .shift-cell {
+    min-height: 2.95rem;
+  }
+
+  .shift-cell-button {
+    font-size: 0.68rem;
   }
 
   .profile-grid {
