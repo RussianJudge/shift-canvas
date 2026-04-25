@@ -3047,8 +3047,11 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
   const competencyIds = Array.from(
     new Set(input.updates.map((update) => update.competencyId).filter((competencyId): competencyId is string => Boolean(competencyId))),
   );
+  const timeCodeIds = Array.from(
+    new Set(input.updates.map((update) => update.timeCodeId).filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId))),
+  );
 
-  const [employeeRowsResult, competencyRowsResult] = await Promise.all([
+  const [employeeRowsResult, competencyRowsResult, timeCodeRowsResult] = await Promise.all([
     employeeIds.length > 0
       ? supabase
           .from("employees")
@@ -3061,10 +3064,18 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
           .select("id, company_id, site_id, business_area_id")
           .in("id", competencyIds)
       : Promise.resolve({ data: [], error: null }),
+    timeCodeIds.length > 0
+      ? supabase
+          .from("time_codes")
+          .select("id, usage_mode, company_id, site_id, business_area_id")
+          .in("id", timeCodeIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   const employeeRows = (employeeRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
   const competencyRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+  const timeCodeRows =
+    (timeCodeRowsResult.data as Array<{ id: string; usage_mode: string | null } & ScopedDatabaseRow> | null) ?? [];
 
   if (employeeRowsResult.error || employeeRows.length !== employeeIds.length) {
     return {
@@ -3080,9 +3091,17 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
     };
   }
 
+  if (timeCodeRowsResult.error || timeCodeRows.length !== timeCodeIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected time codes.",
+    };
+  }
+
   const subScheduleScope = scopeFromRow(subSchedule);
   const employeeScopeMap = new Map(employeeRows.map((row) => [row.id, scopeFromRow(row)]));
   const competencyScopeMap = new Map(competencyRows.map((row) => [row.id, scopeFromRow(row)]));
+  const timeCodeRowsById = new Map(timeCodeRows.map((row) => [row.id, row]));
 
   for (const employeeScope of employeeScopeMap.values()) {
     if (
@@ -3110,20 +3129,62 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
     }
   }
 
+  for (const timeCodeRow of timeCodeRowsById.values()) {
+    const timeCodeScope = scopeFromRow(timeCodeRow);
+
+    if (
+      timeCodeScope.companyId !== subScheduleScope.companyId ||
+      timeCodeScope.siteId !== subScheduleScope.siteId ||
+      timeCodeScope.businessAreaId !== subScheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Sub-schedule time codes must come from the same company, site, and business area as the sub-schedule.",
+      };
+    }
+
+    if (timeCodeRow.usage_mode === "projected_only") {
+      return {
+        ok: false,
+        message: "Projected-only event codes cannot be entered directly inside sub-schedule cells.",
+      };
+    }
+  }
+
+  for (const update of input.updates) {
+    if (update.competencyId && update.timeCodeId) {
+      return {
+        ok: false,
+        message: "Each sub-schedule cell can hold either a post or a time code, not both.",
+      };
+    }
+  }
+
   const rowsToUpsert = input.updates
-    .filter((update) => update.competencyId || (update.notes?.trim().length ?? 0) > 0)
+    .filter(
+      (update) =>
+        update.competencyId ||
+        update.timeCodeId ||
+        (update.notes?.trim().length ?? 0) > 0,
+    )
     .map((update) => ({
       id: update.subScheduleAssignmentId,
       sub_schedule_id: input.subScheduleId,
       employee_id: update.employeeId,
       assignment_date: update.date,
       competency_id: update.competencyId,
+      time_code_id: update.timeCodeId,
       notes: update.notes?.trim() ? update.notes.trim() : null,
       ...toDatabaseScope(subScheduleScope),
     }));
 
   const rowsToDelete = input.updates
-    .filter((update) => !update.competencyId && !(update.notes?.trim().length ?? 0))
+    .filter(
+      (update) =>
+        !update.competencyId &&
+        !update.timeCodeId &&
+        !(update.notes?.trim().length ?? 0),
+    )
     .map((update) => ({
       sub_schedule_id: input.subScheduleId,
       employee_id: update.employeeId,

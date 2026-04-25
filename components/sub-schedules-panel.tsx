@@ -14,8 +14,10 @@ import {
   getEmployeeMap,
   getMonthDays,
   getScheduleById,
+  getTimeCodeMap,
   shiftMonthKey,
 } from "@/lib/scheduling";
+import { getManualEntryTimeCodes } from "@/lib/sub-schedules";
 import type {
   Competency,
   Employee,
@@ -24,6 +26,7 @@ import type {
   SchedulerSnapshot,
   SubScheduleAssignmentUpdate,
   SubScheduleUpdate,
+  TimeCode,
 } from "@/lib/types";
 
 type EditableSubSchedule = {
@@ -35,12 +38,20 @@ type EditableSubSchedule = {
 
 type SubScheduleCellSelection = {
   competencyId: string | null;
+  timeCodeId: string | null;
   notes: string | null;
 };
 
 type EditorCell = {
   employeeId: string;
   date: string;
+};
+
+type DragRange = {
+  employeeId: string;
+  startIndex: number;
+  currentIndex: number;
+  selection: SubScheduleCellSelection;
 };
 
 function createSubScheduleCellKey(employeeId: string, date: string) {
@@ -90,6 +101,7 @@ function buildCellSelectionMap(snapshot: SchedulerSnapshot, subScheduleId: strin
     .reduce<Record<string, SubScheduleCellSelection>>((map, assignment) => {
       map[createSubScheduleCellKey(assignment.employeeId, assignment.date)] = {
         competencyId: assignment.competencyId,
+        timeCodeId: assignment.timeCodeId,
         notes: assignment.notes ?? null,
       };
       return map;
@@ -109,11 +121,12 @@ function buildDirtySubScheduleAssignmentUpdates({
     new Set([...Object.keys(baselineSelections), ...Object.keys(draftSelections)]),
   ).flatMap<SubScheduleAssignmentUpdate>((key) => {
     const [employeeId, date] = key.split(":");
-    const baseline = baselineSelections[key] ?? { competencyId: null, notes: null };
-    const draft = draftSelections[key] ?? { competencyId: null, notes: null };
+    const baseline = baselineSelections[key] ?? { competencyId: null, timeCodeId: null, notes: null };
+    const draft = draftSelections[key] ?? { competencyId: null, timeCodeId: null, notes: null };
 
     if (
       baseline.competencyId === draft.competencyId &&
+      baseline.timeCodeId === draft.timeCodeId &&
       baseline.notes === draft.notes
     ) {
       return [];
@@ -125,6 +138,7 @@ function buildDirtySubScheduleAssignmentUpdates({
         employeeId,
         date,
         competencyId: draft.competencyId,
+        timeCodeId: draft.timeCodeId,
         notes: draft.notes,
       },
     ];
@@ -147,10 +161,26 @@ function getCompactCode(code: string) {
   return code.replace(/\s+/g, "");
 }
 
+function getTimeCodeDisplayCode(timeCode: TimeCode | undefined, notes: string | null) {
+  const baseCode = timeCode?.code ?? "";
+
+  if (baseCode.trim().toUpperCase() !== "T") {
+    return baseCode;
+  }
+
+  const noteDigits = notes?.match(/\d/g)?.slice(0, 3).join("") ?? "";
+  return noteDigits ? `${baseCode}${noteDigits}` : baseCode;
+}
+
 function getCellCode(
   selection: SubScheduleCellSelection,
   competencyMap: Record<string, Competency>,
+  timeCodeMap: Record<string, TimeCode>,
 ) {
+  if (selection.timeCodeId) {
+    return getTimeCodeDisplayCode(timeCodeMap[selection.timeCodeId], selection.notes);
+  }
+
   if (!selection.competencyId) {
     return "";
   }
@@ -163,6 +193,7 @@ function SubScheduleCellModal({
   date,
   selection,
   competencies,
+  timeCodes,
   onApply,
   onClear,
   onClose,
@@ -171,6 +202,7 @@ function SubScheduleCellModal({
   date: string | null;
   selection: SubScheduleCellSelection;
   competencies: Competency[];
+  timeCodes: TimeCode[];
   onApply: (selection: SubScheduleCellSelection) => void;
   onClear: () => void;
   onClose: () => void;
@@ -212,11 +244,37 @@ function SubScheduleCellModal({
                   onApply({
                     ...selection,
                     competencyId: competency.id,
+                    timeCodeId: null,
                   });
                   onClose();
                 }}
               >
                 {getCompactCode(competency.code)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="assignment-modal__group">
+          <span className="assignment-modal__label">Time Codes</span>
+          <div className="assignment-modal__options">
+            {timeCodes.map((timeCode) => (
+              <button
+                key={timeCode.id}
+                type="button"
+                className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
+                  selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
+                }`}
+                onClick={() => {
+                  onApply({
+                    ...selection,
+                    competencyId: null,
+                    timeCodeId: timeCode.id,
+                  });
+                  onClose();
+                }}
+              >
+                {getTimeCodeDisplayCode(timeCode, selection.notes)}
               </button>
             ))}
           </div>
@@ -261,6 +319,7 @@ export function SubSchedulesPanel({
   const router = useRouter();
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
+  const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const employees = useMemo(
     () =>
@@ -292,6 +351,7 @@ export function SubSchedulesPanel({
   const [statusMessage, setStatusMessage] = useState("");
   const [assignmentMessage, setAssignmentMessage] = useState("");
   const [editorCell, setEditorCell] = useState<EditorCell | null>(null);
+  const [dragRange, setDragRange] = useState<DragRange | null>(null);
   const [addedEmployeeIds, setAddedEmployeeIds] = useState<string[]>([]);
   const [employeeToAddId, setEmployeeToAddId] = useState("");
   const [isSavingDefinitions, startDefinitionSaveTransition] = useTransition();
@@ -332,6 +392,7 @@ export function SubSchedulesPanel({
   useEffect(() => {
     setDraftAssignmentSelections(cloneCellSelections(baselineAssignmentSelections));
     setEditorCell(null);
+    setDragRange(null);
     setAddedEmployeeIds([]);
     setEmployeeToAddId("");
     setAssignmentMessage("");
@@ -383,7 +444,7 @@ export function SubSchedulesPanel({
     () =>
       new Set(
         Object.entries(draftAssignmentSelections)
-          .filter(([, selection]) => selection.competencyId || selection.notes)
+          .filter(([, selection]) => selection.competencyId || selection.timeCodeId || selection.notes)
           .map(([key]) => key.split(":")[0]),
       ),
     [draftAssignmentSelections],
@@ -406,14 +467,19 @@ export function SubSchedulesPanel({
     editorCell
       ? draftAssignmentSelections[createSubScheduleCellKey(editorCell.employeeId, editorCell.date)] ?? {
           competencyId: null,
+          timeCodeId: null,
           notes: null,
         }
-      : { competencyId: null, notes: null };
+      : { competencyId: null, timeCodeId: null, notes: null };
   const editorCompetencies = editorEmployee
     ? editorEmployee.competencyIds
         .map((competencyId) => competencyMap[competencyId])
         .filter((competency): competency is Competency => Boolean(competency))
     : [];
+  const editableTimeCodes = useMemo(
+    () => getManualEntryTimeCodes(snapshot.timeCodes),
+    [snapshot.timeCodes],
+  );
   const selectedSummaryTimeCode = activeSubSchedule
     ? snapshot.timeCodes.find((timeCode) => timeCode.id === activeSubSchedule.summaryTimeCodeId) ?? null
     : null;
@@ -489,13 +555,14 @@ export function SubSchedulesPanel({
     setDraftAssignmentSelections((current) => {
       const nextSelections = { ...current };
 
-      if (!selection.competencyId && !(selection.notes?.trim().length ?? 0)) {
+      if (!selection.competencyId && !selection.timeCodeId && !(selection.notes?.trim().length ?? 0)) {
         delete nextSelections[key];
         return nextSelections;
       }
 
       nextSelections[key] = {
         competencyId: selection.competencyId,
+        timeCodeId: selection.timeCodeId,
         notes: selection.notes?.trim() ? selection.notes.trim() : null,
       };
 
@@ -503,6 +570,83 @@ export function SubSchedulesPanel({
     });
     setAssignmentMessage("Draft updated locally.");
   }
+
+  function handleCellPointerDown(
+    employeeId: string,
+    dayIndex: number,
+    selection: SubScheduleCellSelection,
+  ) {
+    if (!isPersistedActiveSubSchedule || activeSubSchedule?.isArchived) {
+      return;
+    }
+
+    setDragRange({
+      employeeId,
+      startIndex: dayIndex,
+      currentIndex: dayIndex,
+      selection,
+    });
+  }
+
+  function handleDragHover(employeeId: string, dayIndex: number) {
+    setDragRange((current) => {
+      if (!current || current.employeeId !== employeeId || current.currentIndex === dayIndex) {
+        return current;
+      }
+
+      return {
+        ...current,
+        currentIndex: dayIndex,
+      };
+    });
+  }
+
+  useEffect(() => {
+    function handlePointerUp() {
+      if (!dragRange) {
+        return;
+      }
+
+      const startIndex = Math.min(dragRange.startIndex, dragRange.currentIndex);
+      const endIndex = Math.max(dragRange.startIndex, dragRange.currentIndex);
+
+      if (endIndex > startIndex) {
+        const rangeDates = monthDays.slice(startIndex, endIndex + 1).map((day) => day.date);
+
+        setDraftAssignmentSelections((current) => {
+          const nextSelections = { ...current };
+
+          for (const date of rangeDates) {
+            const key = createSubScheduleCellKey(dragRange.employeeId, date);
+
+            if (
+              !dragRange.selection.competencyId &&
+              !dragRange.selection.timeCodeId &&
+              !(dragRange.selection.notes?.trim().length ?? 0)
+            ) {
+              delete nextSelections[key];
+              continue;
+            }
+
+            nextSelections[key] = {
+              competencyId: dragRange.selection.competencyId,
+              timeCodeId: dragRange.selection.timeCodeId,
+              notes: dragRange.selection.notes?.trim() ? dragRange.selection.notes.trim() : null,
+            };
+          }
+
+          return nextSelections;
+        });
+        setAssignmentMessage(`Copied assignment across ${rangeDates.length} days.`);
+      }
+
+      setDragRange(null);
+    }
+
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => window.removeEventListener("pointerup", handlePointerUp);
+  }, [dragRange, monthDays]);
 
   function handleSaveAssignments() {
     if (!activeSubSchedule) {
@@ -543,7 +687,7 @@ export function SubSchedulesPanel({
         </div>
       </div>
 
-      <section className="metrics-section">
+      <section className="metrics-section subschedule-builder-section">
         <div className="metrics-section__header">
           <div className="metrics-section__title-group">
             <h2 className="metrics-section__title">Definitions</h2>
@@ -675,7 +819,7 @@ export function SubSchedulesPanel({
 
         {activeSubSchedule ? (
           <>
-            <div className="workspace-toolbar workspace-toolbar--scheduler">
+            <div className="workspace-toolbar workspace-toolbar--scheduler subschedule-builder-toolbar">
               <label className="field">
                 <span>Sub-schedule</span>
                 <select
@@ -784,16 +928,20 @@ export function SubSchedulesPanel({
                           <span>{homeSchedule.name}</span>
                         </div>
                       </div>,
-                      ...monthDays.map((day) => {
+                      ...monthDays.map((day, dayIndex) => {
                         const key = createSubScheduleCellKey(employee.id, day.date);
                         const selection = draftAssignmentSelections[key] ?? {
                           competencyId: null,
+                          timeCodeId: null,
                           notes: null,
                         };
-                        const competency = selection.competencyId
-                          ? competencyMap[selection.competencyId]
-                          : null;
-                        const colorToken = competency?.colorToken ?? "";
+                        const competency = selection.competencyId ? competencyMap[selection.competencyId] : null;
+                        const timeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
+                        const colorToken = timeCode?.colorToken ?? competency?.colorToken ?? "";
+                        const isInDragRange =
+                          dragRange?.employeeId === employee.id &&
+                          dayIndex >= Math.min(dragRange.startIndex, dragRange.currentIndex) &&
+                          dayIndex <= Math.max(dragRange.startIndex, dragRange.currentIndex);
 
                         return (
                           <div
@@ -802,7 +950,28 @@ export function SubSchedulesPanel({
                               colorToken ? `legend-pill--${colorToken.toLowerCase()}` : ""
                             } ${colorToken ? "shift-cell--coded" : ""} ${
                               selection.notes ? "shift-cell--has-note" : ""
-                            }`}
+                            } ${isInDragRange ? "shift-cell--range" : ""}`}
+                            onPointerDown={(event) => {
+                              if (
+                                event.button !== 0 ||
+                                !isPersistedActiveSubSchedule ||
+                                activeSubSchedule.isArchived
+                              ) {
+                                return;
+                              }
+
+                              handleCellPointerDown(employee.id, dayIndex, selection);
+                            }}
+                            onPointerEnter={(event) => {
+                              if (
+                                dragRange &&
+                                isPersistedActiveSubSchedule &&
+                                !activeSubSchedule.isArchived &&
+                                event.buttons === 1
+                              ) {
+                                handleDragHover(employee.id, dayIndex);
+                              }
+                            }}
                           >
                             <button
                               type="button"
@@ -813,7 +982,7 @@ export function SubSchedulesPanel({
                               title={selection.notes ?? undefined}
                               onClick={() => setEditorCell({ employeeId: employee.id, date: day.date })}
                             >
-                              {getCellCode(selection, competencyMap)}
+                              {getCellCode(selection, competencyMap, timeCodeMap)}
                               {selection.notes ? <span className="shift-cell__note-indicator" aria-hidden="true" /> : null}
                             </button>
                           </div>
@@ -839,6 +1008,7 @@ export function SubSchedulesPanel({
           date={editorCell?.date ?? null}
           selection={editorSelection}
           competencies={editorCompetencies}
+          timeCodes={editableTimeCodes}
           onApply={(selection) => {
             if (!editorCell) {
               return;
@@ -853,6 +1023,7 @@ export function SubSchedulesPanel({
 
             handleCellChange(editorCell.employeeId, editorCell.date, {
               competencyId: null,
+              timeCodeId: null,
               notes: null,
             });
             setEditorCell(null);

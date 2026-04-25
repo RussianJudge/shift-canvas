@@ -118,6 +118,7 @@ type SubScheduleAssignmentRow = {
   employee_id: string;
   assignment_date: string;
   competency_id: string | null;
+  time_code_id: string | null;
   notes: string | null;
   company_id: string;
   site_id: string;
@@ -522,6 +523,7 @@ function mapSubScheduleAssignments(rows: SubScheduleAssignmentRow[]) {
     employeeId: row.employee_id,
     date: row.assignment_date,
     competencyId: row.competency_id,
+    timeCodeId: row.time_code_id,
     notes: row.notes,
     companyId: row.company_id,
     siteId: row.site_id,
@@ -776,7 +778,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     applySessionScope(
       supabase
         .from("sub_schedule_assignments")
-        .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, notes, company_id, site_id, business_area_id"),
+        .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, time_code_id, notes, company_id, site_id, business_area_id"),
       session,
     )
       .gte("assignment_date", monthStart)
@@ -821,6 +823,9 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
         ...subScheduleRows
           .map((subSchedule) => subSchedule.summary_time_code_id)
           .filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId)),
+        ...subScheduleAssignmentRows
+          .map((assignment) => assignment.time_code_id)
+          .filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId)),
       ],
     ),
   ].filter((timeCodeId) => !loadedTimeCodeIds.has(timeCodeId));
@@ -843,7 +848,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     missingReferencedTimeCodeIds.length > 0
       ? await supabase
           .from("time_codes")
-          .select("id, code, label, color_token, company_id, site_id, business_area_id")
+          .select("id, code, label, color_token, usage_mode, company_id, site_id, business_area_id")
           .in("id", missingReferencedTimeCodeIds)
           .eq("company_id", session?.companyId ?? "")
       : { data: [], error: null };
@@ -1048,7 +1053,7 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
         applySessionScope(
           supabase
             .from("sub_schedule_assignments")
-            .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, notes, company_id, site_id, business_area_id"),
+            .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, time_code_id, notes, company_id, site_id, business_area_id"),
           session,
         )
           .gte("assignment_date", yearStart)

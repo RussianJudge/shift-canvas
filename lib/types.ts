@@ -94,6 +94,7 @@ export interface SubScheduleAssignment extends OrganizationScope {
   employeeId: string;
   date: string;
   competencyId: string | null;
+  timeCodeId: string | null;
   notes?: string | null;
 }
 
@@ -320,6 +321,7 @@ export interface SubScheduleAssignmentUpdate {
   employeeId: string;
   date: string;
   competencyId: string | null;
+  timeCodeId: string | null;
   notes?: string | null;
 }
 
