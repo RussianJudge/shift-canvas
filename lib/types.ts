@@ -1,6 +1,7 @@
 export type ShiftKind = "DAY" | "NIGHT" | "OFF";
 export type AppRole = "admin" | "leader" | "worker";
 export type MutualStatus = "open" | "accepted" | "withdrawn" | "cancelled" | "rejected";
+export type TimeCodeUsageMode = "manual" | "projected_only" | "both";
 
 export type ScheduleCode = "601" | "602" | "603" | "604";
 
@@ -42,6 +43,7 @@ export interface TimeCode extends OrganizationScope {
   code: string;
   label: string;
   colorToken: string;
+  usageMode: TimeCodeUsageMode;
 }
 
 export interface Employee extends OrganizationScope {
@@ -73,6 +75,26 @@ export interface StoredAssignment extends OrganizationScope {
   timeCodeId: string | null;
   notes?: string | null;
   shiftKind: ShiftKind;
+  sourceType?: "schedule" | "sub-schedule";
+  subScheduleId?: string | null;
+  subScheduleName?: string | null;
+  projectedCompetencyId?: string | null;
+}
+
+export interface SubSchedule extends OrganizationScope {
+  id: string;
+  name: string;
+  summaryTimeCodeId: string;
+  isArchived: boolean;
+}
+
+export interface SubScheduleAssignment extends OrganizationScope {
+  id: string;
+  subScheduleId: string;
+  employeeId: string;
+  date: string;
+  competencyId: string | null;
+  notes?: string | null;
 }
 
 export interface OvertimeClaim extends OrganizationScope {
@@ -145,9 +167,12 @@ export interface SchedulerSnapshot {
   competencies: Competency[];
   timeCodes: TimeCode[];
   assignments: StoredAssignment[];
+  projectedAssignments: StoredAssignment[];
   overtimeClaims: OvertimeClaim[];
   manualOvertimePostings: ManualOvertimePosting[];
   completedSets: CompletedSet[];
+  subSchedules: SubSchedule[];
+  subScheduleAssignments: SubScheduleAssignment[];
 }
 
 export interface MutualsSnapshot {
@@ -271,9 +296,34 @@ export interface TimeCodeUpdate {
   code: string;
   label: string;
   colorToken: string;
+  usageMode: TimeCodeUsageMode;
 }
 
 export interface SaveTimeCodesInput {
   updates: TimeCodeUpdate[];
   deletedTimeCodeIds: string[];
+}
+
+export interface SubScheduleUpdate {
+  subScheduleId: string;
+  name: string;
+  summaryTimeCodeId: string;
+  isArchived: boolean;
+}
+
+export interface SaveSubSchedulesInput {
+  updates: SubScheduleUpdate[];
+}
+
+export interface SubScheduleAssignmentUpdate {
+  subScheduleAssignmentId: string;
+  employeeId: string;
+  date: string;
+  competencyId: string | null;
+  notes?: string | null;
+}
+
+export interface SaveSubScheduleAssignmentsInput {
+  subScheduleId: string;
+  updates: SubScheduleAssignmentUpdate[];
 }

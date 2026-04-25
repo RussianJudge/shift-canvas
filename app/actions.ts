@@ -16,6 +16,8 @@ import type {
   SaveCompetenciesInput,
   SavePersonnelInput,
   SaveSchedulesInput,
+  SaveSubScheduleAssignmentsInput,
+  SaveSubSchedulesInput,
   SaveTimeCodesInput,
   SetScheduleCompletionInput,
   ShiftKind,
@@ -2874,6 +2876,345 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
   };
 }
 
+/** Persists the catalog of event/overlay schedules that project codes like CO1. */
+export async function saveSubSchedules(input: SaveSubSchedulesInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can change sub-schedules.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Sub-schedules are unavailable.",
+    };
+  }
+
+  const invalidSubSchedule = input.updates.find(
+    (update) => isBlank(update.name) || isBlank(update.summaryTimeCodeId),
+  );
+
+  if (invalidSubSchedule) {
+    return {
+      ok: false,
+      message: "Each sub-schedule needs a name and a summary time code.",
+    };
+  }
+
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  const summaryTimeCodeIds = Array.from(new Set(input.updates.map((update) => update.summaryTimeCodeId)));
+  const timeCodeRowsResult = await supabase
+    .from("time_codes")
+    .select("id, usage_mode, company_id, site_id, business_area_id")
+    .in("id", summaryTimeCodeIds);
+
+  const timeCodeRows = ((timeCodeRowsResult.data as Array<{
+    id: string;
+    usage_mode: "manual" | "projected_only" | "both";
+  } & ScopedDatabaseRow> | null) ?? []);
+
+  if (timeCodeRowsResult.error || timeCodeRows.length !== summaryTimeCodeIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected summary time codes.",
+    };
+  }
+
+  for (const row of timeCodeRows) {
+    if (!canAccessScope(session, scopeFromRow(row))) {
+      return {
+        ok: false,
+        message: "You do not have permission to use one or more selected summary time codes.",
+      };
+    }
+
+    if (row.usage_mode === "manual") {
+      return {
+        ok: false,
+        message: "Sub-schedules must use a projected or dual-use summary time code.",
+      };
+    }
+  }
+
+  const rows = input.updates.map((update) => ({
+    id: update.subScheduleId,
+    name: update.name.trim(),
+    summary_time_code_id: update.summaryTimeCodeId,
+    is_archived: update.isArchived,
+    ...toDatabaseScope(sessionScope),
+  }));
+
+  const error =
+    rows.length > 0
+      ? (
+          await supabase.from("sub_schedules").upsert(rows, {
+            onConflict: "id",
+          })
+        ).error
+      : null;
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not save sub-schedules: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/sub-schedules");
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
+  revalidatePath("/metrics");
+
+  return {
+    ok: true,
+    message: "Sub-schedule changes saved to Supabase.",
+  };
+}
+
+/** Saves one month of detailed staffing inside a selected sub-schedule. */
+export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmentsInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can change sub-schedule assignments.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Sub-schedule assignments are unavailable.",
+    };
+  }
+
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  const subScheduleResult = await supabase
+    .from("sub_schedules")
+    .select("id, is_archived, company_id, site_id, business_area_id")
+    .eq("id", input.subScheduleId)
+    .maybeSingle();
+
+  const subSchedule = subScheduleResult.data as ({ id: string; is_archived: boolean } & ScopedDatabaseRow) | null;
+
+  if (subScheduleResult.error || !subSchedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected sub-schedule.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(subSchedule))) {
+    return {
+      ok: false,
+      message: "You do not have permission to edit that sub-schedule.",
+    };
+  }
+
+  if (subSchedule.is_archived) {
+    return {
+      ok: false,
+      message: "Archived sub-schedules are read-only.",
+    };
+  }
+
+  const employeeIds = Array.from(new Set(input.updates.map((update) => update.employeeId).filter(Boolean)));
+  const competencyIds = Array.from(
+    new Set(input.updates.map((update) => update.competencyId).filter((competencyId): competencyId is string => Boolean(competencyId))),
+  );
+
+  const [employeeRowsResult, competencyRowsResult] = await Promise.all([
+    employeeIds.length > 0
+      ? supabase
+          .from("employees")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", employeeIds)
+      : Promise.resolve({ data: [], error: null }),
+    competencyIds.length > 0
+      ? supabase
+          .from("competencies")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", competencyIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const employeeRows = (employeeRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+  const competencyRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+  if (employeeRowsResult.error || employeeRows.length !== employeeIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected employees.",
+    };
+  }
+
+  if (competencyRowsResult.error || competencyRows.length !== competencyIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected competencies.",
+    };
+  }
+
+  const subScheduleScope = scopeFromRow(subSchedule);
+  const employeeScopeMap = new Map(employeeRows.map((row) => [row.id, scopeFromRow(row)]));
+  const competencyScopeMap = new Map(competencyRows.map((row) => [row.id, scopeFromRow(row)]));
+
+  for (const employeeScope of employeeScopeMap.values()) {
+    if (
+      employeeScope.companyId !== subScheduleScope.companyId ||
+      employeeScope.siteId !== subScheduleScope.siteId ||
+      employeeScope.businessAreaId !== subScheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Sub-schedule employees must be in the same company, site, and business area as the sub-schedule.",
+      };
+    }
+  }
+
+  for (const competencyScope of competencyScopeMap.values()) {
+    if (
+      competencyScope.companyId !== subScheduleScope.companyId ||
+      competencyScope.siteId !== subScheduleScope.siteId ||
+      competencyScope.businessAreaId !== subScheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Sub-schedule posts must come from the same company, site, and business area as the sub-schedule.",
+      };
+    }
+  }
+
+  const rowsToUpsert = input.updates
+    .filter((update) => update.competencyId || (update.notes?.trim().length ?? 0) > 0)
+    .map((update) => ({
+      id: update.subScheduleAssignmentId,
+      sub_schedule_id: input.subScheduleId,
+      employee_id: update.employeeId,
+      assignment_date: update.date,
+      competency_id: update.competencyId,
+      notes: update.notes?.trim() ? update.notes.trim() : null,
+      ...toDatabaseScope(subScheduleScope),
+    }));
+
+  const rowsToDelete = input.updates
+    .filter((update) => !update.competencyId && !(update.notes?.trim().length ?? 0))
+    .map((update) => ({
+      sub_schedule_id: input.subScheduleId,
+      employee_id: update.employeeId,
+      assignment_date: update.date,
+    }));
+
+  if (rowsToUpsert.length > 0) {
+    const conflictingSubScheduleDeletes = await Promise.all(
+      rowsToUpsert.map((row) =>
+        supabase
+          .from("sub_schedule_assignments")
+          .delete()
+          .eq("employee_id", row.employee_id)
+          .eq("assignment_date", row.assignment_date)
+          .neq("sub_schedule_id", input.subScheduleId),
+      ),
+    );
+
+    const conflictingSubScheduleError = conflictingSubScheduleDeletes.find((result) => result.error)?.error;
+
+    if (conflictingSubScheduleError) {
+      return {
+        ok: false,
+        message: `Could not clear conflicting sub-schedule work: ${conflictingSubScheduleError.message}`,
+      };
+    }
+
+    const conflictingScheduleDeletes = await Promise.all(
+      rowsToUpsert.map((row) =>
+        supabase
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", row.employee_id)
+          .eq("assignment_date", row.assignment_date),
+      ),
+    );
+
+    const conflictingScheduleError = conflictingScheduleDeletes.find((result) => result.error)?.error;
+
+    if (conflictingScheduleError) {
+      return {
+        ok: false,
+        message: `Could not clear conflicting main-schedule work: ${conflictingScheduleError.message}`,
+      };
+    }
+
+    const { error: upsertError } = await supabase.from("sub_schedule_assignments").upsert(rowsToUpsert, {
+      onConflict: "sub_schedule_id,employee_id,assignment_date",
+    });
+
+    if (upsertError) {
+      return {
+        ok: false,
+        message: `Could not save sub-schedule assignments: ${upsertError.message}`,
+      };
+    }
+  }
+
+  if (rowsToDelete.length > 0) {
+    const deleteResults = await Promise.all(
+      rowsToDelete.map((row) =>
+        supabase
+          .from("sub_schedule_assignments")
+          .delete()
+          .eq("sub_schedule_id", row.sub_schedule_id)
+          .eq("employee_id", row.employee_id)
+          .eq("assignment_date", row.assignment_date),
+      ),
+    );
+
+    const deleteError = deleteResults.find((result) => result.error)?.error;
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not clear sub-schedule assignments: ${deleteError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/sub-schedules");
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
+  revalidatePath("/metrics");
+
+  return {
+    ok: true,
+    message: "Sub-schedule assignments saved to Supabase.",
+  };
+}
+
 /** Persists time-code reference data changes from the Time Codes admin page. */
 export async function saveTimeCodes(input: SaveTimeCodesInput) {
   const session = await requireActionRole(["admin"]);
@@ -2923,8 +3264,28 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
     code: update.code.trim(),
     label: update.label.trim(),
     color_token: update.colorToken,
+    usage_mode: update.usageMode,
     ...toDatabaseScope(sessionScope),
   }));
+
+  const manualSummaryTimeCodeIds = input.updates
+    .filter((update) => update.usageMode === "manual")
+    .map((update) => update.timeCodeId);
+
+  if (manualSummaryTimeCodeIds.length > 0) {
+    const subScheduleUsageResult = await supabase
+      .from("sub_schedules")
+      .select("id")
+      .in("summary_time_code_id", manualSummaryTimeCodeIds)
+      .limit(1);
+
+    if ((subScheduleUsageResult.data as Array<{ id: string }> | null)?.length) {
+      return {
+        ok: false,
+        message: "A sub-schedule summary code cannot be switched to manual-only.",
+      };
+    }
+  }
 
   if (input.deletedTimeCodeIds.length > 0) {
     const deleteScopeResult = await supabase

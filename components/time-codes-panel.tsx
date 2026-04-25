@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { saveTimeCodes } from "@/app/actions";
-import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate } from "@/lib/types";
+import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate, TimeCodeUsageMode } from "@/lib/types";
 
 const COLOR_TOKENS = ["amber", "teal", "violet", "rose", "blue", "lime", "orange", "slate"];
 
@@ -12,6 +12,7 @@ type EditableTimeCode = {
   code: string;
   label: string;
   colorToken: string;
+  usageMode: TimeCodeUsageMode;
 };
 
 /** Clones editable rows so revert/save baselines are never mutated in place. */
@@ -26,6 +27,7 @@ function normalizeTimeCode(timeCode: EditableTimeCode): TimeCodeUpdate {
     code: timeCode.code.trim(),
     label: timeCode.label.trim(),
     colorToken: timeCode.colorToken,
+    usageMode: timeCode.usageMode,
   };
 }
 
@@ -61,6 +63,7 @@ export function TimeCodesPanel({
         code: timeCode.code,
         label: timeCode.label,
         colorToken: timeCode.colorToken,
+        usageMode: timeCode.usageMode,
       })),
     [snapshot.timeCodes],
   );
@@ -123,6 +126,7 @@ export function TimeCodesPanel({
       code: "NEW",
       label: "New time code",
       colorToken: "slate",
+      usageMode: "manual",
     };
 
     setTimeCodes((current) => [nextTimeCode, ...current]);
@@ -204,6 +208,7 @@ export function TimeCodesPanel({
               <th>Code</th>
               <th>Label</th>
               <th>Color</th>
+              <th>Usage</th>
               <th>Preview</th>
               <th />
             </tr>
@@ -257,6 +262,22 @@ export function TimeCodesPanel({
                         {token}
                       </option>
                     ))}
+                  </select>
+                </td>
+                <td>
+                  <select
+                    className="table-select"
+                    value={timeCode.usageMode}
+                    onChange={(event) =>
+                      updateTimeCode(timeCode.id, (current) => ({
+                        ...current,
+                        usageMode: event.target.value as TimeCodeUsageMode,
+                      }))
+                    }
+                  >
+                    <option value="manual">Manual</option>
+                    <option value="projected_only">Projected only</option>
+                    <option value="both">Both</option>
                   </select>
                 </td>
                 <td>

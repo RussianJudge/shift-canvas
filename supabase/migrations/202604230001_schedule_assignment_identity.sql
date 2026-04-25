@@ -34,9 +34,19 @@ drop index if exists public.schedule_assignments_employee_id_assignment_date_key
 alter table public.schedule_assignments
 alter column schedule_id set not null;
 
-alter table public.schedule_assignments
-add constraint schedule_assignments_schedule_employee_date_key
-unique (schedule_id, employee_id, assignment_date);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'schedule_assignments_schedule_employee_date_key'
+  ) then
+    alter table public.schedule_assignments
+    add constraint schedule_assignments_schedule_employee_date_key
+    unique (schedule_id, employee_id, assignment_date);
+  end if;
+end
+$$;
 
 create index if not exists assignments_schedule_date_idx
 on public.schedule_assignments (schedule_id, assignment_date, employee_id);

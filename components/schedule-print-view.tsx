@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
+import { buildProjectedAssignmentIndex } from "@/lib/sub-schedules";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -254,6 +255,7 @@ function PrintScheduleSheet({
   schedule,
   monthKey,
   assignments,
+  projectedAssignmentIndex,
   competencyMap,
   timeCodeMap,
   employees,
@@ -261,6 +263,7 @@ function PrintScheduleSheet({
   schedule: Schedule;
   monthKey: string;
   assignments: Record<string, AssignmentSelection>;
+  projectedAssignmentIndex: Record<string, SchedulerSnapshot["projectedAssignments"][number]>;
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
   employees: DisplayEmployee[];
@@ -330,6 +333,8 @@ function PrintScheduleSheet({
                   ? timeCodeMap[effectiveSelection.timeCodeId]
                   : null;
                 const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
+                const projectedAssignment =
+                  projectedAssignmentIndex[createAssignmentKey(schedule.id, employee.sourceEmployeeId, day.date)] ?? null;
                 const selectionCode = isBorrowedCellVisible
                   ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)
                   : "";
@@ -342,7 +347,7 @@ function PrintScheduleSheet({
                   } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
                     activeColorToken ? "shift-cell--coded" : ""
                   } ${selectionCode ? "" : "shift-cell--blank"
-                  }`}
+                  } ${projectedAssignment ? "shift-cell--projected" : ""}`}
                 >
                     {selectionCode}
                   </div>
@@ -365,7 +370,20 @@ export function SchedulePrintView({
   monthKey: string;
   pinnedEmployeesBySchedule: Record<string, string[]>;
 }) {
-  const assignments = buildAssignmentIndex(snapshot.assignments);
+  const assignments = {
+    ...buildAssignmentIndex(snapshot.assignments),
+    ...Object.fromEntries(
+      snapshot.projectedAssignments.map((assignment) => [
+        createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date),
+        {
+          competencyId: assignment.competencyId,
+          timeCodeId: assignment.timeCodeId,
+          notes: assignment.notes ?? null,
+        },
+      ]),
+    ),
+  };
+  const projectedAssignmentIndex = buildProjectedAssignmentIndex(snapshot.projectedAssignments);
   const competencyMap = getCompetencyMap(snapshot.competencies);
   const timeCodeMap = getTimeCodeMap(snapshot.timeCodes);
   const employeeMap = getEmployeeMap(snapshot.schedules);
@@ -378,6 +396,7 @@ export function SchedulePrintView({
           schedule={schedule}
           monthKey={monthKey}
           assignments={assignments}
+          projectedAssignmentIndex={projectedAssignmentIndex}
           competencyMap={competencyMap}
           timeCodeMap={timeCodeMap}
           employees={buildDisplayEmployeesForSchedule({

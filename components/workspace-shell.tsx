@@ -113,6 +113,16 @@ function MutualsIcon() {
   );
 }
 
+/** Navigation icon for event/outage overlay schedules. */
+function SubSchedulesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h9M4 12h16M4 17h11" />
+      <path d="M17 5l3 2.5L17 10" />
+    </svg>
+  );
+}
+
 /** Toggle icon that visually flips when the sidebar is collapsed. */
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
@@ -262,6 +272,7 @@ export function WorkspaceShell({
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
           { href: "/mutuals", label: "Mutuals", icon: <MutualsIcon /> },
+          { href: "/sub-schedules", label: "Sub-Schedules", icon: <SubSchedulesIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
           { href: "/schedules", label: "Shifts", icon: <PatternsIcon /> },
           { href: "/competencies", label: "Competencies", icon: <CompetenciesIcon /> },
@@ -273,6 +284,7 @@ export function WorkspaceShell({
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
           { href: "/mutuals", label: "Mutuals", icon: <MutualsIcon /> },
+          { href: "/sub-schedules", label: "Sub-Schedules", icon: <SubSchedulesIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
           { href: "/metrics", label: "Metrics", icon: <MetricsIcon /> },
         ]
