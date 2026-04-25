@@ -899,6 +899,10 @@ export function MonthlyScheduler({
   const draftAssignmentsRef = useRef(draftAssignments);
   const activeSaveCountRef = useRef(0);
   const preserveLocalBaselineUntilRef = useRef(0);
+  const scheduleTopScrollRef = useRef<HTMLDivElement | null>(null);
+  const scheduleBodyScrollRef = useRef<HTMLElement | null>(null);
+  const scheduleGridRef = useRef<HTMLDivElement | null>(null);
+  const [scheduleScrollProxyWidth, setScheduleScrollProxyWidth] = useState(0);
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
   const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
@@ -1096,6 +1100,62 @@ export function MonthlyScheduler({
     () => Object.fromEntries(displayEmployees.map((employee) => [employee.sourceEmployeeId, employee])),
     [displayEmployees],
   );
+
+  useEffect(() => {
+    const topScroll = scheduleTopScrollRef.current;
+    const bodyScroll = scheduleBodyScrollRef.current;
+    const grid = scheduleGridRef.current;
+
+    if (!topScroll || !bodyScroll || !grid) {
+      return;
+    }
+
+    let isSyncing = false;
+
+    const syncWidths = () => {
+      setScheduleScrollProxyWidth(grid.scrollWidth);
+    };
+
+    const handleTopScroll = () => {
+      if (isSyncing) {
+        return;
+      }
+
+      isSyncing = true;
+      bodyScroll.scrollLeft = topScroll.scrollLeft;
+      isSyncing = false;
+    };
+
+    const handleBodyScroll = () => {
+      if (isSyncing) {
+        return;
+      }
+
+      isSyncing = true;
+      topScroll.scrollLeft = bodyScroll.scrollLeft;
+      isSyncing = false;
+    };
+
+    syncWidths();
+    topScroll.scrollLeft = bodyScroll.scrollLeft;
+
+    topScroll.addEventListener("scroll", handleTopScroll);
+    bodyScroll.addEventListener("scroll", handleBodyScroll);
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncWidths();
+      topScroll.scrollLeft = bodyScroll.scrollLeft;
+    });
+
+    resizeObserver.observe(grid);
+    resizeObserver.observe(bodyScroll);
+
+    return () => {
+      topScroll.removeEventListener("scroll", handleTopScroll);
+      bodyScroll.removeEventListener("scroll", handleBodyScroll);
+      resizeObserver.disconnect();
+    };
+  }, [currentMonth, visibleEmployees.length]);
 
   const dirtyUpdates = useMemo(
     () =>
@@ -2155,12 +2215,22 @@ export function MonthlyScheduler({
         </section>
       ) : null}
 
-      <section
-        className={`schedule-wrap ${isScheduleLocked ? "schedule-wrap--locked" : ""}`}
-        aria-label="Monthly schedule grid"
-        aria-busy={isScheduleLocked}
-      >
-        <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
+      <div className="schedule-scroll-shell">
+        <div
+          ref={scheduleTopScrollRef}
+          className="schedule-wrap schedule-wrap--top-scroll"
+          aria-hidden="true"
+        >
+          <div className="schedule-wrap__scroll-proxy" style={{ width: scheduleScrollProxyWidth }} />
+        </div>
+
+        <section
+          ref={scheduleBodyScrollRef}
+          className={`schedule-wrap ${isScheduleLocked ? "schedule-wrap--locked" : ""}`}
+          aria-label="Monthly schedule grid"
+          aria-busy={isScheduleLocked}
+        >
+          <div ref={scheduleGridRef} className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
           <div className="employee-header sticky-column">
             <span>{formatMonthLabel(currentMonth)}</span>
             <strong>Employees</strong>
@@ -2236,8 +2306,9 @@ export function MonthlyScheduler({
               <span>Try a different name, role, or clear the filter.</span>
             </div>
           ) : null}
-        </div>
-      </section>
+          </div>
+        </section>
+      </div>
 
       {canEdit && !isScheduleLocked ? (
         <AssignmentModal

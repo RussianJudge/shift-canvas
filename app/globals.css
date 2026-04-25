@@ -1735,6 +1735,11 @@ select {
   opacity: 0.58;
 }
 
+.schedule-scroll-shell {
+  display: grid;
+  gap: 0;
+}
+
 .schedule-wrap {
   position: relative;
   padding: 0 0 0.5rem;
@@ -1742,6 +1747,18 @@ select {
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--line);
+}
+
+.schedule-wrap--top-scroll {
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.schedule-wrap__scroll-proxy {
+  height: 1px;
 }
 
 .schedule-wrap--locked {
@@ -3004,6 +3021,10 @@ select {
   .personnel-table-wrap,
   .schedule-wrap {
     -webkit-overflow-scrolling: touch;
+  }
+
+  .schedule-wrap--top-scroll {
+    display: none;
   }
 
   .landing-hero,
