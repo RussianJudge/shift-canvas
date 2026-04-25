@@ -1,6 +1,12 @@
 export type ShiftKind = "DAY" | "NIGHT" | "OFF";
 export type AppRole = "admin" | "leader" | "worker";
-export type MutualStatus = "open" | "accepted" | "withdrawn" | "cancelled" | "rejected";
+export type MutualStatus =
+  | "open"
+  | "pending_leader_approval"
+  | "accepted"
+  | "withdrawn"
+  | "cancelled"
+  | "rejected";
 export type TimeCodeUsageMode = "manual" | "projected_only" | "both";
 
 export type ScheduleCode = "601" | "602" | "603" | "604";
@@ -142,6 +148,10 @@ export interface MutualShiftPosting extends OrganizationScope {
   month: string;
   createdAt: string;
   acceptedApplicationId: string | null;
+  ownerLeaderApprovedAt: string | null;
+  ownerLeaderApprovedByName: string | null;
+  applicantLeaderApprovedAt: string | null;
+  applicantLeaderApprovedByName: string | null;
   applications: MutualShiftApplication[];
 }
 
@@ -228,6 +238,11 @@ export interface ApplyToMutualPostingInput {
 export interface AcceptMutualApplicationInput {
   postingId: string;
   applicationId: string;
+}
+
+export interface ApproveMutualPostingInput {
+  postingId: string;
+  side: "owner" | "applicant";
 }
 
 export interface WithdrawMutualPostingInput {

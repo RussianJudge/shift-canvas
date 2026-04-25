@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import type {
   AppRole,
   ApplyToMutualPostingInput,
+  ApproveMutualPostingInput,
   CancelAcceptedMutualInput,
   ClaimOvertimePostingInput,
   CreateManualOvertimePostingInput,
@@ -1643,6 +1644,182 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
   };
 }
 
+type MutualPostingRecord = {
+  id: string;
+  owner_employee_id: string;
+  owner_schedule_id: string;
+  status: string;
+  accepted_application_id: string | null;
+  owner_leader_approved_at?: string | null;
+  owner_leader_approved_by_name?: string | null;
+  applicant_leader_approved_at?: string | null;
+  applicant_leader_approved_by_name?: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+type MutualApplicationRecord = {
+  id: string;
+  status: string;
+  applicant_employee_id: string;
+  applicant_schedule_id: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+function canApproveMutualForSchedule(session: NonNullable<Awaited<ReturnType<typeof requireActionRole>>>, scheduleId: string) {
+  if (session.role === "admin") {
+    return true;
+  }
+
+  return session.role === "leader" && session.scheduleId === scheduleId;
+}
+
+async function applyAcceptedMutualToSchedule({
+  supabase,
+  posting,
+  application,
+}: {
+  supabase: SupabaseAdminClient;
+  posting: MutualPostingRecord;
+  application: MutualApplicationRecord;
+}) {
+  const mutualTimeCodeResult = await supabase
+    .from("time_codes")
+    .select("id")
+    .eq("code", "M")
+    .maybeSingle();
+  const mutualTimeCodeId = (mutualTimeCodeResult.data as { id: string } | null)?.id ?? null;
+
+  if (mutualTimeCodeResult.error || !mutualTimeCodeId) {
+    return {
+      ok: false,
+      message: 'Time code "M" was not found. Add it before approving mutuals.',
+    };
+  }
+
+  const [postingDatesResult, applicationDatesResult] = await Promise.all([
+    supabase
+      .from("mutual_shift_posting_dates")
+      .select("swap_date, shift_kind")
+      .eq("posting_id", posting.id)
+      .order("swap_date"),
+    supabase
+      .from("mutual_shift_application_dates")
+      .select("swap_date, shift_kind")
+      .eq("application_id", application.id)
+      .order("swap_date"),
+  ]);
+
+  const postingDates = ((postingDatesResult.data as Array<{
+    swap_date: string;
+    shift_kind: ShiftKind;
+  }> | null) ?? []);
+  const applicationDates = ((applicationDatesResult.data as Array<{
+    swap_date: string;
+    shift_kind: ShiftKind;
+  }> | null) ?? []);
+
+  if (postingDatesResult.error || postingDates.length === 0) {
+    return {
+      ok: false,
+      message: "Could not load the original mutual dates.",
+    };
+  }
+
+  if (applicationDatesResult.error || applicationDates.length === 0) {
+    return {
+      ok: false,
+      message: "Could not load the offered mutual dates.",
+    };
+  }
+
+  const scheduleScopesResult = await supabase
+    .from("schedules")
+    .select("id, company_id, site_id, business_area_id")
+    .in("id", [posting.owner_schedule_id, application.applicant_schedule_id]);
+
+  if (scheduleScopesResult.error) {
+    return {
+      ok: false,
+      message: `Could not resolve mutual schedule scope: ${scheduleScopesResult.error.message}`,
+    };
+  }
+
+  const scheduleScopes = new Map(
+    (((scheduleScopesResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [])).map((row) => [
+      row.id,
+      scopeFromRow(row),
+    ]),
+  );
+
+  const allMutualDates = Array.from(
+    new Set([...postingDates.map((row) => row.swap_date), ...applicationDates.map((row) => row.swap_date)]),
+  );
+  const existingAssignmentsResult = await supabase
+    .from("schedule_assignments")
+    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, company_id, site_id, business_area_id")
+    .in("employee_id", [posting.owner_employee_id, application.applicant_employee_id])
+    .in("assignment_date", allMutualDates);
+
+  if (existingAssignmentsResult.error) {
+    return {
+      ok: false,
+      message: `Could not prepare mutual schedule updates: ${existingAssignmentsResult.error.message}`,
+    };
+  }
+
+  const existingAssignments = new Map(
+    (((existingAssignmentsResult.data as Array<{
+      employee_id: string;
+      schedule_id: string | null;
+      assignment_date: string;
+      competency_id: string | null;
+      time_code_id: string | null;
+    }> | null) ?? []))
+      .filter((row) => Boolean(row.schedule_id))
+      .map((row) => [createAssignmentKey(row.schedule_id ?? "", row.employee_id, row.assignment_date), row]),
+  );
+
+  const mutualRows: MutualAssignmentRow[] = buildAcceptedMutualAssignmentRows({
+    postingId: posting.id,
+    mutualTimeCodeId,
+    originalWorkerId: posting.owner_employee_id,
+    originalWorkerScheduleId: posting.owner_schedule_id,
+    originalDates: postingDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
+    applicantEmployeeId: application.applicant_employee_id,
+    applicantScheduleId: application.applicant_schedule_id,
+    applicantDates: applicationDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
+    existingAssignments,
+  }).map((row) => {
+    const parsed = parseMutualAssignmentNote(row.notes);
+    const targetScope = parsed.targetScheduleId ? scheduleScopes.get(parsed.targetScheduleId) : null;
+
+    return {
+      ...row,
+      ...toDatabaseScope(targetScope ?? scopeFromRow(posting)),
+    };
+  });
+
+  const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
+    onConflict: "schedule_id,employee_id,assignment_date",
+  });
+
+  if (mutualRowsError) {
+    return {
+      ok: false,
+      message: `Could not apply approved mutual to the schedule: ${mutualRowsError.message}`,
+    };
+  }
+
+  return {
+    ok: true,
+    message: "Mutual schedule rows applied.",
+  };
+}
+
 /** Submits an application against an existing mutual posting. */
 export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
@@ -1746,6 +1923,13 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     };
   }
 
+  if (employee.scheduleId === posting.owner_schedule_id) {
+    return {
+      ok: false,
+      message: "Mutuals can only be offered between different shifts.",
+    };
+  }
+
   const offeredShiftKinds = getWorkedShiftKindsForDates(employeeSchedule, dates);
 
   if (offeredShiftKinds.some((shiftKind) => shiftKind === "OFF")) {
@@ -1821,8 +2005,12 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
 }
 
 /**
- * Accepts one mutual application, marks it as the winning offer, and writes the
- * `M` time-code schedule rows that make the swap visible on both schedules.
+ * Accepts one mutual application and marks it as the chosen offer.
+ *
+ * This step is intentionally not the point where schedule rows are written.
+ * The posting first moves into `pending_leader_approval`, then each shift's
+ * leader approves their side, and only the second approval makes the mutual
+ * live on the schedule.
  */
 export async function acceptMutualApplication(input: AcceptMutualApplicationInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
@@ -1854,6 +2042,7 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     owner_employee_id: string;
     owner_schedule_id: string;
     status: string;
+    accepted_application_id: string | null;
     company_id: string;
     site_id: string;
     business_area_id: string;
@@ -1918,139 +2107,24 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     };
   }
 
-  const mutualTimeCodeResult = await supabase
-    .from("time_codes")
-    .select("id")
-    .eq("code", "M")
-    .maybeSingle();
-  const mutualTimeCodeId = (mutualTimeCodeResult.data as { id: string } | null)?.id ?? null;
-
-  if (mutualTimeCodeResult.error || !mutualTimeCodeId) {
+  if (application.applicant_schedule_id === posting.owner_schedule_id) {
     return {
       ok: false,
-      message: 'Time code "M" was not found. Add it before accepting mutuals.',
-    };
-  }
-
-  const [postingDatesResult, applicationDatesResult] = await Promise.all([
-    supabase
-      .from("mutual_shift_posting_dates")
-      .select("swap_date, shift_kind")
-      .eq("posting_id", input.postingId)
-      .order("swap_date"),
-    supabase
-      .from("mutual_shift_application_dates")
-      .select("swap_date, shift_kind")
-      .eq("application_id", input.applicationId)
-      .order("swap_date"),
-  ]);
-
-  const postingDates = ((postingDatesResult.data as Array<{
-    swap_date: string;
-    shift_kind: ShiftKind;
-  }> | null) ?? []);
-  const applicationDates = ((applicationDatesResult.data as Array<{
-    swap_date: string;
-    shift_kind: ShiftKind;
-  }> | null) ?? []);
-
-  if (postingDatesResult.error || postingDates.length === 0) {
-    return {
-      ok: false,
-      message: "Could not load the original mutual dates.",
-    };
-  }
-
-  if (applicationDatesResult.error || applicationDates.length === 0) {
-    return {
-      ok: false,
-      message: "Could not load the offered mutual dates.",
-    };
-  }
-
-  const scheduleScopesResult = await supabase
-    .from("schedules")
-    .select("id, company_id, site_id, business_area_id")
-    .in("id", [posting.owner_schedule_id, application.applicant_schedule_id]);
-
-  if (scheduleScopesResult.error) {
-    return {
-      ok: false,
-      message: `Could not resolve mutual schedule scope: ${scheduleScopesResult.error.message}`,
-    };
-  }
-
-  const scheduleScopes = new Map(
-    (((scheduleScopesResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [])).map((row) => [
-      row.id,
-      scopeFromRow(row),
-    ]),
-  );
-
-  const allMutualDates = Array.from(
-    new Set([...postingDates.map((row) => row.swap_date), ...applicationDates.map((row) => row.swap_date)]),
-  );
-  const existingAssignmentsResult = await supabase
-    .from("schedule_assignments")
-    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, company_id, site_id, business_area_id")
-    .in("employee_id", [posting.owner_employee_id, application.applicant_employee_id])
-    .in("assignment_date", allMutualDates);
-
-  if (existingAssignmentsResult.error) {
-    return {
-      ok: false,
-      message: `Could not prepare mutual schedule updates: ${existingAssignmentsResult.error.message}`,
-    };
-  }
-
-  const existingAssignments = new Map(
-    (((existingAssignmentsResult.data as Array<{
-      employee_id: string;
-      schedule_id: string | null;
-      assignment_date: string;
-      competency_id: string | null;
-      time_code_id: string | null;
-    }> | null) ?? []))
-      .filter((row) => Boolean(row.schedule_id))
-      .map((row) => [createAssignmentKey(row.schedule_id ?? "", row.employee_id, row.assignment_date), row]),
-  );
-
-  const mutualRows: MutualAssignmentRow[] = buildAcceptedMutualAssignmentRows({
-    postingId: input.postingId,
-    mutualTimeCodeId,
-    originalWorkerId: posting.owner_employee_id,
-    originalWorkerScheduleId: posting.owner_schedule_id,
-    originalDates: postingDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
-    applicantEmployeeId: application.applicant_employee_id,
-    applicantScheduleId: application.applicant_schedule_id,
-    applicantDates: applicationDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
-    existingAssignments,
-  }).map((row) => {
-    const parsed = parseMutualAssignmentNote(row.notes);
-    const targetScope = parsed.targetScheduleId ? scheduleScopes.get(parsed.targetScheduleId) : null;
-
-    return {
-      ...row,
-      ...toDatabaseScope(targetScope ?? scopeFromRow(posting)),
-    };
-  });
-
-  const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
-    onConflict: "schedule_id,employee_id,assignment_date",
-  });
-
-  if (mutualRowsError) {
-    return {
-      ok: false,
-      message: `Could not apply accepted mutual to the schedule: ${mutualRowsError.message}`,
+      message: "Mutuals must be between employees on different shifts.",
     };
   }
 
   const { error: postingError } = await supabase
     .from("mutual_shift_postings")
     .update({
-      status: "accepted",
+      status: "pending_leader_approval",
       accepted_application_id: input.applicationId,
+      owner_leader_approved_at: null,
+      owner_leader_approved_by_employee_id: null,
+      owner_leader_approved_by_name: null,
+      applicant_leader_approved_at: null,
+      applicant_leader_approved_by_employee_id: null,
+      applicant_leader_approved_by_name: null,
     })
     .eq("id", input.postingId);
 
@@ -2075,12 +2149,175 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
 
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
-  revalidatePath("/schedule");
-  revalidatePath("/schedule/print");
 
   return {
     ok: true,
-    message: "Mutual application accepted.",
+    message: "Mutual application accepted. Waiting on both shift leaders.",
+  };
+}
+
+/** Records one side's leader approval and only makes the mutual live after both approvals exist. */
+export async function approveMutualPosting(input: ApproveMutualPostingInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can approve mutuals.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual approvals are unavailable.",
+    };
+  }
+
+  const postingResult = await supabase
+    .from("mutual_shift_postings")
+    .select("id, owner_employee_id, owner_schedule_id, status, accepted_application_id, owner_leader_approved_at, owner_leader_approved_by_name, applicant_leader_approved_at, applicant_leader_approved_by_name, company_id, site_id, business_area_id")
+    .eq("id", input.postingId)
+    .maybeSingle();
+
+  const posting = postingResult.data as MutualPostingRecord | null;
+
+  if (postingResult.error || !posting) {
+    return {
+      ok: false,
+      message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(posting))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual.",
+    };
+  }
+
+  if (posting.status === "accepted") {
+    return {
+      ok: false,
+      message: "That mutual is already live.",
+    };
+  }
+
+  if (posting.status !== "pending_leader_approval" || !posting.accepted_application_id) {
+    return {
+      ok: false,
+      message: "That mutual is not waiting for leader approval.",
+    };
+  }
+
+  const applicationResult = await supabase
+    .from("mutual_shift_applications")
+    .select("id, status, applicant_employee_id, applicant_schedule_id, company_id, site_id, business_area_id")
+    .eq("id", posting.accepted_application_id)
+    .eq("posting_id", input.postingId)
+    .maybeSingle();
+
+  const application = applicationResult.data as MutualApplicationRecord | null;
+
+  if (applicationResult.error || !application || application.status !== "accepted") {
+    return {
+      ok: false,
+      message: "Could not find the accepted mutual offer waiting for approval.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(application))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual offer.",
+    };
+  }
+
+  const sideScheduleId =
+    input.side === "owner" ? posting.owner_schedule_id : application.applicant_schedule_id;
+
+  if (!canApproveMutualForSchedule(session, sideScheduleId)) {
+    return {
+      ok: false,
+      message: "You are not the leader for that shift.",
+    };
+  }
+
+  const sideAlreadyApproved =
+    input.side === "owner"
+      ? Boolean(posting.owner_leader_approved_at)
+      : Boolean(posting.applicant_leader_approved_at);
+
+  if (sideAlreadyApproved) {
+    return {
+      ok: false,
+      message: "That shift has already approved this mutual.",
+    };
+  }
+
+  const sideUpdate =
+    input.side === "owner"
+      ? {
+          owner_leader_approved_at: new Date().toISOString(),
+          owner_leader_approved_by_employee_id: session.employeeId,
+          owner_leader_approved_by_name: session.displayName,
+        }
+      : {
+          applicant_leader_approved_at: new Date().toISOString(),
+          applicant_leader_approved_by_employee_id: session.employeeId,
+          applicant_leader_approved_by_name: session.displayName,
+        };
+
+  const bothApprovedAfterThisAction =
+    input.side === "owner"
+      ? Boolean(posting.applicant_leader_approved_at)
+      : Boolean(posting.owner_leader_approved_at);
+
+  if (bothApprovedAfterThisAction) {
+    const applyResult = await applyAcceptedMutualToSchedule({
+      supabase,
+      posting,
+      application,
+    });
+
+    if (!applyResult.ok) {
+      return applyResult;
+    }
+  }
+
+  const { error: approvalError } = await supabase
+    .from("mutual_shift_postings")
+    .update({
+      ...sideUpdate,
+      ...(bothApprovedAfterThisAction ? { status: "accepted" } : {}),
+    })
+    .eq("id", input.postingId);
+
+  if (approvalError) {
+    return {
+      ok: false,
+      message: `Could not save mutual approval: ${approvalError.message}`,
+    };
+  }
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  if (bothApprovedAfterThisAction) {
+    revalidatePath("/schedule");
+    revalidatePath("/schedule/print");
+
+    return {
+      ok: true,
+      message: "Both leaders approved. The mutual is now live on the schedule.",
+    };
+  }
+
+  return {
+    ok: true,
+    message: "Leader approval recorded. Waiting on the other shift leader.",
   };
 }
 
@@ -2424,6 +2661,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
     (update) =>
       isBlank(update.firstName) ||
       isBlank(update.lastName) ||
+      isBlank(update.email) ||
       isBlank(update.role) ||
       isBlank(update.scheduleId),
   );
@@ -2431,7 +2669,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
   if (invalidEmployee) {
     return {
       ok: false,
-      message: "Each employee needs a first name, last name, role, and shift before saving.",
+      message: "Each employee needs a first name, last name, email, role, and shift before saving.",
     };
   }
 

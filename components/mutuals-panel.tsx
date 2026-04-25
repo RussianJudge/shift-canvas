@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 
 import {
   acceptMutualApplication,
+  approveMutualPosting,
   applyToMutualPosting,
   cancelAcceptedMutual,
   createMutualPosting,
@@ -37,15 +38,33 @@ function getShiftBadgeLabel(shiftKind: ShiftKind) {
 /** Human-friendly label used on mutual posting and application status pills. */
 function getStatusLabel(status: MutualShiftPosting["status"]) {
   switch (status) {
+    case "pending_leader_approval":
+      return "Pending approval";
     case "accepted":
-      return "Accepted";
+      return "Live";
     case "withdrawn":
       return "Withdrawn";
     case "cancelled":
       return "Cancelled";
+    case "rejected":
+      return "Rejected";
     default:
       return "Open";
   }
+}
+
+function getLeaderApprovalLabel({
+  scheduleName,
+  approvedAt,
+  approvedByName,
+}: {
+  scheduleName: string;
+  approvedAt: string | null;
+  approvedByName: string | null;
+}) {
+  return approvedAt
+    ? `Shift ${scheduleName} approved${approvedByName ? ` by ${approvedByName}` : ""}`
+    : `Shift ${scheduleName} pending`;
 }
 
 /** Reusable date grid used for both posting and applying to mutual swaps. */
@@ -172,7 +191,7 @@ function MutualApplyModal({
             <select value={selectedEmployeeId} onChange={(event) => onEmployeeChange(event.target.value)}>
               {snapshot.schedules
                 .flatMap((schedule) => schedule.employees)
-                .filter((entry) => entry.id !== posting.ownerEmployeeId)
+                .filter((entry) => entry.id !== posting.ownerEmployeeId && entry.scheduleId !== posting.ownerScheduleId)
                 .sort((left, right) => left.name.localeCompare(right.name))
                 .map((entry) => (
                   <option key={entry.id} value={entry.id}>
@@ -275,8 +294,11 @@ export function MutualsPanel({
   const applyPosting = applyPostingId ? viewSnapshot.postings.find((posting) => posting.id === applyPostingId) ?? null : null;
 
   const openPostings = viewSnapshot.postings.filter((posting) => posting.status === "open");
+  const pendingApprovalPostings = viewSnapshot.postings.filter((posting) => posting.status === "pending_leader_approval");
   const acceptedPostings = viewSnapshot.postings.filter((posting) => posting.status === "accepted");
-  const closedPostings = viewSnapshot.postings.filter((posting) => posting.status !== "open" && posting.status !== "accepted");
+  const closedPostings = viewSnapshot.postings.filter(
+    (posting) => !["open", "pending_leader_approval", "accepted"].includes(posting.status),
+  );
 
   useEffect(() => {
     setViewSnapshot(snapshot);
@@ -327,11 +349,15 @@ export function MutualsPanel({
     setApplicationDates([]);
 
     if (postingId) {
-      const posting = snapshot.postings.find((entry) => entry.id === postingId);
+      const posting = viewSnapshot.postings.find((entry) => entry.id === postingId);
       const defaultEmployee =
         viewer.role === "worker"
           ? viewer.employeeId ?? ""
-          : allEmployees.find((employee) => employee.id !== posting?.ownerEmployeeId)?.id ?? "";
+          : allEmployees.find(
+              (employee) =>
+                employee.id !== posting?.ownerEmployeeId &&
+                employee.scheduleId !== posting?.ownerScheduleId,
+            )?.id ?? "";
       setApplicationEmployeeId(defaultEmployee);
     }
   }
@@ -497,9 +523,12 @@ export function MutualsPanel({
         <div className="metrics-team-list">
           {openPostings.length > 0 ? (
             openPostings.map((posting) => {
+              const viewerEmployee = viewer.employeeId ? employeeMap[viewer.employeeId] ?? null : null;
               const canCancelPosting =
                 viewer.role !== "worker" || viewer.employeeId === posting.ownerEmployeeId;
-              const canApplyToPosting = viewer.employeeId !== posting.ownerEmployeeId;
+              const canApplyToPosting =
+                viewer.employeeId !== posting.ownerEmployeeId &&
+                (viewer.role !== "worker" || viewerEmployee?.scheduleId !== posting.ownerScheduleId);
 
               return (
                 <article key={posting.id} className="metrics-card mutual-card">
@@ -619,6 +648,131 @@ export function MutualsPanel({
 
       <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
+          <h2 className="metrics-section__title">Pending Leader Approval</h2>
+        </div>
+
+        <div className="metrics-team-list">
+          {pendingApprovalPostings.length > 0 ? (
+            pendingApprovalPostings.map((posting) => {
+              const acceptedApplication = posting.applications.find((application) => application.id === posting.acceptedApplicationId);
+              const canApproveOwner =
+                Boolean(acceptedApplication) &&
+                !posting.ownerLeaderApprovedAt &&
+                (viewer.role === "admin" || (viewer.role === "leader" && viewer.scheduleId === posting.ownerScheduleId));
+              const canApproveApplicant =
+                Boolean(acceptedApplication) &&
+                !posting.applicantLeaderApprovedAt &&
+                (viewer.role === "admin" || (viewer.role === "leader" && viewer.scheduleId === acceptedApplication?.applicantScheduleId));
+
+              return (
+                <article key={posting.id} className="metrics-card mutual-card">
+                  <div className="metrics-card__header">
+                    <div>
+                      <p className="metrics-card__eyebrow">Shift {posting.ownerScheduleName}</p>
+                      <h3 className="metrics-card__title">
+                        {posting.ownerEmployeeName}
+                        {acceptedApplication ? ` ↔ ${acceptedApplication.applicantEmployeeName}` : ""}
+                      </h3>
+                    </div>
+                    <span className="legend-pill legend-pill--amber">Pending approval</span>
+                  </div>
+
+                  <div className="mutual-accepted-grid">
+                    <div>
+                      <strong>{posting.ownerEmployeeName}</strong>
+                      <div className="mutual-date-summary">
+                        {posting.dates.map((date, index) => (
+                          <span key={date} className="mutual-date-chip">
+                            {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {acceptedApplication ? (
+                      <div>
+                        <strong>{acceptedApplication.applicantEmployeeName}</strong>
+                        <div className="mutual-date-summary">
+                          {acceptedApplication.dates.map((date, index) => (
+                            <span key={date} className="mutual-date-chip">
+                              {formatShortDate(date)} · {getShiftBadgeLabel(acceptedApplication.shiftKinds[index] ?? "OFF")}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mutual-date-summary">
+                    <span className="legend-pill legend-pill--slate">
+                      {getLeaderApprovalLabel({
+                        scheduleName: posting.ownerScheduleName,
+                        approvedAt: posting.ownerLeaderApprovedAt,
+                        approvedByName: posting.ownerLeaderApprovedByName,
+                      })}
+                    </span>
+                    {acceptedApplication ? (
+                      <span className="legend-pill legend-pill--slate">
+                        {getLeaderApprovalLabel({
+                          scheduleName: acceptedApplication.applicantScheduleName,
+                          approvedAt: posting.applicantLeaderApprovedAt,
+                          approvedByName: posting.applicantLeaderApprovedByName,
+                        })}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {canApproveOwner || canApproveApplicant ? (
+                    <div className="mutual-card__actions">
+                      {canApproveOwner ? (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() =>
+                            runAction(() =>
+                              approveMutualPosting({
+                                postingId: posting.id,
+                                side: "owner",
+                              }),
+                            )
+                          }
+                          disabled={isSubmitting}
+                        >
+                          Approve {posting.ownerScheduleName}
+                        </button>
+                      ) : null}
+                      {canApproveApplicant && acceptedApplication ? (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() =>
+                            runAction(() =>
+                              approveMutualPosting({
+                                postingId: posting.id,
+                                side: "applicant",
+                              }),
+                            )
+                          }
+                          disabled={isSubmitting}
+                        >
+                          Approve {acceptedApplication.applicantScheduleName}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })
+          ) : (
+            <div className="empty-state">
+              <strong>No mutuals waiting on leaders.</strong>
+              <span>Employee-accepted swaps will appear here until both shift leaders approve them.</span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="metrics-section mutuals-section">
+        <div className="metrics-section__header">
           <h2 className="metrics-section__title">Accepted Mutuals</h2>
         </div>
 
@@ -637,7 +791,7 @@ export function MutualsPanel({
                         {acceptedApplication ? ` ↔ ${acceptedApplication.applicantEmployeeName}` : ""}
                       </h3>
                     </div>
-                    <span className="legend-pill legend-pill--teal">Accepted</span>
+                    <span className="legend-pill legend-pill--teal">Live</span>
                   </div>
 
                   <div className="mutual-accepted-grid">
@@ -683,7 +837,7 @@ export function MutualsPanel({
           ) : (
             <div className="empty-state">
               <strong>No accepted mutuals.</strong>
-              <span>Accepted swaps will appear here once the original worker approves an offer.</span>
+              <span>Live swaps will appear here after both shift leaders approve them.</span>
             </div>
           )}
         </div>

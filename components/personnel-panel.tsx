@@ -275,27 +275,50 @@ function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   };
 }
 
-/** Returns the required-field issues that block save/add for a row. */
-function getEmployeeIssues(employee: EditableEmployee) {
-  const issues: string[] = [];
+type EmployeeFieldIssues = {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  role?: string;
+  scheduleId?: string;
+};
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+/** Returns column-specific validation messages so each warning can sit under its input. */
+function getEmployeeFieldIssues(employee: EditableEmployee): EmployeeFieldIssues {
+  const issues: EmployeeFieldIssues = {};
 
   if (!employee.firstName.trim()) {
-    issues.push("First name required");
+    issues.firstName = "First name required";
   }
 
   if (!employee.lastName.trim()) {
-    issues.push("Last name required");
+    issues.lastName = "Last name required";
+  }
+
+  if (!employee.email.trim()) {
+    issues.email = "Email required";
+  } else if (!isValidEmail(employee.email)) {
+    issues.email = "Enter a valid email";
   }
 
   if (!employee.role.trim()) {
-    issues.push("Role required");
+    issues.role = "Role required";
   }
 
   if (!employee.scheduleId) {
-    issues.push("Shift required");
+    issues.scheduleId = "Shift required";
   }
 
   return issues;
+}
+
+/** Flattens field-level validation back into a simple list for save gating logic. */
+function getEmployeeIssues(employee: EditableEmployee) {
+  return Object.values(getEmployeeFieldIssues(employee));
 }
 
 export function PersonnelPanel({
@@ -427,6 +450,7 @@ export function PersonnelPanel({
   }, [initialEmployees]);
   const hasValidationErrors = invalidEmployeeIds.size > 0;
   const draftEmployeeIssues = draftEmployee ? getEmployeeIssues(draftEmployee) : [];
+  const draftEmployeeFieldIssues = draftEmployee ? getEmployeeFieldIssues(draftEmployee) : {};
 
   const visibleEmployees = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -891,96 +915,121 @@ export function PersonnelPanel({
             {draftEmployee ? (
               <tr className="table-row--draft">
                 <td>
-                  <input
-                    className="table-input"
-                    placeholder="Enter first name"
-                    value={draftEmployee.firstName}
-                    onChange={(event) =>
-                      setDraftEmployee((current) =>
-                        current
-                          ? {
-                              ...current,
-                              firstName: event.target.value,
-                            }
-                          : current,
-                      )
-                    }
-                  />
+                  <div className="table-input-stack">
+                    <input
+                      className="table-input"
+                      placeholder="Enter first name"
+                      value={draftEmployee.firstName}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                firstName: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                    {draftEmployeeFieldIssues.firstName ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.firstName}</p>
+                    ) : null}
+                  </div>
                 </td>
                 <td>
-                  <input
-                    className="table-input"
-                    placeholder="Enter last name"
-                    value={draftEmployee.lastName}
-                    onChange={(event) =>
-                      setDraftEmployee((current) =>
-                        current
-                          ? {
-                              ...current,
-                              lastName: event.target.value,
-                            }
-                          : current,
-                      )
-                    }
-                  />
+                  <div className="table-input-stack">
+                    <input
+                      className="table-input"
+                      placeholder="Enter last name"
+                      value={draftEmployee.lastName}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                lastName: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                    {draftEmployeeFieldIssues.lastName ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.lastName}</p>
+                    ) : null}
+                  </div>
                 </td>
                 <td>
-                  <input
-                    className="table-input"
-                    type="email"
-                    placeholder="email@company.com"
-                    value={draftEmployee.email}
-                    onChange={(event) =>
-                      setDraftEmployee((current) =>
-                        current
-                          ? {
-                              ...current,
-                              email: event.target.value,
-                            }
-                          : current,
-                      )
-                    }
-                  />
+                  <div className="table-input-stack">
+                    <input
+                      className="table-input"
+                      type="email"
+                      placeholder="email@company.com"
+                      value={draftEmployee.email}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                email: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                    {draftEmployeeFieldIssues.email ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.email}</p>
+                    ) : null}
+                  </div>
                 </td>
                 <td>
-                  <input
-                    className="table-input"
-                    placeholder="Enter role"
-                    value={draftEmployee.role}
-                    onChange={(event) =>
-                      setDraftEmployee((current) =>
-                        current
-                          ? {
-                              ...current,
-                              role: event.target.value,
-                            }
-                          : current,
-                      )
-                    }
-                  />
+                  <div className="table-input-stack">
+                    <input
+                      className="table-input"
+                      placeholder="Enter role"
+                      value={draftEmployee.role}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                role: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                    {draftEmployeeFieldIssues.role ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.role}</p>
+                    ) : null}
+                  </div>
                 </td>
                 <td className="column-shift">
-                  <select
-                    className="table-select"
-                    value={draftEmployee.scheduleId}
-                    onChange={(event) =>
-                      setDraftEmployee((current) =>
-                        current
-                          ? {
-                              ...current,
-                              scheduleId: event.target.value,
-                            }
-                          : current,
-                      )
-                    }
-                  >
-                    <option value="">Select shift</option>
-                    {snapshot.schedules.map((schedule) => (
-                      <option key={schedule.id} value={schedule.id}>
-                        {schedule.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="table-input-stack">
+                    <select
+                      className="table-select"
+                      value={draftEmployee.scheduleId}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                scheduleId: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    >
+                      <option value="">Select shift</option>
+                      {snapshot.schedules.map((schedule) => (
+                        <option key={schedule.id} value={schedule.id}>
+                          {schedule.name}
+                        </option>
+                      ))}
+                    </select>
+                    {draftEmployeeFieldIssues.scheduleId ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.scheduleId}</p>
+                    ) : null}
+                  </div>
                 </td>
                 <td>
                   <div className="table-pills table-pills--editable">
@@ -1016,9 +1065,6 @@ export function PersonnelPanel({
                 </td>
                 <td>
                   <div className="table-actions-cell">
-                    {draftEmployeeIssues.length > 0 ? (
-                      <p className="row-issue">{draftEmployeeIssues.join(" · ")}</p>
-                    ) : null}
                     <div className="table-actions-inline">
                       <button
                         type="button"
@@ -1052,73 +1098,93 @@ export function PersonnelPanel({
                     invalidEmployeeIds.has(entry.value.id) ? "table-row--invalid" : ""
                   }`}
                 >
+                  {(() => {
+                    const fieldIssues = getEmployeeFieldIssues(entry.value);
+
+                    return (
+                      <>
                   <td>
-                    <input
-                      className="table-input"
-                      value={entry.value.firstName}
-                      onChange={(event) =>
-                        updateEmployee(entry.value.id, (current) => ({
-                          ...current,
-                          firstName: event.target.value,
-                        }))
-                      }
-                    />
+                    <div className="table-input-stack">
+                      <input
+                        className="table-input"
+                        value={entry.value.firstName}
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            firstName: event.target.value,
+                          }))
+                        }
+                      />
+                      {fieldIssues.firstName ? <p className="row-issue">{fieldIssues.firstName}</p> : null}
+                    </div>
                   </td>
                   <td>
-                    <input
-                      className="table-input"
-                      value={entry.value.lastName}
-                      onChange={(event) =>
-                        updateEmployee(entry.value.id, (current) => ({
-                          ...current,
-                          lastName: event.target.value,
-                        }))
-                      }
-                    />
+                    <div className="table-input-stack">
+                      <input
+                        className="table-input"
+                        value={entry.value.lastName}
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            lastName: event.target.value,
+                          }))
+                        }
+                      />
+                      {fieldIssues.lastName ? <p className="row-issue">{fieldIssues.lastName}</p> : null}
+                    </div>
                   </td>
                   <td>
-                    <input
-                      className="table-input"
-                      type="email"
-                      value={entry.value.email}
-                      placeholder="email@company.com"
-                      onChange={(event) =>
-                        updateEmployee(entry.value.id, (current) => ({
-                          ...current,
-                          email: event.target.value,
-                        }))
-                      }
-                    />
+                    <div className="table-input-stack">
+                      <input
+                        className="table-input"
+                        type="email"
+                        value={entry.value.email}
+                        placeholder="email@company.com"
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            email: event.target.value,
+                          }))
+                        }
+                      />
+                      {fieldIssues.email ? <p className="row-issue">{fieldIssues.email}</p> : null}
+                    </div>
                   </td>
                   <td>
-                    <input
-                      className="table-input"
-                      value={entry.value.role}
-                      onChange={(event) =>
-                        updateEmployee(entry.value.id, (current) => ({
-                          ...current,
-                          role: event.target.value,
-                        }))
-                      }
-                    />
+                    <div className="table-input-stack">
+                      <input
+                        className="table-input"
+                        value={entry.value.role}
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            role: event.target.value,
+                          }))
+                        }
+                      />
+                      {fieldIssues.role ? <p className="row-issue">{fieldIssues.role}</p> : null}
+                    </div>
                   </td>
                   <td className="column-shift">
-                    <select
-                      className="table-select"
-                      value={entry.value.scheduleId}
-                      onChange={(event) =>
-                        updateEmployee(entry.value.id, (current) => ({
-                          ...current,
-                          scheduleId: event.target.value,
-                        }))
-                      }
-                    >
-                      {snapshot.schedules.map((schedule) => (
-                        <option key={schedule.id} value={schedule.id}>
-                          {schedule.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="table-input-stack">
+                      <select
+                        className="table-select"
+                        value={entry.value.scheduleId}
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            scheduleId: event.target.value,
+                          }))
+                        }
+                      >
+                        {snapshot.schedules.map((schedule) => (
+                          <option key={schedule.id} value={schedule.id}>
+                            {schedule.name}
+                          </option>
+                        ))}
+                      </select>
+                      {fieldIssues.scheduleId ? <p className="row-issue">{fieldIssues.scheduleId}</p> : null}
+                    </div>
                   </td>
                   <td>
                     <div className="table-pills table-pills--editable">
@@ -1143,9 +1209,6 @@ export function PersonnelPanel({
                   </td>
                   <td>
                     <div className="table-actions-cell">
-                      {invalidEmployeeIds.has(entry.value.id) ? (
-                        <p className="row-issue">{getEmployeeIssues(entry.value).join(" · ")}</p>
-                      ) : null}
                       <button
                         type="button"
                         className="table-action table-action--danger"
@@ -1155,6 +1218,9 @@ export function PersonnelPanel({
                       </button>
                     </div>
                   </td>
+                      </>
+                    );
+                  })()}
                 </tr>
               ),
             )}

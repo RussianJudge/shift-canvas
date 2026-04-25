@@ -247,6 +247,10 @@ type MutualShiftPostingRow = {
   status: MutualShiftPosting["status"];
   month_key: string;
   accepted_application_id: string | null;
+  owner_leader_approved_at: string | null;
+  owner_leader_approved_by_name: string | null;
+  applicant_leader_approved_at: string | null;
+  applicant_leader_approved_by_name: string | null;
   created_at: string;
   company_id: string;
   site_id: string;
@@ -1399,7 +1403,7 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
   const [postingsResult, applicationsResult] = await Promise.all([
     supabase
       .from("mutual_shift_postings")
-      .select("id, owner_employee_id, owner_schedule_id, status, month_key, accepted_application_id, created_at, company_id, site_id, business_area_id")
+      .select("id, owner_employee_id, owner_schedule_id, status, month_key, accepted_application_id, owner_leader_approved_at, owner_leader_approved_by_name, applicant_leader_approved_at, applicant_leader_approved_by_name, created_at, company_id, site_id, business_area_id")
       .in("id", postingIds)
       .order("created_at"),
     supabase
@@ -1489,6 +1493,10 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
       month: row.month_key,
       createdAt: row.created_at,
       acceptedApplicationId: row.accepted_application_id,
+      ownerLeaderApprovedAt: row.owner_leader_approved_at,
+      ownerLeaderApprovedByName: row.owner_leader_approved_by_name,
+      applicantLeaderApprovedAt: row.applicant_leader_approved_at,
+      applicantLeaderApprovedByName: row.applicant_leader_approved_by_name,
       applications: (applicationsByPostingId[row.id] ?? []).sort(
         (left, right) => left.createdAt.localeCompare(right.createdAt),
       ),

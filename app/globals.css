@@ -2459,6 +2459,12 @@ select {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--team-accent) 18%, transparent);
 }
 
+.table-input-stack {
+  display: grid;
+  gap: 0.32rem;
+  align-items: start;
+}
+
 .table-code {
   display: inline-flex;
   padding: 0.35rem 0.55rem;
@@ -2519,7 +2525,7 @@ select {
   color: #b91c1c;
   font-size: 0.74rem;
   white-space: normal;
-  text-align: right;
+  text-align: left;
 }
 
 .import-preview {
