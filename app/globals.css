@@ -647,6 +647,11 @@ select {
   width: 100%;
 }
 
+.auth-mode-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .auth-selection-note {
   display: grid;
   gap: 0.2rem;

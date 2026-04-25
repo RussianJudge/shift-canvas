@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { requestPasswordReset, signIn, signUp } from "@/app/auth-actions";
@@ -74,10 +75,12 @@ function getNoticeMessage(notice: string | undefined) {
 export function SignInPanel({
   error,
   notice,
+  initialEmail,
   initialMode = "sign-in",
 }: {
   error?: string;
   notice?: string;
+  initialEmail?: string;
   initialMode?: AuthMode;
 }) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
@@ -133,7 +136,14 @@ export function SignInPanel({
 
           <label className="field">
             <span>Email</span>
-            <input type="email" name="email" placeholder="you@company.com" autoComplete="email" required />
+            <input
+              type="email"
+              name="email"
+              placeholder="you@company.com"
+              autoComplete="email"
+              defaultValue={initialEmail ?? ""}
+              required
+            />
           </label>
 
           {!isResetMode ? (
@@ -173,13 +183,20 @@ export function SignInPanel({
         {isCreateMode || isResetMode ? (
           <div className="auth-mode-switch">
             <span>{isCreateMode ? "Already have an account?" : "Remember your password?"}</span>
-            <button type="button" className="ghost-button" onClick={() => setMode("sign-in")}>
+            <Link href="/sign-in" className="ghost-button">
               Sign in
-            </button>
+            </Link>
           </div>
         ) : (
-          <div className="auth-mode-switch auth-mode-switch--single">
-            <button type="button" className="ghost-button auth-mode-switch__full-button" onClick={() => setMode("reset")}>
+          <div className="auth-mode-actions">
+            <Link href="/sign-up" className="ghost-button auth-mode-switch__full-button">
+              Create account
+            </Link>
+            <button
+              type="button"
+              className="ghost-button auth-mode-switch__full-button"
+              onClick={() => setMode("reset")}
+            >
               Forgot password?
             </button>
           </div>

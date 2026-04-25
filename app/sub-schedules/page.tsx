@@ -1,7 +1,7 @@
 import { SubSchedulesPanel } from "@/components/sub-schedules-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { requireAppSession } from "@/lib/auth";
-import { getSchedulerSnapshot } from "@/lib/data";
+import { getSubSchedulesSnapshot } from "@/lib/data";
 import { getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function SubSchedulesPage({
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
-  const snapshot = await getSchedulerSnapshot(month, session);
+  const snapshot = await getSubSchedulesSnapshot(month, session);
 
   return (
     <WorkspaceShell viewer={session}>

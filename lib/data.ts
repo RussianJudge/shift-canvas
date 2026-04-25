@@ -641,6 +641,65 @@ function mapCompletedSets(rows: CompletedSetRow[]) {
   }));
 }
 
+/**
+ * Loads only scoped schedules plus active employees, with optional competency
+ * links for pages that need qualification lookups.
+ *
+ * Several routes need roster context but do not need schedule cells, overtime,
+ * or completed-set state. Centralizing this narrower loader avoids making those
+ * pages pay the full scheduler snapshot cost.
+ */
+async function getScopedSchedulesWithEmployees(
+  session?: AppSession | null,
+  options: {
+    includeEmployeeCompetencies?: boolean;
+  } = {},
+) {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    return null;
+  }
+
+  const { includeEmployeeCompetencies = false } = options;
+  const [schedulesResult, employeesResult, employeeCompetenciesResult] = await Promise.all([
+    applySessionScope(
+      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+      session,
+    ).order("name"),
+    applySessionScope(
+      supabase
+        .from("employees")
+        .select(EMPLOYEE_SELECT_COLUMNS),
+      session,
+    )
+      .eq("is_active", true)
+      .order("last_name")
+      .order("first_name"),
+    includeEmployeeCompetencies
+      ? applySessionScope(
+          supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
+          session,
+        )
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const employeeRows = (employeesResult.data as EmployeeRow[] | null) ?? [];
+  const employeeCompetencyRows = (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [];
+  const employeesBySchedule = buildEmployeesBySchedule(employeeRows, employeeCompetencyRows);
+
+  return {
+    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
+    employeeRows,
+    employeeCompetencyRows,
+    errors: [
+      ["schedules", schedulesResult.error],
+      ["employees", employeesResult.error],
+      ["employee_competencies", employeeCompetenciesResult.error],
+    ] as Array<[string, { message?: string } | null | undefined]>,
+  };
+}
+
 /** Normalizes a full date into the `YYYY-MM` month key used in routing. */
 function getMonthKeyFromDate(isoDate: string) {
   return isoDate.slice(0, 7);
@@ -995,6 +1054,75 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
   };
 }
 
+/**
+ * Loads only the data the sub-schedule builder actually consumes.
+ *
+ * This intentionally skips base schedule assignments, overtime, manual OT
+ * postings, and completed-set state because the overlay builder does not use
+ * them.
+ */
+export async function getSubSchedulesSnapshot(month: string, session?: AppSession | null) {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    console.error("Sub-schedules snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
+    return emptySnapshot(month);
+  }
+
+  const { monthStart, monthEnd } = getMonthBounds(month);
+  const [scheduleReference, competenciesResult, timeCodesResult, subSchedulesResult, subScheduleAssignmentsResult] =
+    await Promise.all([
+      getScopedSchedulesWithEmployees(session, { includeEmployeeCompetencies: true }),
+      applySessionScope(
+        supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
+        session,
+      ).order("code"),
+      applySessionScope(
+        supabase.from("time_codes").select("id, code, label, color_token, usage_mode, company_id, site_id, business_area_id"),
+        session,
+      ).order("code"),
+      applySessionScope(
+        supabase
+          .from("sub_schedules")
+          .select("id, name, summary_time_code_id, is_archived, company_id, site_id, business_area_id"),
+        session,
+      )
+        .order("is_archived")
+        .order("name"),
+      fetchAllRows<SubScheduleAssignmentRow>(
+        applySessionScope(
+          supabase
+            .from("sub_schedule_assignments")
+            .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, time_code_id, notes, company_id, site_id, business_area_id"),
+          session,
+        )
+          .gte("assignment_date", monthStart)
+          .lte("assignment_date", monthEnd)
+          .order("assignment_date")
+          .order("employee_id")
+          .order("sub_schedule_id"),
+      ),
+    ]);
+
+  logSnapshotQueryErrors("Sub-schedules snapshot", [
+    ...(scheduleReference?.errors ?? []),
+    ["competencies", competenciesResult.error],
+    ["time_codes", timeCodesResult.error],
+    ["sub_schedules", subSchedulesResult.error],
+    ["sub_schedule_assignments", subScheduleAssignmentsResult.error],
+  ]);
+
+  return emptySnapshot(month, {
+    competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
+    timeCodes: mapTimeCodes((timeCodesResult.data as TimeCodeRow[] | null) ?? []),
+    schedules: scheduleReference?.schedules ?? [],
+    subSchedules: mapSubSchedules((subSchedulesResult.data as SubScheduleRow[] | null) ?? []),
+    subScheduleAssignments: mapSubScheduleAssignments(
+      (subScheduleAssignmentsResult.data as SubScheduleAssignmentRow[] | null) ?? [],
+    ),
+  });
+}
+
 export async function getMetricsOvertimeHistory(today: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
@@ -1118,6 +1246,58 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
   ];
 }
 
+/**
+ * Loads the small worker profile snapshot instead of reusing the full
+ * personnel workspace payload.
+ */
+export async function getProfileSnapshot(session: AppSession) {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    console.error("Profile snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
+    return {
+      employee: null,
+      schedule: null,
+      competencies: [],
+    };
+  }
+
+  const [profileResult, scheduleReference, competenciesResult] = await Promise.all([
+    session.employeeId
+      ? Promise.resolve({ data: { employee_id: session.employeeId }, error: null })
+      : supabase
+          .from("profiles")
+          .select("employee_id")
+          .eq("email", session.email)
+          .maybeSingle(),
+    getScopedSchedulesWithEmployees(session, { includeEmployeeCompetencies: true }),
+    applySessionScope(
+      supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
+      session,
+    ).order("code"),
+  ]);
+
+  const profileEmployeeId = (profileResult.data as { employee_id?: string | null } | null)?.employee_id ?? null;
+  const employee =
+    profileEmployeeId && scheduleReference
+      ? scheduleReference.schedules
+          .flatMap((schedule) => schedule.employees)
+          .find((entry) => entry.id === profileEmployeeId) ?? null
+      : null;
+  const schedule =
+    employee && scheduleReference
+      ? scheduleReference.schedules.find((entry) => entry.id === employee.scheduleId) ?? null
+      : null;
+
+  return {
+    employee,
+    schedule,
+    competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []).filter(
+      (competency) => employee?.competencyIds.includes(competency.id),
+    ),
+  };
+}
+
 export async function getSchedulesSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
@@ -1126,32 +1306,15 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
     return emptySnapshot(month);
   }
 
-  const [schedulesResult, employeesResult] = await Promise.all([
-    applySessionScope(
-      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
-      session,
-    ).order("name"),
-    applySessionScope(
-      supabase.from("employees").select(EMPLOYEE_SELECT_COLUMNS),
-      session,
-    ).eq("is_active", true),
-  ]);
+  const scheduleReference = await getScopedSchedulesWithEmployees(session);
 
-  logSnapshotQueryErrors("Schedules snapshot", [
-    ["schedules", schedulesResult.error],
-    ["employees", employeesResult.error],
-  ]);
-
-  const employeesBySchedule = buildEmployeesBySchedule(
-    (employeesResult.data as EmployeeRow[] | null) ?? [],
-    [],
-  );
+  logSnapshotQueryErrors("Schedules snapshot", scheduleReference?.errors ?? []);
 
   logScopedEmptyState(
     "Schedules snapshot",
     {
-      schedules: (schedulesResult.data as ScheduleRow[] | null)?.length ?? 0,
-      employees: (employeesResult.data as EmployeeRow[] | null)?.length ?? 0,
+      schedules: scheduleReference?.schedules.length ?? 0,
+      employees: scheduleReference?.employeeRows.length ?? 0,
     },
     session,
   );
@@ -1161,7 +1324,7 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
     productionUnits: [],
     competencies: [],
     timeCodes: [],
-    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
+    schedules: scheduleReference?.schedules ?? [],
     assignments: [],
     projectedAssignments: [],
     overtimeClaims: [],
@@ -1363,14 +1526,14 @@ export async function getUserSchedulePins(email: string) {
 }
 
 export async function getMutualsSnapshot(month: string, session?: AppSession | null): Promise<MutualsSnapshot> {
-  const schedulerSnapshot = await getSchedulerSnapshot(month, session);
+  const scheduleReference = await getScopedSchedulesWithEmployees(session);
   const supabase = getDataClient();
 
   if (!supabase) {
     console.error("Mutuals snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
     return {
       month,
-      schedules: schedulerSnapshot.schedules,
+      schedules: scheduleReference?.schedules ?? [],
       postings: [],
     };
   }
@@ -1395,7 +1558,7 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
   if (postingIds.length === 0) {
     return {
       month,
-      schedules: schedulerSnapshot.schedules,
+      schedules: scheduleReference?.schedules ?? [],
       postings: [],
     };
   }
@@ -1431,9 +1594,9 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
       : Promise.resolve({ data: [], error: null }),
   ]);
 
-  const employeeMap = getEmployeeMap(schedulerSnapshot.schedules);
+  const employeeMap = getEmployeeMap(scheduleReference?.schedules ?? []);
   const scheduleMap = Object.fromEntries(
-    schedulerSnapshot.schedules.map((schedule) => [schedule.id, schedule]),
+    (scheduleReference?.schedules ?? []).map((schedule) => [schedule.id, schedule]),
   );
 
   const postingDatesById = ((postingDatesResult.data as MutualShiftPostingDateRow[] | null) ?? []).reduce<
@@ -1508,7 +1671,7 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
 
   return {
     month,
-    schedules: schedulerSnapshot.schedules,
+    schedules: scheduleReference?.schedules ?? [],
     postings,
   };
 }

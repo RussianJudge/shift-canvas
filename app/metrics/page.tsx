@@ -28,9 +28,11 @@ export default async function MetricsPage({
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = resolveMetricsMonth(resolvedSearchParams?.month, currentMonth);
   const metricsHistoryEnd = getMonthEndDateKey(month);
-  const snapshot = await getSchedulerSnapshot(month, session);
-  const overtimeHistory = await getMetricsOvertimeHistory(metricsHistoryEnd, session);
-  const assignmentHistory = await getMetricsAssignmentHistory(metricsHistoryEnd, session);
+  const [snapshot, overtimeHistory, assignmentHistory] = await Promise.all([
+    getSchedulerSnapshot(month, session),
+    getMetricsOvertimeHistory(metricsHistoryEnd, session),
+    getMetricsAssignmentHistory(metricsHistoryEnd, session),
+  ]);
 
   return (
     <WorkspaceShell viewer={session}>

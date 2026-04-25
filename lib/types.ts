@@ -192,6 +192,12 @@ export interface MutualsSnapshot {
   postings: MutualShiftPosting[];
 }
 
+export interface ProfileSnapshot {
+  employee: Employee | null;
+  schedule: Schedule | null;
+  competencies: Competency[];
+}
+
 export interface SaveAssignmentsInput {
   scheduleId: string;
   updates: StoredAssignment[];
