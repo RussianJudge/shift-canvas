@@ -1184,6 +1184,7 @@ select {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.85rem;
+  padding-top: 0.35rem;
 }
 
 .metrics-section__controls {
@@ -2010,6 +2011,7 @@ select {
 }
 
 .subschedule-builder-toolbar {
+  grid-template-columns: minmax(0, 20rem) auto minmax(0, 1fr);
   row-gap: 0.9rem;
 }
 

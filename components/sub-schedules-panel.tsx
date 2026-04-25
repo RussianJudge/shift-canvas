@@ -811,7 +811,7 @@ export function SubSchedulesPanel({
             <h2 className="metrics-section__title">Monthly Builder</h2>
             {activeSubSchedule && selectedSummaryTimeCode ? (
               <p className="toolbar-status">
-                Main schedule will show {selectedSummaryTimeCode.code} for assigned cells.
+                Building {activeSubSchedule.name}. Main schedule will show {selectedSummaryTimeCode.code} for assigned cells.
               </p>
             ) : null}
           </div>
@@ -820,20 +820,6 @@ export function SubSchedulesPanel({
         {activeSubSchedule ? (
           <>
             <div className="workspace-toolbar workspace-toolbar--scheduler subschedule-builder-toolbar">
-              <label className="field">
-                <span>Sub-schedule</span>
-                <select
-                  value={selectedSubScheduleId}
-                  onChange={(event) => setSelectedSubScheduleId(event.target.value)}
-                >
-                  {subSchedules.map((subSchedule) => (
-                    <option key={subSchedule.id} value={subSchedule.id}>
-                      {subSchedule.name} {subSchedule.isArchived ? "· Archived" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
               <label className="field">
                 <span>Add employee</span>
                 <div className="subschedule-add-employee">
