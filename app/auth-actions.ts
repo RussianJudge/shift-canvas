@@ -36,6 +36,11 @@ type NamedScopeRow = {
   name: string;
 };
 
+type AuthenticatedUser = {
+  id: string;
+  email?: string | null;
+};
+
 /** Builds the public URL Supabase should send users back to after auth emails. */
 async function getAuthRedirectOrigin() {
   const headerStore = await headers();
@@ -54,6 +59,120 @@ async function getAuthRedirectOrigin() {
   }
 
   return "http://localhost:3000";
+}
+
+/**
+ * Loads the app-specific profile context for an authenticated Supabase user and
+ * converts it into the signed workspace session used across the app.
+ *
+ * Keeping this logic centralized prevents signup and normal sign-in from
+ * drifting into slightly different session/bootstrap behavior.
+ */
+async function establishAppSessionForUser(user: AuthenticatedUser) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false as const,
+      reason: "auth-unavailable" as const,
+    };
+  }
+
+  const profileResult = await supabase
+    .from("profiles")
+    .select("email, display_name, role, schedule_id, employee_id, company_id, site_id, business_area_id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profileResult.error) {
+    return {
+      ok: false as const,
+      reason: "auth-unavailable" as const,
+    };
+  }
+
+  const profile = profileResult.data as ProfileRow | null;
+
+  if (!profile) {
+    return {
+      ok: false as const,
+      reason: "profile-missing" as const,
+    };
+  }
+
+  let scheduleName: string | null = null;
+  let companyName = profile.company_id;
+  let siteName = profile.site_id;
+  let businessAreaName = profile.business_area_id;
+  const session: AppSession = {
+    email: profile.email,
+    role: profile.role,
+    displayName: profile.display_name || profile.email.split("@")[0] || "User",
+    scheduleId: profile.schedule_id,
+    employeeId: profile.employee_id,
+    scheduleName,
+    companyId: profile.company_id,
+    siteId: profile.site_id,
+    businessAreaId: profile.business_area_id,
+    companyName,
+    siteName,
+    businessAreaName,
+    activeSiteId: profile.role === "admin" ? null : profile.site_id,
+    activeBusinessAreaId: profile.role === "admin" ? null : profile.business_area_id,
+  };
+
+  const [scheduleResult, companyResult, siteResult, businessAreaResult] = await Promise.all([
+    profile.schedule_id
+      ? supabase
+          .from("schedules")
+          .select("id, name")
+          .eq("id", profile.schedule_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    supabase
+      .from("companies")
+      .select("id, name")
+      .eq("id", profile.company_id)
+      .maybeSingle(),
+    supabase
+      .from("sites")
+      .select("id, name")
+      .eq("id", profile.site_id)
+      .maybeSingle(),
+    supabase
+      .from("business_areas")
+      .select("id, name")
+      .eq("id", profile.business_area_id)
+      .maybeSingle(),
+  ]);
+
+  if (!scheduleResult.error) {
+    scheduleName = (scheduleResult.data as ScheduleRow | null)?.name ?? null;
+  }
+
+  if (!companyResult.error) {
+    companyName = (companyResult.data as NamedScopeRow | null)?.name ?? companyName;
+  }
+
+  if (!siteResult.error) {
+    siteName = (siteResult.data as NamedScopeRow | null)?.name ?? siteName;
+  }
+
+  if (!businessAreaResult.error) {
+    businessAreaName = (businessAreaResult.data as NamedScopeRow | null)?.name ?? businessAreaName;
+  }
+
+  session.scheduleName = scheduleName;
+  session.companyName = companyName;
+  session.siteName = siteName;
+  session.businessAreaName = businessAreaName;
+
+  await setAppSession(session);
+
+  return {
+    ok: true as const,
+    session,
+  };
 }
 
 /**
@@ -77,107 +196,31 @@ export async function signIn(formData: FormData) {
   }
 
   const authClient = getSupabaseServerClient();
-  const supabase = getSupabaseAdminClient();
 
-  if (authClient && supabase) {
-    const authResult = await authClient.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (authResult.error || !authResult.data.user) {
-      redirect("/sign-in?error=invalid-credentials");
-    }
-
-    const profileResult = await supabase
-      .from("profiles")
-      .select("email, display_name, role, schedule_id, employee_id, company_id, site_id, business_area_id")
-      .eq("id", authResult.data.user.id)
-      .maybeSingle();
-
-    if (profileResult.error) {
-      redirect("/sign-in?error=auth-unavailable");
-    }
-
-    const profile = profileResult.data as ProfileRow | null;
-
-    if (profile) {
-      let scheduleName: string | null = null;
-      let companyName = profile.company_id;
-      let siteName = profile.site_id;
-      let businessAreaName = profile.business_area_id;
-      const session: AppSession = {
-        email: profile.email,
-        role: profile.role,
-        displayName: profile.display_name || profile.email.split("@")[0] || "User",
-        scheduleId: profile.schedule_id,
-        employeeId: profile.employee_id,
-        scheduleName,
-        companyId: profile.company_id,
-        siteId: profile.site_id,
-        businessAreaId: profile.business_area_id,
-        companyName,
-        siteName,
-        businessAreaName,
-        activeSiteId: profile.role === "admin" ? null : profile.site_id,
-        activeBusinessAreaId: profile.role === "admin" ? null : profile.business_area_id,
-      };
-
-      const [scheduleResult, companyResult, siteResult, businessAreaResult] = await Promise.all([
-        profile.schedule_id
-          ? supabase
-              .from("schedules")
-              .select("id, name")
-              .eq("id", profile.schedule_id)
-              .maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-        supabase
-          .from("companies")
-          .select("id, name")
-          .eq("id", profile.company_id)
-          .maybeSingle(),
-        supabase
-          .from("sites")
-          .select("id, name")
-          .eq("id", profile.site_id)
-          .maybeSingle(),
-        supabase
-          .from("business_areas")
-          .select("id, name")
-          .eq("id", profile.business_area_id)
-          .maybeSingle(),
-      ]);
-
-      if (!scheduleResult.error) {
-        scheduleName = (scheduleResult.data as ScheduleRow | null)?.name ?? null;
-      }
-
-      if (!companyResult.error) {
-        companyName = (companyResult.data as NamedScopeRow | null)?.name ?? companyName;
-      }
-
-      if (!siteResult.error) {
-        siteName = (siteResult.data as NamedScopeRow | null)?.name ?? siteName;
-      }
-
-      if (!businessAreaResult.error) {
-        businessAreaName = (businessAreaResult.data as NamedScopeRow | null)?.name ?? businessAreaName;
-      }
-
-      session.scheduleName = scheduleName;
-      session.companyName = companyName;
-      session.siteName = siteName;
-      session.businessAreaName = businessAreaName;
-
-      await setAppSession(session);
-
-      redirect(getSessionHomePath(session));
-    }
-
-    redirect("/sign-in?error=profile-missing");
+  if (!authClient) {
+    redirect("/sign-in?error=auth-unavailable");
   }
 
-  redirect("/sign-in?error=auth-unavailable");
+  const authResult = await authClient.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (authResult.error || !authResult.data.user) {
+    redirect("/sign-in?error=invalid-credentials");
+  }
+
+  const sessionResult = await establishAppSessionForUser(authResult.data.user);
+
+  if (!sessionResult.ok) {
+    redirect(
+      sessionResult.reason === "profile-missing"
+        ? "/sign-in?error=profile-missing"
+        : "/sign-in?error=auth-unavailable",
+    );
+  }
+
+  redirect(getSessionHomePath(sessionResult.session));
 }
 
 /**
@@ -216,7 +259,7 @@ export async function signUp(formData: FormData) {
     redirect("/sign-in?mode=create&error=auth-unavailable");
   }
 
-  const { error } = await authClient.auth.signUp({
+  const { data, error } = await authClient.auth.signUp({
     email,
     password,
     options: {
@@ -243,7 +286,38 @@ export async function signUp(formData: FormData) {
     redirect("/sign-in?mode=create&error=signup-failed");
   }
 
-  redirect("/sign-in?notice=account-created");
+  const createdUser = data.user;
+
+  if (!createdUser) {
+    redirect("/sign-in?notice=account-created-sign-in-failed");
+  }
+
+  const signInResult = await authClient.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (signInResult.error || !signInResult.data.user) {
+    const message = signInResult.error?.message.toLowerCase() ?? "";
+
+    if (message.includes("confirm") || message.includes("verified") || message.includes("email")) {
+      redirect("/sign-in?notice=account-created-confirm-email");
+    }
+
+    redirect("/sign-in?notice=account-created-sign-in-failed");
+  }
+
+  const sessionResult = await establishAppSessionForUser(signInResult.data.user);
+
+  if (!sessionResult.ok) {
+    redirect(
+      sessionResult.reason === "profile-missing"
+        ? "/sign-in?notice=account-created-pending-access"
+        : "/sign-in?notice=account-created-sign-in-failed",
+    );
+  }
+
+  redirect(getSessionHomePath(sessionResult.session));
 }
 
 /**

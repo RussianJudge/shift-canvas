@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useFormStatus } from "react-dom";
 
 import { requestPasswordReset, signIn, signUp } from "@/app/auth-actions";
 import { BrandLockup } from "@/components/brand-lockup";
@@ -61,8 +62,16 @@ function getErrorMessage(error: string | undefined) {
 }
 
 function getNoticeMessage(notice: string | undefined) {
-  if (notice === "account-created") {
-    return "Account created. If email confirmation is enabled, confirm your email first, then sign in.";
+  if (notice === "account-created-confirm-email") {
+    return "Your account was created. Confirm your email first, then sign in.";
+  }
+
+  if (notice === "account-created-sign-in-failed") {
+    return "Your account was created, but we could not complete sign-in automatically. Sign in with your new credentials.";
+  }
+
+  if (notice === "account-created-pending-access") {
+    return "Your account was created, but your workspace access is still being set up. An admin may need to finish linking your profile.";
   }
 
   if (notice === "reset-sent") {
@@ -70,6 +79,32 @@ function getNoticeMessage(notice: string | undefined) {
   }
 
   return "";
+}
+
+function AuthSubmitButton({
+  isCreateMode,
+  isResetMode,
+}: {
+  isCreateMode: boolean;
+  isResetMode: boolean;
+}) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button type="submit" className="primary-button auth-submit" disabled={pending}>
+      {pending
+        ? isCreateMode
+          ? "Creating account..."
+          : isResetMode
+            ? "Sending reset link..."
+            : "Signing in..."
+        : isCreateMode
+          ? "Create account"
+          : isResetMode
+            ? "Send reset link"
+            : "Sign in"}
+    </button>
+  );
 }
 
 export function SignInPanel({
@@ -175,9 +210,7 @@ export function SignInPanel({
           {errorMessage ? <p className="auth-error">{errorMessage}</p> : null}
           {!errorMessage && noticeMessage ? <p className="auth-notice">{noticeMessage}</p> : null}
 
-          <button type="submit" className="primary-button auth-submit">
-            {isCreateMode ? "Create account" : isResetMode ? "Send reset link" : "Sign in"}
-          </button>
+          <AuthSubmitButton isCreateMode={isCreateMode} isResetMode={isResetMode} />
         </form>
 
         {isCreateMode || isResetMode ? (
