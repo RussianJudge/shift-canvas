@@ -1669,12 +1669,58 @@ type MutualApplicationRecord = {
   business_area_id: string;
 };
 
-function canApproveMutualForSchedule(session: NonNullable<Awaited<ReturnType<typeof requireActionRole>>>, scheduleId: string) {
+async function getEffectiveLeaderScheduleId(
+  session: NonNullable<Awaited<ReturnType<typeof requireActionRole>>>,
+) {
+  if (session.scheduleId) {
+    return session.scheduleId;
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return null;
+  }
+
+  let employeeId = session.employeeId;
+
+  if (!employeeId) {
+    const profileResult = await supabase
+      .from("profiles")
+      .select("employee_id")
+      .eq("email", session.email)
+      .maybeSingle();
+
+    employeeId = (profileResult.data as { employee_id?: string | null } | null)?.employee_id ?? null;
+  }
+
+  if (!employeeId) {
+    return null;
+  }
+
+  const employeeResult = await supabase
+    .from("employees")
+    .select("schedule_id")
+    .eq("id", employeeId)
+    .maybeSingle();
+
+  return (employeeResult.data as { schedule_id?: string | null } | null)?.schedule_id ?? null;
+}
+
+async function canApproveMutualForSchedule(
+  session: NonNullable<Awaited<ReturnType<typeof requireActionRole>>>,
+  scheduleId: string,
+) {
   if (session.role === "admin") {
     return true;
   }
 
-  return session.role === "leader" && session.scheduleId === scheduleId;
+  if (session.role !== "leader") {
+    return false;
+  }
+
+  const effectiveScheduleId = await getEffectiveLeaderScheduleId(session);
+  return effectiveScheduleId === scheduleId;
 }
 
 async function applyAcceptedMutualToSchedule({
@@ -2238,7 +2284,7 @@ export async function approveMutualPosting(input: ApproveMutualPostingInput) {
   const sideScheduleId =
     input.side === "owner" ? posting.owner_schedule_id : application.applicant_schedule_id;
 
-  if (!canApproveMutualForSchedule(session, sideScheduleId)) {
+  if (!(await canApproveMutualForSchedule(session, sideScheduleId))) {
     return {
       ok: false,
       message: "You are not the leader for that shift.",

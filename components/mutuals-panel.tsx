@@ -256,6 +256,11 @@ export function MutualsPanel({
   const [viewSnapshot, setViewSnapshot] = useState(snapshot);
   const [viewMonth, setViewMonth] = useState(snapshot.month);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
+  const viewerEmployee = useMemo(
+    () => (viewer.employeeId ? employeeMap[viewer.employeeId] ?? null : null),
+    [employeeMap, viewer.employeeId],
+  );
+  const effectiveViewerScheduleId = viewerEmployee?.scheduleId ?? viewer.scheduleId ?? null;
   const allEmployees = useMemo(
     () =>
       snapshot.schedules
@@ -523,7 +528,6 @@ export function MutualsPanel({
         <div className="metrics-team-list">
           {openPostings.length > 0 ? (
             openPostings.map((posting) => {
-              const viewerEmployee = viewer.employeeId ? employeeMap[viewer.employeeId] ?? null : null;
               const canCancelPosting =
                 viewer.role !== "worker" || viewer.employeeId === posting.ownerEmployeeId;
               const canApplyToPosting =
@@ -658,11 +662,13 @@ export function MutualsPanel({
               const canApproveOwner =
                 Boolean(acceptedApplication) &&
                 !posting.ownerLeaderApprovedAt &&
-                (viewer.role === "admin" || (viewer.role === "leader" && viewer.scheduleId === posting.ownerScheduleId));
+                (viewer.role === "admin" ||
+                  (viewer.role === "leader" && effectiveViewerScheduleId === posting.ownerScheduleId));
               const canApproveApplicant =
                 Boolean(acceptedApplication) &&
                 !posting.applicantLeaderApprovedAt &&
-                (viewer.role === "admin" || (viewer.role === "leader" && viewer.scheduleId === acceptedApplication?.applicantScheduleId));
+                (viewer.role === "admin" ||
+                  (viewer.role === "leader" && effectiveViewerScheduleId === acceptedApplication?.applicantScheduleId));
 
               return (
                 <article key={posting.id} className="metrics-card mutual-card">
