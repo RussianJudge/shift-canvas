@@ -4,7 +4,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { savePersonnel } from "@/app/actions";
-import { formatEmployeeDisplayName } from "@/lib/employee-names";
+import { formatEmployeeDisplayName, splitEmployeeDisplayName } from "@/lib/employee-names";
 import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
 
 /**
@@ -15,7 +15,8 @@ import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/l
  */
 type EditableEmployee = {
   id: string;
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   role: string;
   scheduleId: string;
@@ -44,12 +45,21 @@ type PendingCsvImport = {
 function createDraftEmployee() {
   return {
     id: `emp-${crypto.randomUUID().slice(0, 8)}`,
-    name: "",
+    firstName: "",
+    lastName: "",
     email: "",
     role: "",
     scheduleId: "",
     competencyIds: [],
   };
+}
+
+/** Keeps UI sorting/search/display consistent while the editor stores split names. */
+function getEditableEmployeeDisplayName(employee: Pick<EditableEmployee, "firstName" | "lastName">) {
+  return formatEmployeeDisplayName({
+    firstName: employee.firstName,
+    lastName: employee.lastName,
+  });
 }
 
 /** Normalizes CSV headers so import accepts a wide range of spreadsheet exports. */
@@ -120,6 +130,21 @@ function createCompetencyLookupKeys(competency: SchedulerSnapshot["competencies"
       }
     });
   }
+
+  return [...variants];
+}
+
+/** Accept both `Last, First` and `First Last` when matching people during imports. */
+function createEmployeeLookupKeys(employee: Pick<EditableEmployee, "firstName" | "lastName">) {
+  const variants = new Set<string>();
+  const displayName = getEditableEmployeeDisplayName(employee);
+  const naturalName = `${employee.firstName} ${employee.lastName}`.trim();
+
+  [displayName, naturalName].forEach((value) => {
+    for (const variant of createLookupVariants(value)) {
+      variants.add(variant);
+    }
+  });
 
   return [...variants];
 }
@@ -241,7 +266,8 @@ function cloneEmployees(employees: EditableEmployee[]) {
 function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   return {
     employeeId: employee.id,
-    name: employee.name.trim(),
+    firstName: employee.firstName.trim(),
+    lastName: employee.lastName.trim(),
     email: employee.email.trim().toLowerCase(),
     role: employee.role.trim(),
     scheduleId: employee.scheduleId,
@@ -253,8 +279,12 @@ function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
 function getEmployeeIssues(employee: EditableEmployee) {
   const issues: string[] = [];
 
-  if (!employee.name.trim()) {
-    issues.push("Name required");
+  if (!employee.firstName.trim()) {
+    issues.push("First name required");
+  }
+
+  if (!employee.lastName.trim()) {
+    issues.push("Last name required");
   }
 
   if (!employee.role.trim()) {
@@ -279,7 +309,8 @@ export function PersonnelPanel({
       snapshot.schedules.flatMap((schedule) =>
         schedule.employees.map((employee) => ({
           id: employee.id,
-          name: employee.name,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
           email: employee.email ?? "",
           role: employee.role,
           scheduleId: employee.scheduleId,
@@ -417,14 +448,15 @@ export function PersonnelPanel({
           return true;
         }
 
-        return `${employee.name} ${employee.email} ${employee.role} ${scheduleNameById[employee.scheduleId] ?? ""}`
+        return `${employee.firstName} ${employee.lastName} ${getEditableEmployeeDisplayName(employee)} ${employee.email} ${employee.role} ${scheduleNameById[employee.scheduleId] ?? ""}`
           .toLowerCase()
           .includes(query);
       })
       .sort(
         (left, right) =>
           (scheduleNameById[left.scheduleId] ?? "").localeCompare(scheduleNameById[right.scheduleId] ?? "") ||
-          left.name.localeCompare(right.name),
+          left.lastName.localeCompare(right.lastName) ||
+          left.firstName.localeCompare(right.firstName),
       );
   }, [employees, scheduleNameById, search, selectedCompetencyFilter, selectedScheduleFilter]);
 
@@ -543,7 +575,9 @@ export function PersonnelPanel({
     const nextEmployees = cloneEmployees(employees);
     const indexById = new Map(nextEmployees.map((employee, index) => [employee.id, index]));
     const indexByName = new Map(
-      nextEmployees.map((employee, index) => [normalizeLookupValue(employee.name), index]),
+      nextEmployees.flatMap((employee, index) =>
+        createEmployeeLookupKeys(employee).map((key) => [key, index] as const),
+      ),
     );
     const restoredIds = new Set<string>();
     const previewRows: CsvPreviewRow[] = [];
@@ -566,6 +600,12 @@ export function PersonnelPanel({
               lastName: csvLastName,
             })
           : "");
+      const resolvedCsvNameParts = resolvedCsvName
+        ? splitEmployeeDisplayName(resolvedCsvName)
+        : {
+            firstName: "",
+            lastName: "",
+          };
       const csvRole = pickCsvValue(row, ["role", "role_title", "title", "position"]);
       const csvShift = pickCsvValue(row, ["shift", "schedule", "shift_code", "schedule_code", "pattern"]);
       const csvCompetencies = pickCsvValue(row, [
@@ -605,8 +645,13 @@ export function PersonnelPanel({
       }
 
       const matchedIndexById = csvId ? indexById.get(csvId) : undefined;
-      const matchedIndexByName = resolvedCsvName ? indexByName.get(normalizeLookupValue(resolvedCsvName)) : undefined;
-      const matchedIndex = matchedIndexById ?? matchedIndexByName;
+      const existingNameMatchIndex =
+        resolvedCsvName
+          ? createEmployeeLookupKeys(resolvedCsvNameParts)
+              .map((key) => indexByName.get(key))
+              .find((index): index is number => index !== undefined)
+          : undefined;
+      const matchedIndex = matchedIndexById ?? existingNameMatchIndex;
       const existing = matchedIndex === undefined ? null : nextEmployees[matchedIndex];
       const resolvedScheduleId = csvShift
         ? scheduleIdByLookup.get(normalizeLookupValue(csvShift)) ?? ""
@@ -637,7 +682,8 @@ export function PersonnelPanel({
 
       const nextEmployee: EditableEmployee = {
         id: existing?.id ?? (csvId || `emp-${crypto.randomUUID().slice(0, 8)}`),
-        name: resolvedCsvName || existing?.name || "New Employee",
+        firstName: resolvedCsvNameParts.firstName || existing?.firstName || "New",
+        lastName: resolvedCsvNameParts.lastName || existing?.lastName || "Employee",
         email: csvEmail.toLowerCase() || existing?.email || "",
         role: csvRole || existing?.role || "Operator",
         scheduleId: resolvedScheduleId || existing?.scheduleId || defaultSchedule.id,
@@ -651,11 +697,11 @@ export function PersonnelPanel({
         nextEmployees.push(nextEmployee);
         const nextIndex = nextEmployees.length - 1;
         indexById.set(nextEmployee.id, nextIndex);
-        indexByName.set(normalizeLookupValue(nextEmployee.name), nextIndex);
+        createEmployeeLookupKeys(nextEmployee).forEach((key) => indexByName.set(key, nextIndex));
       } else {
         nextEmployees[matchedIndex] = nextEmployee;
         indexById.set(nextEmployee.id, matchedIndex);
-        indexByName.set(normalizeLookupValue(nextEmployee.name), matchedIndex);
+        createEmployeeLookupKeys(nextEmployee).forEach((key) => indexByName.set(key, matchedIndex));
       }
 
       restoredIds.add(nextEmployee.id);
@@ -663,7 +709,7 @@ export function PersonnelPanel({
 
       previewRows.push({
         key: nextEmployee.id,
-        name: nextEmployee.name,
+        name: getEditableEmployeeDisplayName(nextEmployee),
         role: nextEmployee.role,
         shiftName: scheduleNameById[nextEmployee.scheduleId] ?? nextEmployee.scheduleId,
         action: existing ? "Update" : "Add",
@@ -832,7 +878,8 @@ export function PersonnelPanel({
         <table className="personnel-table">
           <thead>
             <tr>
-              <th>Name</th>
+              <th>First Name</th>
+              <th>Last Name</th>
               <th>Email</th>
               <th>Role</th>
               <th className="column-shift">Shift</th>
@@ -846,14 +893,31 @@ export function PersonnelPanel({
                 <td>
                   <input
                     className="table-input"
-                    placeholder="Enter name"
-                    value={draftEmployee.name}
+                    placeholder="Enter first name"
+                    value={draftEmployee.firstName}
                     onChange={(event) =>
                       setDraftEmployee((current) =>
                         current
                           ? {
                               ...current,
-                              name: event.target.value,
+                              firstName: event.target.value,
+                            }
+                          : current,
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="table-input"
+                    placeholder="Enter last name"
+                    value={draftEmployee.lastName}
+                    onChange={(event) =>
+                      setDraftEmployee((current) =>
+                        current
+                          ? {
+                              ...current,
+                              lastName: event.target.value,
                             }
                           : current,
                       )
@@ -979,7 +1043,7 @@ export function PersonnelPanel({
             {groupedEmployees.map((entry) =>
               entry.type === "group" ? (
                 <tr key={`group-${entry.label}`} className="table-group-row">
-                  <td colSpan={6}>{entry.label}</td>
+                  <td colSpan={7}>{entry.label}</td>
                 </tr>
               ) : (
                 <tr
@@ -991,11 +1055,23 @@ export function PersonnelPanel({
                   <td>
                     <input
                       className="table-input"
-                      value={entry.value.name}
+                      value={entry.value.firstName}
                       onChange={(event) =>
                         updateEmployee(entry.value.id, (current) => ({
                           ...current,
-                          name: event.target.value,
+                          firstName: event.target.value,
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="table-input"
+                      value={entry.value.lastName}
+                      onChange={(event) =>
+                        updateEmployee(entry.value.id, (current) => ({
+                          ...current,
+                          lastName: event.target.value,
                         }))
                       }
                     />

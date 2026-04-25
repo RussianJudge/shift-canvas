@@ -25,7 +25,6 @@ import type {
   WithdrawMutualPostingInput,
 } from "@/lib/types";
 import { getSchedulerSnapshot } from "@/lib/data";
-import { splitEmployeeDisplayName } from "@/lib/employee-names";
 import {
   buildOvertimeAssignmentNote,
   buildSwapOvertimeAssignmentRows,
@@ -2422,13 +2421,17 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   const invalidEmployee = input.updates.find(
-    (update) => isBlank(update.name) || isBlank(update.role) || isBlank(update.scheduleId),
+    (update) =>
+      isBlank(update.firstName) ||
+      isBlank(update.lastName) ||
+      isBlank(update.role) ||
+      isBlank(update.scheduleId),
   );
 
   if (invalidEmployee) {
     return {
       ok: false,
-      message: "Each employee needs a name, role, and shift before saving.",
+      message: "Each employee needs a first name, last name, role, and shift before saving.",
     };
   }
 
@@ -2551,13 +2554,11 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   const employeeRows = input.updates.map((update) => {
-    const nameParts = splitEmployeeDisplayName(update.name);
-
     return {
       ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
       id: update.employeeId,
-      first_name: nameParts.firstName,
-      last_name: nameParts.lastName,
+      first_name: update.firstName.trim(),
+      last_name: update.lastName.trim(),
       email: update.email.trim().toLowerCase() || null,
       role_title: update.role.trim(),
       schedule_id: update.scheduleId,
