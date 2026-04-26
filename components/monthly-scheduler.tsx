@@ -2488,7 +2488,6 @@ function EmployeeRow({
             <span className="employee-name-full">{employee.name}</span>
             <span className="employee-name-compact">{getCompactEmployeeName(employee.name)}</span>
           </strong>
-          <span>{employee.role}</span>
         </div>
         <button
           type="button"
