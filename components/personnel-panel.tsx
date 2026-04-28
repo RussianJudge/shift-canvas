@@ -768,13 +768,25 @@ export function PersonnelPanel({
   }
 
   function handleRemoveEmployee(employeeId: string) {
+    const employee = employees.find((entry) => entry.id === employeeId);
+
+    if (!employee) {
+      return;
+    }
+
+    const employeeName = getEditableEmployeeDisplayName(employee);
+
+    if (!window.confirm(`Remove ${employeeName} from Personnel? This change will not save until you click Save.`)) {
+      return;
+    }
+
     setEmployees((current) => current.filter((employee) => employee.id !== employeeId));
 
     if (baselineMap.has(employeeId)) {
       setDeletedEmployeeIds((current) => [...current, employeeId]);
     }
 
-    setStatusMessage("");
+    setStatusMessage(`${employeeName} removed from the table. Save when you're ready.`);
   }
 
   return (
