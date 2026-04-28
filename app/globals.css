@@ -1989,6 +1989,17 @@ select {
   min-width: 15.5rem;
 }
 
+.personnel-table th.column-competencies,
+.personnel-table td.column-competencies {
+  min-width: 16rem;
+}
+
+.personnel-table th.column-actions,
+.personnel-table td.column-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
 .table-group-row td {
   padding: 0.5rem 0.72rem;
   background: rgba(245, 236, 223, 0.88);

@@ -901,8 +901,8 @@ export function PersonnelPanel({
               <th className="column-name">Last Name</th>
               <th className="column-email">Email</th>
               <th className="column-shift">Shift</th>
-              <th>Competencies</th>
-              <th />
+              <th className="column-competencies">Competencies</th>
+              <th className="column-actions" />
             </tr>
           </thead>
           <tbody>
@@ -1003,7 +1003,7 @@ export function PersonnelPanel({
                     ) : null}
                   </div>
                 </td>
-                <td>
+                <td className="column-competencies">
                   <div className="table-pills table-pills--editable">
                     {snapshot.competencies.map((competency) => {
                       const isSelected = draftEmployee.competencyIds.includes(competency.id);
@@ -1035,7 +1035,7 @@ export function PersonnelPanel({
                     })}
                   </div>
                 </td>
-                <td>
+                <td className="column-actions">
                   <div className="table-actions-cell">
                     <div className="table-actions-inline">
                       <button
@@ -1075,7 +1075,7 @@ export function PersonnelPanel({
 
                     return (
                       <>
-                  <td className="column-email">
+                  <td className="column-name">
                     <div className="table-input-stack">
                       <input
                         className="table-input"
@@ -1105,7 +1105,7 @@ export function PersonnelPanel({
                       {fieldIssues.lastName ? <p className="row-issue">{fieldIssues.lastName}</p> : null}
                     </div>
                   </td>
-                  <td className="column-name">
+                  <td className="column-email">
                     <div className="table-input-stack">
                       <input
                         className="table-input"
@@ -1143,7 +1143,7 @@ export function PersonnelPanel({
                       {fieldIssues.scheduleId ? <p className="row-issue">{fieldIssues.scheduleId}</p> : null}
                     </div>
                   </td>
-                  <td>
+                  <td className="column-competencies">
                     <div className="table-pills table-pills--editable">
                       {snapshot.competencies.map((competency) => {
                         const isSelected = entry.value.competencyIds.includes(competency.id);
@@ -1164,7 +1164,7 @@ export function PersonnelPanel({
                       })}
                     </div>
                   </td>
-                  <td>
+                  <td className="column-actions">
                     <div className="table-actions-cell">
                       <button
                         type="button"
