@@ -1970,11 +1970,18 @@ select {
   letter-spacing: 0.08em;
 }
 
+.personnel-table th.column-name,
+.personnel-table td.column-name {
+  min-width: 9rem;
+  width: 9rem;
+}
+
 .personnel-table th.column-shift,
 .personnel-table td.column-shift {
-  min-width: 8.5rem;
-  padding-left: 1rem;
-  padding-right: 1rem;
+  min-width: 7.1rem;
+  width: 7.1rem;
+  padding-left: 0.82rem;
+  padding-right: 0.82rem;
 }
 
 .personnel-table th.column-email,

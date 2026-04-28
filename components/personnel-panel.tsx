@@ -897,8 +897,8 @@ export function PersonnelPanel({
         <table className="personnel-table">
           <thead>
             <tr>
-              <th>First Name</th>
-              <th>Last Name</th>
+              <th className="column-name">First Name</th>
+              <th className="column-name">Last Name</th>
               <th className="column-email">Email</th>
               <th className="column-shift">Shift</th>
               <th>Competencies</th>
@@ -908,7 +908,7 @@ export function PersonnelPanel({
           <tbody>
             {draftEmployee ? (
               <tr className="table-row--draft">
-                <td>
+                <td className="column-name">
                   <div className="table-input-stack">
                     <input
                       className="table-input"
@@ -930,7 +930,7 @@ export function PersonnelPanel({
                     ) : null}
                   </div>
                 </td>
-                <td>
+                <td className="column-name">
                   <div className="table-input-stack">
                     <input
                       className="table-input"
@@ -1090,7 +1090,7 @@ export function PersonnelPanel({
                       {fieldIssues.firstName ? <p className="row-issue">{fieldIssues.firstName}</p> : null}
                     </div>
                   </td>
-                  <td>
+                  <td className="column-name">
                     <div className="table-input-stack">
                       <input
                         className="table-input"
@@ -1105,7 +1105,7 @@ export function PersonnelPanel({
                       {fieldIssues.lastName ? <p className="row-issue">{fieldIssues.lastName}</p> : null}
                     </div>
                   </td>
-                  <td>
+                  <td className="column-name">
                     <div className="table-input-stack">
                       <input
                         className="table-input"
