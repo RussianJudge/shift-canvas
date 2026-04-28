@@ -1952,7 +1952,7 @@ select {
 
 .personnel-table th,
 .personnel-table td {
-  padding: 1rem 1.1rem;
+  padding: 0.78rem 0.72rem;
   text-align: left;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
@@ -1973,12 +1973,17 @@ select {
 .personnel-table th.column-shift,
 .personnel-table td.column-shift {
   min-width: 8.5rem;
-  padding-left: 1.5rem;
-  padding-right: 1.5rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.personnel-table th.column-email,
+.personnel-table td.column-email {
+  min-width: 15.5rem;
 }
 
 .table-group-row td {
-  padding: 0.55rem 1.1rem;
+  padding: 0.5rem 0.72rem;
   background: rgba(245, 236, 223, 0.88);
   color: var(--muted);
   font-size: 0.74rem;
@@ -2450,7 +2455,7 @@ select {
 .table-select {
   width: 100%;
   min-height: 2.35rem;
-  padding: 0.5rem 0.65rem;
+  padding: 0.42rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: 0.85rem;
   background: rgba(255, 255, 255, 0.85);

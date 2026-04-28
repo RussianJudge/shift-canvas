@@ -17,9 +17,11 @@ function isMonthKey(value: string | undefined) {
 async function ScheduleBoard({
   session,
   month,
+  initialSelectedScheduleId,
 }: {
   session: Awaited<ReturnType<typeof requireAppSession>>;
   month: string;
+  initialSelectedScheduleId: string | null;
 }) {
   const [snapshot, initialPinnedEmployeesBySchedule] = await Promise.all([
     getSchedulerSnapshot(month, session),
@@ -34,6 +36,7 @@ async function ScheduleBoard({
       canManageSetBuilder={session.role !== "worker"}
       canSwitchSchedule={true}
       forcedScheduleId={null}
+      initialSelectedScheduleId={initialSelectedScheduleId}
     />
   );
 }
@@ -115,17 +118,22 @@ function ScheduleBoardFallback({ month }: { month: string }) {
 export default async function SchedulePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ month?: string }>;
+  searchParams?: Promise<{ month?: string; schedule?: string }>;
 }) {
   const session = await requireAppSession(["admin", "leader", "worker"]);
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
+  const initialSelectedScheduleId = resolvedSearchParams?.schedule?.trim() || null;
 
   return (
     <WorkspaceShell viewer={session}>
       <Suspense key={month} fallback={<ScheduleBoardFallback month={month} />}>
-        <ScheduleBoard session={session} month={month} />
+        <ScheduleBoard
+          session={session}
+          month={month}
+          initialSelectedScheduleId={initialSelectedScheduleId}
+        />
       </Suspense>
     </WorkspaceShell>
   );

@@ -1,8 +1,11 @@
+import { Suspense } from "react";
+
 import { MetricsPanel } from "@/components/metrics-panel";
+import { LoadingMetricsGrid, LoadingMonthNav, LoadingPanelFrame } from "@/components/workspace-loading";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { requireAppSession } from "@/lib/auth";
 import { getMetricsAssignmentHistory, getMetricsOvertimeHistory, getSchedulerSnapshot } from "@/lib/data";
-import { getCurrentMonthKey } from "@/lib/scheduling";
+import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +21,37 @@ function getMonthEndDateKey(month: string) {
   return monthEnd.toISOString().slice(0, 10);
 }
 
+async function MetricsBoard({
+  session,
+  month,
+}: {
+  session: Awaited<ReturnType<typeof requireAppSession>>;
+  month: string;
+}) {
+  const metricsHistoryEnd = getMonthEndDateKey(month);
+  const [snapshot, overtimeHistory, assignmentHistory] = await Promise.all([
+    getSchedulerSnapshot(month, session),
+    getMetricsOvertimeHistory(metricsHistoryEnd, session),
+    getMetricsAssignmentHistory(metricsHistoryEnd, session),
+  ]);
+
+  return (
+    <MetricsPanel
+      snapshot={snapshot}
+      overtimeHistory={overtimeHistory}
+      assignmentHistory={assignmentHistory}
+    />
+  );
+}
+
+function MetricsBoardFallback({ month }: { month: string }) {
+  return (
+    <LoadingPanelFrame title="Metrics" headingAside={<LoadingMonthNav monthLabel={formatMonthLabel(month)} />}>
+      <LoadingMetricsGrid />
+    </LoadingPanelFrame>
+  );
+}
+
 export default async function MetricsPage({
   searchParams,
 }: {
@@ -27,20 +61,12 @@ export default async function MetricsPage({
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = resolveMetricsMonth(resolvedSearchParams?.month, currentMonth);
-  const metricsHistoryEnd = getMonthEndDateKey(month);
-  const [snapshot, overtimeHistory, assignmentHistory] = await Promise.all([
-    getSchedulerSnapshot(month, session),
-    getMetricsOvertimeHistory(metricsHistoryEnd, session),
-    getMetricsAssignmentHistory(metricsHistoryEnd, session),
-  ]);
 
   return (
     <WorkspaceShell viewer={session}>
-      <MetricsPanel
-        snapshot={snapshot}
-        overtimeHistory={overtimeHistory}
-        assignmentHistory={assignmentHistory}
-      />
+      <Suspense key={month} fallback={<MetricsBoardFallback month={month} />}>
+        <MetricsBoard session={session} month={month} />
+      </Suspense>
     </WorkspaceShell>
   );
 }

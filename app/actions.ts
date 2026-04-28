@@ -1544,10 +1544,10 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
     };
   }
 
-  if (session.role === "worker" && session.employeeId !== input.employeeId) {
+  if (session.role !== "admin" && session.employeeId !== input.employeeId) {
     return {
       ok: false,
-      message: "Workers can only post their own shifts to mutuals.",
+      message: "Only admins can post mutuals on behalf of other workers.",
     };
   }
 
@@ -2708,14 +2708,13 @@ export async function savePersonnel(input: SavePersonnelInput) {
       isBlank(update.firstName) ||
       isBlank(update.lastName) ||
       isBlank(update.email) ||
-      isBlank(update.role) ||
       isBlank(update.scheduleId),
   );
 
   if (invalidEmployee) {
     return {
       ok: false,
-      message: "Each employee needs a first name, last name, email, role, and shift before saving.",
+      message: "Each employee needs a first name, last name, email, and shift before saving.",
     };
   }
 
@@ -2844,7 +2843,7 @@ export async function savePersonnel(input: SavePersonnelInput) {
       first_name: update.firstName.trim(),
       last_name: update.lastName.trim(),
       email: update.email.trim().toLowerCase() || null,
-      role_title: update.role.trim(),
+      role_title: update.role.trim() || "Operator",
       schedule_id: update.scheduleId,
       is_active: true,
     };

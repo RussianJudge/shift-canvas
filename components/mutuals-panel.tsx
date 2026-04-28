@@ -248,6 +248,7 @@ export function MutualsPanel({
   snapshot: MutualsSnapshot;
   viewer: AppSession;
 }) {
+  const canPostForOthers = viewer.role === "admin";
   /**
    * The server provides the initial month snapshot, then the panel owns later
    * month switches so the postings board can refresh without remounting the
@@ -270,7 +271,7 @@ export function MutualsPanel({
   );
   const [statusMessage, setStatusMessage] = useState("");
   const [selectedPostingEmployeeId, setSelectedPostingEmployeeId] = useState(
-    viewer.role === "worker" ? viewer.employeeId ?? "" : allEmployees[0]?.id ?? "",
+    canPostForOthers ? allEmployees[0]?.id ?? "" : viewer.employeeId ?? "",
   );
   const [postingMonth, setPostingMonth] = useState(snapshot.month);
   const [postingDates, setPostingDates] = useState<string[]>([]);
@@ -447,22 +448,29 @@ export function MutualsPanel({
               <strong>{selectedPostingEmployee?.name ?? viewer.displayName}</strong>
             </div>
           ) : (
-            <label className="field">
-              <span>Post As</span>
-              <select
-                value={selectedPostingEmployeeId}
-                onChange={(event) => {
-                  setSelectedPostingEmployeeId(event.target.value);
-                  setPostingDates([]);
-                }}
-              >
-                {allEmployees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            canPostForOthers ? (
+              <label className="field">
+                <span>Post As</span>
+                <select
+                  value={selectedPostingEmployeeId}
+                  onChange={(event) => {
+                    setSelectedPostingEmployeeId(event.target.value);
+                    setPostingDates([]);
+                  }}
+                >
+                  {allEmployees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <div className="field field--static">
+                <span>Post As</span>
+                <strong>{selectedPostingEmployee?.name ?? viewer.displayName}</strong>
+              </div>
+            )
           )}
 
           <label className="field">

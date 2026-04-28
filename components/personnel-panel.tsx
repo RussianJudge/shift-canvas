@@ -48,7 +48,7 @@ function createDraftEmployee() {
     firstName: "",
     lastName: "",
     email: "",
-    role: "",
+    role: "Operator",
     scheduleId: "",
     competencyIds: [],
   };
@@ -269,7 +269,7 @@ function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
     firstName: employee.firstName.trim(),
     lastName: employee.lastName.trim(),
     email: employee.email.trim().toLowerCase(),
-    role: employee.role.trim(),
+    role: employee.role.trim() || "Operator",
     scheduleId: employee.scheduleId,
     competencyIds: [...employee.competencyIds].sort(),
   };
@@ -279,7 +279,6 @@ type EmployeeFieldIssues = {
   firstName?: string;
   lastName?: string;
   email?: string;
-  role?: string;
   scheduleId?: string;
 };
 
@@ -303,10 +302,6 @@ function getEmployeeFieldIssues(employee: EditableEmployee): EmployeeFieldIssues
     issues.email = "Email required";
   } else if (!isValidEmail(employee.email)) {
     issues.email = "Enter a valid email";
-  }
-
-  if (!employee.role.trim()) {
-    issues.role = "Role required";
   }
 
   if (!employee.scheduleId) {
@@ -335,7 +330,7 @@ export function PersonnelPanel({
           firstName: employee.firstName,
           lastName: employee.lastName,
           email: employee.email ?? "",
-          role: employee.role,
+          role: employee.role || "Operator",
           scheduleId: employee.scheduleId,
           competencyIds: employee.competencyIds,
         })),
@@ -904,8 +899,7 @@ export function PersonnelPanel({
             <tr>
               <th>First Name</th>
               <th>Last Name</th>
-              <th>Email</th>
-              <th>Role</th>
+              <th className="column-email">Email</th>
               <th className="column-shift">Shift</th>
               <th>Competencies</th>
               <th />
@@ -958,7 +952,7 @@ export function PersonnelPanel({
                     ) : null}
                   </div>
                 </td>
-                <td>
+                <td className="column-email">
                   <div className="table-input-stack">
                     <input
                       className="table-input"
@@ -978,28 +972,6 @@ export function PersonnelPanel({
                     />
                     {draftEmployeeFieldIssues.email ? (
                       <p className="row-issue">{draftEmployeeFieldIssues.email}</p>
-                    ) : null}
-                  </div>
-                </td>
-                <td>
-                  <div className="table-input-stack">
-                    <input
-                      className="table-input"
-                      placeholder="Enter role"
-                      value={draftEmployee.role}
-                      onChange={(event) =>
-                        setDraftEmployee((current) =>
-                          current
-                            ? {
-                                ...current,
-                                role: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                    />
-                    {draftEmployeeFieldIssues.role ? (
-                      <p className="row-issue">{draftEmployeeFieldIssues.role}</p>
                     ) : null}
                   </div>
                 </td>
@@ -1089,7 +1061,7 @@ export function PersonnelPanel({
             {groupedEmployees.map((entry) =>
               entry.type === "group" ? (
                 <tr key={`group-${entry.label}`} className="table-group-row">
-                  <td colSpan={7}>{entry.label}</td>
+                  <td colSpan={6}>{entry.label}</td>
                 </tr>
               ) : (
                 <tr
@@ -1103,7 +1075,7 @@ export function PersonnelPanel({
 
                     return (
                       <>
-                  <td>
+                  <td className="column-email">
                     <div className="table-input-stack">
                       <input
                         className="table-input"
@@ -1148,21 +1120,6 @@ export function PersonnelPanel({
                         }
                       />
                       {fieldIssues.email ? <p className="row-issue">{fieldIssues.email}</p> : null}
-                    </div>
-                  </td>
-                  <td>
-                    <div className="table-input-stack">
-                      <input
-                        className="table-input"
-                        value={entry.value.role}
-                        onChange={(event) =>
-                          updateEmployee(entry.value.id, (current) => ({
-                            ...current,
-                            role: event.target.value,
-                          }))
-                        }
-                      />
-                      {fieldIssues.role ? <p className="row-issue">{fieldIssues.role}</p> : null}
                     </div>
                   </td>
                   <td className="column-shift">

@@ -878,6 +878,7 @@ export function MonthlyScheduler({
   canManageSetBuilder,
   canSwitchSchedule,
   forcedScheduleId,
+  initialSelectedScheduleId,
 }: {
   initialSnapshot: SchedulerSnapshot;
   initialPinnedEmployeesBySchedule: Record<string, string[]>;
@@ -885,6 +886,7 @@ export function MonthlyScheduler({
   canManageSetBuilder: boolean;
   canSwitchSchedule: boolean;
   forcedScheduleId: string | null;
+  initialSelectedScheduleId?: string | null;
 }) {
   // `baselineAssignments` tracks the last server-confirmed state. `draftAssignments`
   // layers in local edits and set actions until auto-save confirms them or the user reverts.
@@ -892,7 +894,11 @@ export function MonthlyScheduler({
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [currentMonth, setCurrentMonth] = useState(initialSnapshot.month);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
-    forcedScheduleId ?? initialSnapshot.schedules[0]?.id ?? "",
+    forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
+      ? forcedScheduleId
+      : initialSnapshot.schedules.some((schedule) => schedule.id === initialSelectedScheduleId)
+      ? initialSelectedScheduleId ?? ""
+      : initialSnapshot.schedules[0]?.id ?? "",
   );
   const [search, setSearch] = useState("");
   const [baselineAssignments, setBaselineAssignments] = useState(() =>
@@ -1284,6 +1290,25 @@ export function MonthlyScheduler({
   }
 
   const gridColumns = `var(--schedule-name-column-width, 7.75rem) repeat(${monthDays.length}, minmax(var(--schedule-day-column-width, 1.72rem), 1fr))`;
+
+  function replaceScheduleUrlState(month: string, scheduleId: string) {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    params.set("month", month);
+
+    if (scheduleId) {
+      params.set("schedule", scheduleId);
+    } else {
+      params.delete("schedule");
+    }
+
+    const queryString = params.toString();
+    const nextUrl = queryString ? `/schedule?${queryString}` : "/schedule";
+    window.history.replaceState(null, "", nextUrl);
+  }
 
   useEffect(() => {
     if (!forcedScheduleId || selectedScheduleId === forcedScheduleId) {
@@ -1720,7 +1745,7 @@ export function MonthlyScheduler({
     startMonthTransition(() => {
       setCurrentMonth((current) => {
         const nextMonth = addMonths(current, delta);
-        router.push(`/schedule?month=${nextMonth}`, { scroll: false });
+        replaceScheduleUrlState(nextMonth, selectedScheduleId);
         return nextMonth;
       });
       setStatusMessage("Changing month");
@@ -2143,7 +2168,9 @@ export function MonthlyScheduler({
             <select
               value={selectedScheduleId}
               onChange={(event) => {
-                setSelectedScheduleId(event.target.value);
+                const nextScheduleId = event.target.value;
+                setSelectedScheduleId(nextScheduleId);
+                replaceScheduleUrlState(currentMonth, nextScheduleId);
                 setSelectedCoverageCompetencyId(null);
               }}
             >
