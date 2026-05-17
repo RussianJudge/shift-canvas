@@ -3,9 +3,15 @@ import { Resend } from "resend";
 import type { AppRole } from "@/lib/types";
 import { AccountInviteEmail } from "@/components/emails/account-invite-email";
 
-function getPublicAppUrl() {
+function getPublicAppUrl(overrideBaseUrl?: string | null) {
+  const normalizedOverride = overrideBaseUrl?.trim().replace(/\/+$/, "");
+
+  if (normalizedOverride) {
+    return normalizedOverride;
+  }
+
   if (process.env.NEXT_PUBLIC_SITE_URL) {
-    return process.env.NEXT_PUBLIC_SITE_URL;
+    return process.env.NEXT_PUBLIC_SITE_URL.trim().replace(/\/+$/, "");
   }
 
   if (process.env.VERCEL_URL) {
@@ -21,8 +27,8 @@ function getPublicAppUrl() {
  * We deep-link into the dedicated sign-up page so invite links open directly
  * into the account creation flow with the intended email/token context.
  */
-export function buildCreateAccountInviteUrl(email: string, inviteToken?: string | null) {
-  const inviteUrl = new URL("/sign-up", getPublicAppUrl());
+export function buildCreateAccountInviteUrl(email: string, inviteToken?: string | null, baseUrl?: string | null) {
+  const inviteUrl = new URL("/sign-up", getPublicAppUrl(baseUrl));
   inviteUrl.searchParams.set("email", email.trim().toLowerCase());
 
   if (inviteToken) {
@@ -45,6 +51,7 @@ export async function sendAccountInviteEmail(input: {
   invitedByName?: string | null;
   inviteToken?: string | null;
   role?: AppRole;
+  baseUrl?: string | null;
 }) {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL;
@@ -56,8 +63,8 @@ export async function sendAccountInviteEmail(input: {
 
   const resend = new Resend(apiKey);
   const normalizedEmail = input.to.trim().toLowerCase();
-  const appBaseUrl = getPublicAppUrl();
-  const inviteUrl = buildCreateAccountInviteUrl(normalizedEmail, input.inviteToken);
+  const appBaseUrl = getPublicAppUrl(input.baseUrl);
+  const inviteUrl = buildCreateAccountInviteUrl(normalizedEmail, input.inviteToken, appBaseUrl);
   const recipientName =
     [input.firstName?.trim(), input.lastName?.trim()].filter(Boolean).join(" ") || "there";
   const roleLabel =

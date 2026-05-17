@@ -675,6 +675,7 @@ export async function createAccountInvite(input: {
   const displayName = formatEmployeeDisplayName({ firstName, lastName });
   const rawToken = randomBytes(32).toString("hex");
   const tokenHash = hashInviteToken(rawToken);
+  const publicAppUrl = await getAuthRedirectOrigin();
 
   const inviteInsert = await supabase.from("account_invites").insert({
     token_hash: tokenHash,
@@ -697,7 +698,7 @@ export async function createAccountInvite(input: {
     };
   }
 
-  const inviteUrl = buildCreateAccountInviteUrl(normalizedEmail, rawToken);
+  const inviteUrl = buildCreateAccountInviteUrl(normalizedEmail, rawToken, publicAppUrl);
 
   let message = `Invite created for ${displayName}.`;
 
@@ -709,6 +710,7 @@ export async function createAccountInvite(input: {
       invitedByName: session.displayName,
       inviteToken: rawToken,
       role,
+      baseUrl: publicAppUrl,
     });
     message = `Invite created and emailed to ${normalizedEmail}.`;
   } catch {
