@@ -17,7 +17,7 @@ async function PersonnelBoard({
   month: string;
 }) {
   const snapshot = await getPersonnelSnapshot(month, session);
-  return <PersonnelPanel snapshot={snapshot} />;
+  return <PersonnelPanel snapshot={snapshot} viewer={session} />;
 }
 
 function PersonnelBoardFallback({ month }: { month: string }) {
@@ -35,7 +35,7 @@ function PersonnelBoardFallback({ month }: { month: string }) {
         />
       }
     >
-      <LoadingTable columns={["First name", "Last name", "Email", "Role", "Shift", "Actions"]} rows={6} />
+      <LoadingTable columns={["First name", "Last name", "Email", "Shift", "Competencies", "Actions"]} rows={6} />
     </LoadingPanelFrame>
   );
 }

@@ -3,6 +3,7 @@ type AccountInviteEmailProps = {
   inviteUrl: string;
   invitedByName?: string | null;
   appBaseUrl: string;
+  roleLabel: string;
 };
 
 /**
@@ -17,6 +18,7 @@ export function AccountInviteEmail({
   inviteUrl,
   invitedByName,
   appBaseUrl,
+  roleLabel,
 }: AccountInviteEmailProps) {
   const previewText = "You have been invited to create your Schwifty account.";
   const logoUrl = `${appBaseUrl.replace(/\/$/, "")}/schwifty-logo.png`;
@@ -107,6 +109,10 @@ export function AccountInviteEmail({
               You have been invited to create your Schwifty account and join the planning workspace.
               Once your account is created, you will be able to sign in and access the schedule tools
               available to your role.
+            </p>
+
+            <p style={{ margin: "0 0 16px", fontSize: 16, lineHeight: 1.7, color: "#4f342b" }}>
+              Your invited workspace role: <strong>{roleLabel}</strong>.
             </p>
 
             {invitedByName ? (

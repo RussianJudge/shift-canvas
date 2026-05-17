@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 
+import type { AppRole } from "@/lib/types";
 import { AccountInviteEmail } from "@/components/emails/account-invite-email";
 
 function getPublicAppUrl() {
@@ -17,28 +18,33 @@ function getPublicAppUrl() {
 /**
  * Builds a direct account-creation link for the invite email.
  *
- * We deep-link into the existing sign-in page instead of building a separate
- * invitation screen, which keeps the onboarding flow aligned with the auth UI
- * users already have.
+ * We deep-link into the dedicated sign-up page so invite links open directly
+ * into the account creation flow with the intended email/token context.
  */
-export function buildCreateAccountInviteUrl(email: string) {
-  const inviteUrl = new URL("/sign-in", getPublicAppUrl());
-  inviteUrl.searchParams.set("mode", "create");
+export function buildCreateAccountInviteUrl(email: string, inviteToken?: string | null) {
+  const inviteUrl = new URL("/sign-up", getPublicAppUrl());
   inviteUrl.searchParams.set("email", email.trim().toLowerCase());
+
+  if (inviteToken) {
+    inviteUrl.searchParams.set("invite", inviteToken);
+  }
+
   return inviteUrl.toString();
 }
 
 /**
  * Sends the branded account invitation email through Resend.
  *
- * Nothing in the app calls this yet; it is a reusable delivery helper we can
- * plug into Personnel, an admin action, or a future invite workflow.
+ * The Personnel admin invite builder uses this helper to send the branded
+ * invite email, and other future admin flows can reuse it too.
  */
 export async function sendAccountInviteEmail(input: {
   to: string;
   firstName?: string | null;
   lastName?: string | null;
   invitedByName?: string | null;
+  inviteToken?: string | null;
+  role?: AppRole;
 }) {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL;
@@ -51,9 +57,11 @@ export async function sendAccountInviteEmail(input: {
   const resend = new Resend(apiKey);
   const normalizedEmail = input.to.trim().toLowerCase();
   const appBaseUrl = getPublicAppUrl();
-  const inviteUrl = buildCreateAccountInviteUrl(normalizedEmail);
+  const inviteUrl = buildCreateAccountInviteUrl(normalizedEmail, input.inviteToken);
   const recipientName =
     [input.firstName?.trim(), input.lastName?.trim()].filter(Boolean).join(" ") || "there";
+  const roleLabel =
+    input.role === "admin" ? "Admin" : input.role === "leader" ? "Leader" : "Worker";
 
   const { error } = await resend.emails.send({
     from,
@@ -66,6 +74,7 @@ export async function sendAccountInviteEmail(input: {
         inviteUrl={inviteUrl}
         invitedByName={input.invitedByName}
         appBaseUrl={appBaseUrl}
+        roleLabel={roleLabel}
       />
     ),
   });

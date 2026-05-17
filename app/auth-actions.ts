@@ -1,10 +1,13 @@
 "use server";
 
+import { createHash, randomBytes } from "crypto";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 
 import { clearAppSession, getAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
-import type { AppSession } from "@/lib/types";
+import { buildCreateAccountInviteUrl, sendAccountInviteEmail } from "@/lib/email";
+import { formatEmployeeDisplayName } from "@/lib/employee-names";
+import type { AppRole, AppSession } from "@/lib/types";
 import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
 
 /**
@@ -41,6 +44,41 @@ type AuthenticatedUser = {
   email?: string | null;
 };
 
+type AccountInviteRow = {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  display_name: string;
+  role: AppRole;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+  schedule_id: string | null;
+  employee_id: string | null;
+  expires_at: string;
+  used_at: string | null;
+};
+
+type InviteEmployeeRow = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  schedule_id: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+function hashInviteToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 /** Builds the public URL Supabase should send users back to after auth emails. */
 async function getAuthRedirectOrigin() {
   const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "");
@@ -72,6 +110,133 @@ async function getAuthRedirectOrigin() {
   }
 
   return "http://localhost:3000";
+}
+
+async function findActiveInvite(rawToken: string) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      invite: null,
+      error: "auth-unavailable" as const,
+    };
+  }
+
+  const tokenHash = hashInviteToken(rawToken);
+  const inviteResult = await supabase
+    .from("account_invites")
+    .select(
+      "id, email, first_name, last_name, display_name, role, company_id, site_id, business_area_id, schedule_id, employee_id, expires_at, used_at",
+    )
+    .eq("token_hash", tokenHash)
+    .maybeSingle();
+
+  if (inviteResult.error) {
+    return {
+      invite: null,
+      error: "auth-unavailable" as const,
+    };
+  }
+
+  const invite = inviteResult.data as AccountInviteRow | null;
+
+  if (!invite) {
+    return {
+      invite: null,
+      error: "invite-invalid" as const,
+    };
+  }
+
+  if (invite.used_at) {
+    return {
+      invite: null,
+      error: "invite-used" as const,
+    };
+  }
+
+  if (new Date(invite.expires_at).getTime() <= Date.now()) {
+    return {
+      invite: null,
+      error: "invite-expired" as const,
+    };
+  }
+
+  return {
+    invite,
+    error: null,
+  };
+}
+
+async function applyInviteToProfile({
+  user,
+  invite,
+  firstName,
+  lastName,
+}: {
+  user: AuthenticatedUser;
+  invite: AccountInviteRow;
+  firstName: string;
+  lastName: string;
+}) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false as const,
+      error: "auth-unavailable" as const,
+    };
+  }
+
+  const displayName =
+    `${firstName} ${lastName}`.trim() ||
+    invite.display_name ||
+    formatEmployeeDisplayName({
+      firstName: invite.first_name,
+      lastName: invite.last_name,
+    }) ||
+    user.email?.split("@")[0] ||
+    "User";
+
+  const profileUpdate = await supabase
+    .from("profiles")
+    .update({
+      email: user.email?.trim().toLowerCase() ?? invite.email,
+      display_name: displayName,
+      role: invite.role,
+      company_id: invite.company_id,
+      site_id: invite.site_id,
+      business_area_id: invite.business_area_id,
+      schedule_id: invite.schedule_id,
+      employee_id: invite.employee_id,
+    })
+    .eq("id", user.id);
+
+  if (profileUpdate.error) {
+    return {
+      ok: false as const,
+      error: "profile-update-failed" as const,
+    };
+  }
+
+  const markInviteUsed = await supabase
+    .from("account_invites")
+    .update({
+      used_at: new Date().toISOString(),
+      used_by_user_id: user.id,
+    })
+    .eq("id", invite.id)
+    .is("used_at", null);
+
+  if (markInviteUsed.error) {
+    return {
+      ok: false as const,
+      error: "invite-update-failed" as const,
+    };
+  }
+
+  return {
+    ok: true as const,
+  };
 }
 
 /**
@@ -249,6 +414,7 @@ export async function signUp(formData: FormData) {
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
   const firstName = String(formData.get("firstName") ?? "").trim();
   const lastName = String(formData.get("lastName") ?? "").trim();
+  const inviteToken = String(formData.get("inviteToken") ?? "").trim();
 
   if (!email) {
     redirect("/sign-in?mode=create&error=missing-email");
@@ -272,6 +438,18 @@ export async function signUp(formData: FormData) {
     redirect("/sign-in?mode=create&error=auth-unavailable");
   }
 
+  const inviteLookup = inviteToken ? await findActiveInvite(inviteToken) : { invite: null, error: null };
+
+  if (inviteLookup.error) {
+    redirect(`/sign-up?error=${inviteLookup.error}&email=${encodeURIComponent(email)}`);
+  }
+
+  const invite = inviteLookup.invite;
+
+  if (invite && invite.email.trim().toLowerCase() !== email) {
+    redirect(`/sign-up?error=invite-email-mismatch&email=${encodeURIComponent(invite.email)}`);
+  }
+
   const { data, error } = await authClient.auth.signUp({
     email,
     password,
@@ -280,7 +458,7 @@ export async function signUp(formData: FormData) {
         first_name: firstName,
         last_name: lastName,
         display_name: `${firstName} ${lastName}`,
-        role: "worker",
+        role: invite?.role ?? "worker",
       },
     },
   });
@@ -303,6 +481,22 @@ export async function signUp(formData: FormData) {
 
   if (!createdUser) {
     redirect("/sign-in?notice=account-created-sign-in-failed");
+  }
+
+  if (invite) {
+    const inviteApplyResult = await applyInviteToProfile({
+      user: {
+        id: createdUser.id,
+        email: createdUser.email,
+      },
+      invite,
+      firstName,
+      lastName,
+    });
+
+    if (!inviteApplyResult.ok) {
+      redirect("/sign-in?notice=account-created-pending-access");
+    }
   }
 
   const signInResult = await authClient.auth.signInWithPassword({
@@ -331,6 +525,201 @@ export async function signUp(formData: FormData) {
   }
 
   redirect(getSessionHomePath(sessionResult.session));
+}
+
+export async function createAccountInvite(input: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: AppRole;
+  employeeId?: string | null;
+}) {
+  const session = await getAppSession();
+
+  if (!session || !["admin", "leader"].includes(session.role)) {
+    return {
+      ok: false,
+      message: "Only admins and leaders can create account invites.",
+    };
+  }
+
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  const employeeId = input.employeeId?.trim() || null;
+  const role = input.role;
+
+  if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+    return {
+      ok: false,
+      message: "Enter a valid invite email address.",
+    };
+  }
+
+  if (!firstName || !lastName) {
+    return {
+      ok: false,
+      message: "Enter a first and last name for the invite.",
+    };
+  }
+
+  if (!["admin", "leader", "worker"].includes(role)) {
+    return {
+      ok: false,
+      message: "Choose a valid app role for the invite.",
+    };
+  }
+
+  if (session.role === "leader" && role !== "worker") {
+    return {
+      ok: false,
+      message: "Leaders can only create worker invites.",
+    };
+  }
+
+  if (role !== "admin" && !employeeId) {
+    return {
+      ok: false,
+      message: "Leader and worker invites must be linked to an employee record.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Account invites are unavailable.",
+    };
+  }
+
+  const [existingProfileResult, employeeResult] = await Promise.all([
+    supabase.from("profiles").select("id").eq("email", normalizedEmail).maybeSingle(),
+    employeeId
+      ? supabase
+          .from("employees")
+          .select(
+            "id, first_name, last_name, email, schedule_id, company_id, site_id, business_area_id",
+          )
+          .eq("id", employeeId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  if (existingProfileResult.error) {
+    return {
+      ok: false,
+      message: "Could not verify whether that email already has an account.",
+    };
+  }
+
+  if (existingProfileResult.data) {
+    return {
+      ok: false,
+      message: "That email already has an account.",
+    };
+  }
+
+  const linkedEmployee = employeeResult.data as InviteEmployeeRow | null;
+
+  if (employeeId && (employeeResult.error || !linkedEmployee)) {
+    return {
+      ok: false,
+      message: "Could not load the linked employee for this invite.",
+    };
+  }
+
+  if (
+    linkedEmployee &&
+    (linkedEmployee.company_id !== session.companyId ||
+      linkedEmployee.site_id !== session.siteId ||
+      linkedEmployee.business_area_id !== session.businessAreaId)
+  ) {
+    return {
+      ok: false,
+      message: "You can only create invites for employees inside your current scope.",
+    };
+  }
+
+  if (
+    session.role === "leader" &&
+    linkedEmployee &&
+    session.scheduleId &&
+    linkedEmployee.schedule_id !== session.scheduleId
+  ) {
+    return {
+      ok: false,
+      message: "Leaders can only create invites for employees on their own shift.",
+    };
+  }
+
+  const scope = linkedEmployee
+    ? {
+        companyId: linkedEmployee.company_id,
+        siteId: linkedEmployee.site_id,
+        businessAreaId: linkedEmployee.business_area_id,
+      }
+    : {
+        companyId: session.companyId,
+        siteId: session.siteId,
+        businessAreaId: session.businessAreaId,
+      };
+
+  if (!scope.companyId || !scope.siteId || !scope.businessAreaId) {
+    return {
+      ok: false,
+      message: "Your profile scope is incomplete. Update it before creating invites.",
+    };
+  }
+
+  const displayName = formatEmployeeDisplayName({ firstName, lastName });
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = hashInviteToken(rawToken);
+
+  const inviteInsert = await supabase.from("account_invites").insert({
+    token_hash: tokenHash,
+    email: normalizedEmail,
+    first_name: firstName,
+    last_name: lastName,
+    display_name: displayName,
+    role,
+    company_id: scope.companyId,
+    site_id: scope.siteId,
+    business_area_id: scope.businessAreaId,
+    schedule_id: linkedEmployee?.schedule_id ?? null,
+    employee_id: linkedEmployee?.id ?? null,
+  });
+
+  if (inviteInsert.error) {
+    return {
+      ok: false,
+      message: `Could not create the account invite: ${inviteInsert.error.message}`,
+    };
+  }
+
+  const inviteUrl = buildCreateAccountInviteUrl(normalizedEmail, rawToken);
+
+  let message = `Invite created for ${displayName}.`;
+
+  try {
+    await sendAccountInviteEmail({
+      to: normalizedEmail,
+      firstName,
+      lastName,
+      invitedByName: session.displayName,
+      inviteToken: rawToken,
+      role,
+    });
+    message = `Invite created and emailed to ${normalizedEmail}.`;
+  } catch {
+    message = `Invite created for ${displayName}. Copy the link below to share it manually.`;
+  }
+
+  return {
+    ok: true,
+    message,
+    inviteUrl,
+  };
 }
 
 /**

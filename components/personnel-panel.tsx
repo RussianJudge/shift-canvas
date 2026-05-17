@@ -4,8 +4,9 @@ import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { savePersonnel } from "@/app/actions";
+import { createAccountInvite } from "@/app/auth-actions";
 import { formatEmployeeDisplayName, splitEmployeeDisplayName } from "@/lib/employee-names";
-import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
+import type { AppRole, AppSession, PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
 
 /**
  * Personnel editor with inline row editing and CSV import.
@@ -41,6 +42,14 @@ type PendingCsvImport = {
   summary: string;
 };
 
+type InviteDraft = {
+  employeeId: string;
+  role: AppRole;
+  firstName: string;
+  lastName: string;
+  email: string;
+};
+
 /** Creates the unsaved row shown at the top of the table before add/save. */
 function createDraftEmployee() {
   return {
@@ -51,6 +60,16 @@ function createDraftEmployee() {
     role: "Operator",
     scheduleId: "",
     competencyIds: [],
+  };
+}
+
+function createInviteDraft(): InviteDraft {
+  return {
+    employeeId: "",
+    role: "worker",
+    firstName: "",
+    lastName: "",
+    email: "",
   };
 }
 
@@ -318,8 +337,10 @@ function getEmployeeIssues(employee: EditableEmployee) {
 
 export function PersonnelPanel({
   snapshot,
+  viewer,
 }: {
   snapshot: SchedulerSnapshot;
+  viewer: AppSession;
 }) {
   const csvInputRef = useRef<HTMLInputElement>(null);
   const initialEmployees = useMemo<EditableEmployee[]>(
@@ -347,7 +368,15 @@ export function PersonnelPanel({
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
   const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
+  const [showInviteBuilder, setShowInviteBuilder] = useState(false);
+  const [inviteDraft, setInviteDraft] = useState<InviteDraft>(createInviteDraft);
+  const [inviteLink, setInviteLink] = useState("");
+  const [inviteStatusMessage, setInviteStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
+  const [isCreatingInvite, startInviteTransition] = useTransition();
+  const canManageInvites = viewer.role === "admin" || viewer.role === "leader";
+  const canInviteAdmin = viewer.role === "admin";
+  const canInviteLeader = viewer.role === "admin";
   const defaultSchedule =
     [...snapshot.schedules]
       .sort((left, right) => left.employees.length - right.employees.length || left.name.localeCompare(right.name))[0] ??
@@ -356,6 +385,16 @@ export function PersonnelPanel({
   const scheduleNameById = useMemo(
     () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
     [snapshot.schedules],
+  );
+  const employeeOptions = useMemo(
+    () =>
+      [...employees].sort(
+        (left, right) =>
+          left.lastName.localeCompare(right.lastName) ||
+          left.firstName.localeCompare(right.firstName) ||
+          left.email.localeCompare(right.email),
+      ),
+    [employees],
   );
   const baselineMap = useMemo(
     () => new Map(baselineEmployees.map((employee) => [employee.id, normalizeEmployee(employee)])),
@@ -442,7 +481,41 @@ export function PersonnelPanel({
     setSelectedCompetencyFilter("all");
     setPendingCsvImport(null);
     setDraftEmployee(null);
+    setShowInviteBuilder(false);
+    setInviteDraft(createInviteDraft());
+    setInviteLink("");
+    setInviteStatusMessage("");
   }, [initialEmployees]);
+
+  useEffect(() => {
+    if (!inviteDraft.employeeId) {
+      return;
+    }
+
+    const employee = employeeOptions.find((entry) => entry.id === inviteDraft.employeeId);
+
+    if (!employee) {
+      return;
+    }
+
+    setInviteDraft((current) => ({
+      ...current,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      email: employee.email || current.email,
+    }));
+  }, [employeeOptions, inviteDraft.employeeId]);
+
+  useEffect(() => {
+    if (canInviteAdmin || inviteDraft.role === "worker") {
+      return;
+    }
+
+    setInviteDraft((current) => ({
+      ...current,
+      role: "worker",
+    }));
+  }, [canInviteAdmin, inviteDraft.role]);
   const hasValidationErrors = invalidEmployeeIds.size > 0;
   const draftEmployeeIssues = draftEmployee ? getEmployeeIssues(draftEmployee) : [];
   const draftEmployeeFieldIssues = draftEmployee ? getEmployeeFieldIssues(draftEmployee) : {};
@@ -789,6 +862,45 @@ export function PersonnelPanel({
     setStatusMessage(`${employeeName} removed from the table. Save when you're ready.`);
   }
 
+  function handleInviteDraftChange<K extends keyof InviteDraft>(key: K, value: InviteDraft[K]) {
+    setInviteDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function handleCreateInvite() {
+    startInviteTransition(async () => {
+      const result = await createAccountInvite({
+        email: inviteDraft.email,
+        firstName: inviteDraft.firstName,
+        lastName: inviteDraft.lastName,
+        role: inviteDraft.role,
+        employeeId: inviteDraft.employeeId || null,
+      });
+
+      setInviteStatusMessage(result.message);
+      setInviteLink(result.ok && "inviteUrl" in result && result.inviteUrl ? result.inviteUrl : "");
+
+      if (result.ok) {
+        setShowInviteBuilder(true);
+      }
+    });
+  }
+
+  async function handleCopyInviteLink() {
+    if (!inviteLink) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setInviteStatusMessage("Invite link copied to clipboard.");
+    } catch {
+      setInviteStatusMessage("Could not copy automatically. Copy the invite link manually.");
+    }
+  }
+
   return (
     <section className="panel-frame">
       <div className="panel-heading panel-heading--simple">
@@ -840,6 +952,15 @@ export function PersonnelPanel({
           <button type="button" className="ghost-button" onClick={handleAddEmployee}>
             Add employee
           </button>
+          {canManageInvites ? (
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setShowInviteBuilder((current) => !current)}
+            >
+              {showInviteBuilder ? "Hide invite builder" : "Invite account"}
+            </button>
+          ) : null}
           <button type="button" className="ghost-button" onClick={() => csvInputRef.current?.click()}>
             Import CSV
           </button>
@@ -872,6 +993,122 @@ export function PersonnelPanel({
           ) : null}
         </div>
       </div>
+
+      {canManageInvites && showInviteBuilder ? (
+        <section className="invite-builder">
+          <div className="invite-builder__header">
+            <div>
+              <strong>Create Account Invite</strong>
+              <p>
+                Generate a secure sign-up link that assigns the invited workspace profile on the server.
+              </p>
+            </div>
+            <div className="planner-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setInviteDraft(createInviteDraft());
+                  setInviteLink("");
+                  setInviteStatusMessage("");
+                }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+	          <div className="invite-builder__grid">
+            <label className="field">
+              <span>App role</span>
+              <select
+                value={inviteDraft.role}
+                onChange={(event) => handleInviteDraftChange("role", event.target.value as AppRole)}
+              >
+                <option value="worker">Worker</option>
+                {canInviteLeader ? <option value="leader">Leader</option> : null}
+                {canInviteAdmin ? <option value="admin">Admin</option> : null}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Link employee</span>
+              <select
+                value={inviteDraft.employeeId}
+                onChange={(event) => handleInviteDraftChange("employeeId", event.target.value)}
+              >
+                <option value="">None</option>
+                {employeeOptions.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {getEditableEmployeeDisplayName(employee)}{employee.email ? ` · ${employee.email}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>First Name</span>
+              <input
+                type="text"
+                value={inviteDraft.firstName}
+                onChange={(event) => handleInviteDraftChange("firstName", event.target.value)}
+              />
+            </label>
+
+            <label className="field">
+              <span>Last Name</span>
+              <input
+                type="text"
+                value={inviteDraft.lastName}
+                onChange={(event) => handleInviteDraftChange("lastName", event.target.value)}
+              />
+            </label>
+
+            <label className="field invite-builder__email">
+              <span>Email</span>
+              <input
+                type="email"
+                value={inviteDraft.email}
+                placeholder="you@company.com"
+                onChange={(event) => handleInviteDraftChange("email", event.target.value)}
+              />
+            </label>
+          </div>
+
+          <p className="toolbar-status">
+            {viewer.role === "leader"
+              ? "Leaders can send worker invites for linked employees on their own shift."
+              : inviteDraft.role === "admin"
+              ? "Admin invites can be standalone or linked to an employee."
+              : "Leader and worker invites should be linked to an employee so the correct shift and scope are assigned."}
+          </p>
+
+          <div className="invite-builder__actions">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleCreateInvite}
+              disabled={isCreatingInvite}
+            >
+              {isCreatingInvite ? "Creating invite..." : "Create invite"}
+            </button>
+            {inviteLink ? (
+              <button type="button" className="ghost-button" onClick={handleCopyInviteLink}>
+                Copy invite link
+              </button>
+            ) : null}
+          </div>
+
+          {inviteStatusMessage ? <p className="toolbar-status">{inviteStatusMessage}</p> : null}
+
+          {inviteLink ? (
+            <label className="field invite-builder__link">
+              <span>Invite Link</span>
+              <input type="text" readOnly value={inviteLink} />
+            </label>
+          ) : null}
+        </section>
+      ) : null}
 
       {pendingCsvImport ? (
         <section className="import-preview">

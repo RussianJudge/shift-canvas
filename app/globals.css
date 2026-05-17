@@ -2010,6 +2010,46 @@ select {
   text-transform: uppercase;
 }
 
+.invite-builder {
+  display: grid;
+  gap: 1rem;
+  margin-block: 1rem 1.25rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 1.1rem;
+  background: rgba(255, 250, 244, 0.82);
+}
+
+.invite-builder__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.invite-builder__header p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.invite-builder__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem 1rem;
+}
+
+.invite-builder__email,
+.invite-builder__link {
+  grid-column: 1 / -1;
+}
+
+.invite-builder__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .table-row--dirty td {
   background: rgba(255, 248, 235, 0.92);
 }
@@ -2956,6 +2996,14 @@ select {
 
   .panel-heading {
     padding: 1rem 1rem 0.8rem;
+  }
+
+  .invite-builder__header {
+    flex-direction: column;
+  }
+
+  .invite-builder__grid {
+    grid-template-columns: 1fr;
   }
 
   .workspace-toolbar,

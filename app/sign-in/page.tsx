@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ error?: string; notice?: string; mode?: string; email?: string }>;
+  searchParams?: Promise<{ error?: string; notice?: string; mode?: string; email?: string; invite?: string }>;
 }) {
   const session = await getAppSession();
 
@@ -23,6 +23,7 @@ export default async function SignInPage({
       error={resolvedSearchParams?.error}
       notice={resolvedSearchParams?.notice}
       initialEmail={resolvedSearchParams?.email}
+      inviteToken={resolvedSearchParams?.invite}
       initialMode={
         resolvedSearchParams?.mode === "create"
           ? "create"

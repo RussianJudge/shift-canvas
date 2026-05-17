@@ -54,6 +54,22 @@ function getErrorMessage(error: string | undefined) {
     return "Could not send a reset email. Check the address and try again.";
   }
 
+  if (error === "invite-invalid") {
+    return "That sign-up invite is not valid anymore. Ask an admin for a new link.";
+  }
+
+  if (error === "invite-expired") {
+    return "That sign-up invite has expired. Ask an admin for a new link.";
+  }
+
+  if (error === "invite-used") {
+    return "That sign-up invite has already been used.";
+  }
+
+  if (error === "invite-email-mismatch") {
+    return "Use the invited email address for this sign-up link.";
+  }
+
   if (error === "unknown-email") {
     return "That email does not have access yet.";
   }
@@ -111,11 +127,13 @@ export function SignInPanel({
   error,
   notice,
   initialEmail,
+  inviteToken,
   initialMode = "sign-in",
 }: {
   error?: string;
   notice?: string;
   initialEmail?: string;
+  inviteToken?: string;
   initialMode?: AuthMode;
 }) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
@@ -143,6 +161,8 @@ export function SignInPanel({
         </div>
 
         <form action={formAction} className="auth-form">
+          {isCreateMode && inviteToken ? <input type="hidden" name="inviteToken" value={inviteToken} /> : null}
+
           {isCreateMode ? (
             <div className="auth-name-grid">
               <label className="field">
