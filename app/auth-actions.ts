@@ -43,15 +43,28 @@ type AuthenticatedUser = {
 
 /** Builds the public URL Supabase should send users back to after auth emails. */
 async function getAuthRedirectOrigin() {
+  const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "");
+
+  if (configuredSiteUrl) {
+    return configuredSiteUrl;
+  }
+
   const headerStore = await headers();
+  const forwardedProto = headerStore.get("x-forwarded-proto");
+  const forwardedHost = headerStore.get("x-forwarded-host");
+  const host = headerStore.get("host");
   const requestOrigin = headerStore.get("origin");
 
   if (requestOrigin) {
-    return requestOrigin;
+    return requestOrigin.replace(/\/+$/, "");
   }
 
-  if (process.env.NEXT_PUBLIC_SITE_URL) {
-    return process.env.NEXT_PUBLIC_SITE_URL;
+  if (forwardedHost || host) {
+    const resolvedHost = forwardedHost ?? host ?? "";
+    const resolvedProtocol =
+      forwardedProto ?? (resolvedHost.includes("localhost") || resolvedHost.startsWith("127.0.0.1") ? "http" : "https");
+
+    return `${resolvedProtocol}://${resolvedHost}`.replace(/\/+$/, "");
   }
 
   if (process.env.VERCEL_URL) {
