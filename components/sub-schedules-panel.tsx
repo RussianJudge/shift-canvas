@@ -490,6 +490,7 @@ export function SubSchedulesPanel({
   const selectedSummaryTimeCode = activeSubSchedule
     ? snapshot.timeCodes.find((timeCode) => timeCode.id === activeSubSchedule.summaryTimeCodeId) ?? null
     : null;
+  const activeSubScheduleIssues = activeSubSchedule ? getSubScheduleIssues(activeSubSchedule) : [];
 
   function updateSubSchedule(
     subScheduleId: string,
@@ -698,7 +699,7 @@ export function SubSchedulesPanel({
       <section className="metrics-section subschedule-builder-section">
         <div className="metrics-section__header">
           <div className="metrics-section__title-group">
-            <h2 className="metrics-section__title">Definitions</h2>
+            <h2 className="metrics-section__title">Sub-Schedule</h2>
             <p className="toolbar-status">
               Summary codes project onto the main schedule automatically.
             </p>
@@ -732,85 +733,85 @@ export function SubSchedulesPanel({
           </div>
         </div>
 
-        <div className="personnel-table-wrap">
-          <table className="personnel-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Summary Code</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {subSchedules.map((subSchedule) => (
-                <tr
-                  key={subSchedule.id}
-                  className={`${dirtySubScheduleIds.has(subSchedule.id) ? "table-row--dirty" : ""} ${
-                    invalidSubScheduleIds.has(subSchedule.id) ? "table-row--invalid" : ""
-                  } ${selectedSubScheduleId === subSchedule.id ? "table-row--selected" : ""}`}
-                  onClick={() => setSelectedSubScheduleId(subSchedule.id)}
-                >
-                  <td>
-                    <input
-                      className="table-input"
-                      value={subSchedule.name}
-                      onChange={(event) =>
-                        updateSubSchedule(subSchedule.id, (current) => ({
-                          ...current,
-                          name: event.target.value,
-                        }))
-                      }
-                    />
-                  </td>
-                  <td>
-                    <select
-                      className="table-select"
-                      value={subSchedule.summaryTimeCodeId}
-                      onChange={(event) =>
-                        updateSubSchedule(subSchedule.id, (current) => ({
-                          ...current,
-                          summaryTimeCodeId: event.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">Select summary code</option>
-                      {projectedSummaryTimeCodes.map((timeCode) => (
-                        <option key={timeCode.id} value={timeCode.id}>
-                          {timeCode.code} · {timeCode.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <label className="subschedule-status-toggle">
-                      <input
-                        type="checkbox"
-                        checked={subSchedule.isArchived}
-                        onChange={(event) =>
-                          updateSubSchedule(subSchedule.id, (current) => ({
-                            ...current,
-                            isArchived: event.target.checked,
-                          }))
-                        }
-                      />
-                      <span>{subSchedule.isArchived ? "Archived" : "Active"}</span>
-                    </label>
-                  </td>
-                </tr>
-              ))}
-              {subSchedules.length === 0 ? (
-                <tr>
-                  <td colSpan={3}>
-                    <div className="empty-state">
-                      <strong>No sub-schedules yet.</strong>
-                      <span>Add one to start planning outage or event staffing.</span>
-                    </div>
-                  </td>
-                </tr>
+        {subSchedules.length === 0 ? (
+          <div className="empty-state">
+            <strong>No sub-schedules yet.</strong>
+            <span>Add one to start planning outage or event staffing.</span>
+          </div>
+        ) : activeSubSchedule ? (
+          <div className="workspace-toolbar workspace-toolbar--scheduler">
+            <label className="field">
+              <span>Sub-schedule</span>
+              <select
+                value={selectedSubScheduleId}
+                onChange={(event) => setSelectedSubScheduleId(event.target.value)}
+              >
+                {subSchedules.map((subSchedule) => (
+                  <option key={subSchedule.id} value={subSchedule.id}>
+                    {subSchedule.name}
+                    {subSchedule.isArchived ? " (Archived)" : ""}
+                    {dirtySubScheduleIds.has(subSchedule.id) ? " *" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Name</span>
+              <input
+                value={activeSubSchedule.name}
+                onChange={(event) =>
+                  updateSubSchedule(activeSubSchedule.id, (current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
+              />
+            </label>
+
+            <label className="field">
+              <span>Summary code</span>
+              <select
+                value={activeSubSchedule.summaryTimeCodeId}
+                onChange={(event) =>
+                  updateSubSchedule(activeSubSchedule.id, (current) => ({
+                    ...current,
+                    summaryTimeCodeId: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Select summary code</option>
+                {projectedSummaryTimeCodes.map((timeCode) => (
+                  <option key={timeCode.id} value={timeCode.id}>
+                    {timeCode.code} · {timeCode.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="subschedule-status-toggle">
+              <input
+                type="checkbox"
+                checked={activeSubSchedule.isArchived}
+                onChange={(event) =>
+                  updateSubSchedule(activeSubSchedule.id, (current) => ({
+                    ...current,
+                    isArchived: event.target.checked,
+                  }))
+                }
+              />
+              <span>{activeSubSchedule.isArchived ? "Archived" : "Active"}</span>
+            </label>
+
+            <div className="toolbar-status-wrap">
+              {activeSubScheduleIssues.length > 0 ? (
+                <p className="toolbar-status">{activeSubScheduleIssues[0]}</p>
+              ) : dirtySubScheduleIds.has(activeSubSchedule.id) ? (
+                <p className="toolbar-status">This sub-schedule has unsaved changes.</p>
               ) : null}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="metrics-section">
