@@ -104,18 +104,9 @@ function getMutualPostingDateWindowError(dates: string[]) {
 }
 
 function getMutualApplicationDateWindowError(dates: string[]) {
-  const today = getCurrentUtcDateKey();
-  const latestAllowedDate = getCurrentUtcYearEndDateKey();
+  const currentYear = getCurrentUtcYearKey();
 
-  if (dates.some((date) => date < today)) {
-    return "Mutual dates must be today or later.";
-  }
-
-  if (dates.some((date) => date > latestAllowedDate)) {
-    return "Mutual dates must be on or before the end of the current year.";
-  }
-
-  if (dates.some((date) => date.slice(0, 4) !== latestAllowedDate.slice(0, 4))) {
+  if (dates.some((date) => date.slice(0, 4) !== currentYear)) {
     return "Mutual applications must stay within the current year.";
   }
 

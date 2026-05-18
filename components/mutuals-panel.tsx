@@ -164,7 +164,7 @@ function MutualApplyModal({
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[selectedEmployeeId];
   const monthOptions = useMemo(
-    () => getCurrentUtcFutureYearMonthOptions(),
+    () => getCurrentUtcYearMonthOptions(),
     [],
   );
   const [offerMonth, setOfferMonth] = useState(monthOptions[0] ?? getCurrentUtcMonthKey());
@@ -173,13 +173,11 @@ function MutualApplyModal({
   const postingOwnerSchedule = postingOwner
     ? snapshot.schedules.find((entry) => entry.id === postingOwner.scheduleId) ?? null
     : null;
-  const minimumApplicationDate = new Date().toISOString().slice(0, 10);
   const availableDates =
     employee && schedule && postingOwnerSchedule
       ? getMonthDays(offerMonth)
           .filter(
             (day) =>
-              day.date >= minimumApplicationDate &&
               shiftForDate(schedule, day.date) !== "OFF" &&
               shiftForDate(postingOwnerSchedule, day.date) === "OFF",
           )
