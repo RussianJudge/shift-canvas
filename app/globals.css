@@ -971,7 +971,27 @@ select {
 }
 
 .workspace-toolbar--overtime {
-  grid-template-columns: repeat(5, minmax(10rem, 14rem)) minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.5rem), 1fr));
+  align-items: end;
+}
+
+.workspace-toolbar--overtime .planner-actions,
+.workspace-toolbar--overtime .toolbar-status-wrap {
+  grid-column: 1 / -1;
+}
+
+.workspace-toolbar--overtime .field,
+.workspace-toolbar--overtime .field--static,
+.workspace-toolbar--overtime .toolbar-actions {
+  min-width: 0;
+}
+
+.workspace-toolbar--overtime .toolbar-actions {
+  justify-content: flex-start;
+}
+
+.workspace-toolbar--overtime .toolbar-status-wrap {
+  justify-content: flex-start;
 }
 
 .workspace-toolbar--metrics {

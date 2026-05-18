@@ -1392,7 +1392,14 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     return emptySnapshot(month);
   }
 
-  const [competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult] = await Promise.all([
+  const [
+    competenciesResult,
+    schedulesResult,
+    employeesResult,
+    employeeCompetenciesResult,
+    subSchedulesResult,
+    subScheduleCompetenciesResult,
+  ] = await Promise.all([
     applySessionScope(
       supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
       session,
@@ -1414,6 +1421,20 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
       supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
       session,
     ),
+    applySessionScope(
+      supabase
+        .from("sub_schedules")
+        .select("id, name, summary_time_code_id, is_archived, company_id, site_id, business_area_id"),
+      session,
+    )
+      .order("is_archived")
+      .order("name"),
+    applySessionScope(
+      supabase
+        .from("sub_schedule_competencies")
+        .select("sub_schedule_id, competency_id, company_id, site_id, business_area_id"),
+      session,
+    ),
   ]);
 
   logSnapshotQueryErrors("Competencies snapshot", [
@@ -1421,6 +1442,8 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     ["schedules", schedulesResult.error],
     ["employees", employeesResult.error],
     ["employee_competencies", employeeCompetenciesResult.error],
+    ["sub_schedules", subSchedulesResult.error],
+    ["sub_schedule_competencies", subScheduleCompetenciesResult.error],
   ]);
 
   const employeesBySchedule = buildEmployeesBySchedule(
@@ -1439,7 +1462,10 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     overtimeClaims: [],
     manualOvertimePostings: [],
     completedSets: [],
-    subSchedules: [],
+    subSchedules: mapSubSchedules(
+      (subSchedulesResult.data as SubScheduleRow[] | null) ?? [],
+      (subScheduleCompetenciesResult.data as SubScheduleCompetencyRow[] | null) ?? [],
+    ),
     subScheduleAssignments: [],
   };
 }
