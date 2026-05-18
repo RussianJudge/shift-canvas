@@ -26,7 +26,7 @@ type EditableCompetency = {
   qualifiedEmployeeCount: number;
 };
 
-type ScheduleTargetKey = `schedule:${string}` | `sub:${string}`;
+type ScheduleTargetKey = "main" | `sub:${string}`;
 
 function cloneCompetencies(competencies: EditableCompetency[]) {
   return competencies.map((competency) => ({ ...competency }));
@@ -66,8 +66,8 @@ function getCompetencyIssues(competency: EditableCompetency) {
 }
 
 function buildInitialTargetKey(snapshot: SchedulerSnapshot): ScheduleTargetKey | "" {
-  if (snapshot.schedules[0]?.id) {
-    return `schedule:${snapshot.schedules[0].id}`;
+  if (snapshot.schedules.length > 0) {
+    return "main";
   }
 
   if (snapshot.subSchedules[0]?.id) {
@@ -118,7 +118,7 @@ export function CompetenciesPanel({
     setSelectedTargetKey((current) => {
       if (
         current &&
-        (snapshot.schedules.some((schedule) => `schedule:${schedule.id}` === current) ||
+        ((current === "main" && snapshot.schedules.length > 0) ||
           snapshot.subSchedules.some((subSchedule) => `sub:${subSchedule.id}` === current))
       ) {
         return current;
@@ -128,15 +128,16 @@ export function CompetenciesPanel({
     });
   }, [snapshot.schedules, snapshot.subSchedules]);
 
-  const selectedScheduleId = selectedTargetKey.startsWith("schedule:") ? selectedTargetKey.slice("schedule:".length) : "";
   const selectedSubScheduleId = selectedTargetKey.startsWith("sub:") ? selectedTargetKey.slice("sub:".length) : "";
-  const selectedSchedule = snapshot.schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
   const selectedSubSchedule = snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleId) ?? null;
-  const selectedTargetLabel = selectedSchedule
-    ? `Shift ${selectedSchedule.name}`
+  const selectedTargetLabel = selectedTargetKey === "main"
+    ? "Main schedule"
     : selectedSubSchedule?.name ?? null;
   const selectedTargetIsArchived = selectedSubSchedule?.isArchived ?? false;
-  const selectedTargetCompetencyIds = selectedSchedule?.competencyIds ?? selectedSubSchedule?.competencyIds ?? [];
+  const selectedTargetCompetencyIds =
+    selectedTargetKey === "main"
+      ? Array.from(new Set(snapshot.schedules.flatMap((schedule) => schedule.competencyIds)))
+      : selectedSubSchedule?.competencyIds ?? [];
   const [baselineTargetCompetencyIds, setBaselineTargetCompetencyIds] = useState<string[]>(
     selectedTargetCompetencyIds,
   );
@@ -256,20 +257,30 @@ export function CompetenciesPanel({
   }
 
   function handleSaveAvailability() {
-    if (!selectedSchedule && !selectedSubSchedule) {
+    if (selectedTargetKey !== "main" && !selectedSubSchedule) {
       setStatusMessage("Select a schedule first.");
       return;
     }
 
-    if (selectedSchedule) {
+    if (selectedTargetKey === "main") {
       startScheduleSaveTransition(async () => {
-        const result = await saveScheduleCompetencies({
-          scheduleId: selectedSchedule.id,
-          competencyIds: draftTargetCompetencyIds,
-        } as SaveScheduleCompetenciesInput);
-        setStatusMessage(result.message);
+        const results = await Promise.all(
+          snapshot.schedules.map((schedule) =>
+            saveScheduleCompetencies({
+              scheduleId: schedule.id,
+              competencyIds: draftTargetCompetencyIds,
+            } as SaveScheduleCompetenciesInput),
+          ),
+        );
+        const failedResult = results.find((result) => !result.ok);
 
-        if (result.ok) {
+        if (failedResult) {
+          setStatusMessage(failedResult.message);
+          return;
+        }
+
+        setStatusMessage("Main schedule competencies saved.");
+        if (results.length > 0) {
           setBaselineTargetCompetencyIds([...draftTargetCompetencyIds]);
         }
       });
@@ -345,13 +356,7 @@ export function CompetenciesPanel({
                     setStatusMessage("");
                   }}
                 >
-                  <optgroup label="Main schedules">
-                    {snapshot.schedules.map((schedule) => (
-                      <option key={`schedule:${schedule.id}`} value={`schedule:${schedule.id}`}>
-                        Shift {schedule.name}
-                      </option>
-                    ))}
-                  </optgroup>
+                  {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}
                   <optgroup label="Sub-schedules">
                     {snapshot.subSchedules.map((subSchedule) => (
                       <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
@@ -400,7 +405,9 @@ export function CompetenciesPanel({
             <p className="toolbar-status">
               {selectedTargetIsArchived
                 ? "Archived sub-schedules stay visible for history but their competency set is read-only."
-                : `Choose which competencies ${selectedTargetLabel} can use in its builder and overtime board.`}
+                : selectedTargetKey === "main"
+                  ? "Choose which competencies the main schedule can use across its builder and overtime board."
+                  : `Choose which competencies ${selectedTargetLabel} can use in its builder and overtime board.`}
             </p>
           ) : null}
         </div>

@@ -60,6 +60,7 @@ type ScheduleRow = {
   day_shift_days: number;
   night_shift_days: number;
   off_days: number;
+  is_active: boolean | null;
   company_id: string;
   site_id: string;
   business_area_id: string;
@@ -613,6 +614,7 @@ function mapSchedules(
     dayShiftDays: row.day_shift_days,
     nightShiftDays: row.night_shift_days,
     offDays: row.off_days,
+    isActive: row.is_active ?? true,
     employees: employeesBySchedule[row.id] ?? [],
     competencyIds: competencyIdsBySchedule[row.id] ?? [],
     companyId: row.company_id,
@@ -702,7 +704,7 @@ async function getScopedSchedulesWithEmployees(
   const { includeEmployeeCompetencies = false } = options;
   const [schedulesResult, employeesResult, employeeCompetenciesResult, scheduleCompetenciesResult] = await Promise.all([
     applySessionScope(
-      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, is_active, company_id, site_id, business_area_id"),
       session,
     ).order("name"),
     applySessionScope(
@@ -811,7 +813,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       session,
     ),
     applySessionScope(
-      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, is_active, company_id, site_id, business_area_id"),
       session,
     ).order("name"),
     applySessionScope(
@@ -1063,7 +1065,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
         session,
       ).order("code"),
       applySessionScope(
-        supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+        supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, is_active, company_id, site_id, business_area_id"),
         session,
       ).order("name"),
       applySessionScope(
@@ -1283,7 +1285,7 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
           .order("sub_schedule_id"),
       ),
       applySessionScope(
-        supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+        supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, is_active, company_id, site_id, business_area_id"),
         session,
       ).order("name"),
       applySessionScope(
@@ -1458,7 +1460,7 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
       session,
     ).order("code"),
     applySessionScope(
-      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
+      supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, is_active, company_id, site_id, business_area_id"),
       session,
     ).order("name"),
     applySessionScope(

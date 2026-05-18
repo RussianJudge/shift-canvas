@@ -523,6 +523,29 @@ function getTimeCodeDisplayCode(timeCode: TimeCode | undefined, notes: string | 
   return noteDigits ? `${baseCode}${noteDigits}` : baseCode;
 }
 
+function isOvertimeManagedSelection(selection: AssignmentSelection) {
+  return Boolean(selection.notes?.startsWith("OT|"));
+}
+
+function getScheduleCellComment({
+  notes,
+  employeeName,
+  employeeMap,
+}: {
+  notes: string | null;
+  employeeName: string;
+  employeeMap: Record<string, Employee>;
+}) {
+  const parsedMutual = parseMutualAssignmentNote(notes);
+
+  if (parsedMutual.partnerEmployeeId) {
+    const partnerName = employeeMap[parsedMutual.partnerEmployeeId]?.name ?? "their mutual partner";
+    return `${employeeName} working for ${partnerName}`;
+  }
+
+  return notes ?? undefined;
+}
+
 function getSelectionCode(
   selection: AssignmentSelection,
   competencyMap: Record<string, Competency>,
@@ -749,6 +772,7 @@ function AssignmentModal({
   onApply,
   onClear,
   onClose,
+  clearDisabledReason,
 }: {
   selectedEmployee: DisplayEmployee | null;
   selectedDate: string | null;
@@ -759,6 +783,7 @@ function AssignmentModal({
   onApply: (selection: AssignmentSelection) => void;
   onClear: () => void;
   onClose: () => void;
+  clearDisabledReason?: string | null;
 }) {
   if (!selectedEmployee || !selectedDate) {
     return null;
@@ -857,10 +882,12 @@ function AssignmentModal({
         </div>
 
         <div className="assignment-modal__footer">
+          {clearDisabledReason ? <p className="toolbar-status">{clearDisabledReason}</p> : null}
           <button
             type="button"
             className="ghost-button"
             onClick={onClear}
+            disabled={Boolean(clearDisabledReason)}
           >
             Clear assignment
           </button>
@@ -1274,6 +1301,9 @@ export function MonthlyScheduler({
           snapshot.timeCodes,
         )
       : { competencyId: null, timeCodeId: null, notes: null };
+  const editorClearDisabledReason = isOvertimeManagedSelection(editorSelection)
+    ? "This cell came from an overtime posting. Release it from the Overtime page instead of clearing it here."
+    : null;
   const editorEmployeeCompetencies = editorEmployee
     ? editorEmployee.competencyIds
         .filter((competencyId) => activeSchedule?.competencyIds.includes(competencyId))
@@ -1689,11 +1719,26 @@ export function MonthlyScheduler({
 
     const shiftKind = shiftForDate(employeeSchedule, date);
     const defaultSelection = getDefaultSelection(shiftKind, snapshot.timeCodes);
+    const currentSelection = getSelectionForCell(
+      activeSchedule.id,
+      employeeId,
+      date,
+      shiftKind,
+      draftAssignments,
+      snapshot.timeCodes,
+    );
     const key = createAssignmentKey(activeSchedule.id, employeeId, date);
     const shouldResetToDefault =
       defaultSelection.competencyId === selection.competencyId &&
       defaultSelection.timeCodeId === selection.timeCodeId &&
       defaultSelection.notes === selection.notes;
+
+    if (shouldResetToDefault && isOvertimeManagedSelection(currentSelection)) {
+      setStatusMessage(
+        "Overtime-filled cells must be released from the Overtime page before they can be cleared here.",
+      );
+      return;
+    }
 
     startTransition(() => {
       setDraftAssignments((current) => {
@@ -2388,6 +2433,7 @@ export function MonthlyScheduler({
               competencyMap={competencyMap}
               timeCodeMap={timeCodeMap}
               timeCodes={snapshot.timeCodes}
+              employeeMap={employeeMap}
               completedSetDates={completedSetDates}
               selectedCell={selectedCell}
               dragRange={dragRange}
@@ -2439,6 +2485,7 @@ export function MonthlyScheduler({
           selection={editorSelection}
           competencies={editorEmployeeCompetencies}
           timeCodes={manualEntryTimeCodes}
+          clearDisabledReason={editorClearDisabledReason}
           onApply={(selection) => {
             if (!editorCell) {
               return;
@@ -2475,6 +2522,7 @@ function EmployeeRow({
   competencyMap,
   timeCodeMap,
   timeCodes,
+  employeeMap,
   completedSetDates,
   selectedCell,
   dragRange,
@@ -2496,6 +2544,7 @@ function EmployeeRow({
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
   timeCodes: TimeCode[];
+  employeeMap: Record<string, Employee>;
   completedSetDates: Set<string>;
   selectedCell: SelectedCell | null;
   dragRange: DragRange | null;
@@ -2591,7 +2640,11 @@ function EmployeeRow({
           activeCompetency?.id === selectedCoverageCompetencyId;
         const cellTitle = isProjectedCell
           ? `${projectedAssignment?.subScheduleName ?? "Sub-schedule"} manages this cell`
-          : selection.notes ?? undefined;
+          : getScheduleCellComment({
+              notes: selection.notes,
+              employeeName: employee.name,
+              employeeMap,
+            });
 
         return (
           <div

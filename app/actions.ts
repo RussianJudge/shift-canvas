@@ -81,6 +81,47 @@ function hasValidShiftPattern(dayShiftDays: number, nightShiftDays: number, offD
     dayShiftDays + nightShiftDays + offDays > 0;
 }
 
+function getCurrentUtcDateKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getCurrentUtcYearKey() {
+  return new Date().toISOString().slice(0, 4);
+}
+
+function getCurrentUtcYearEndDateKey() {
+  return `${getCurrentUtcYearKey()}-12-31`;
+}
+
+function getMutualPostingDateWindowError(dates: string[]) {
+  const currentYear = getCurrentUtcYearKey();
+
+  if (dates.some((date) => date.slice(0, 4) !== currentYear)) {
+    return "Mutual postings must use dates from the current year.";
+  }
+
+  return null;
+}
+
+function getMutualApplicationDateWindowError(dates: string[]) {
+  const today = getCurrentUtcDateKey();
+  const latestAllowedDate = getCurrentUtcYearEndDateKey();
+
+  if (dates.some((date) => date < today)) {
+    return "Mutual dates must be today or later.";
+  }
+
+  if (dates.some((date) => date > latestAllowedDate)) {
+    return "Mutual dates must be on or before the end of the current year.";
+  }
+
+  if (dates.some((date) => date.slice(0, 4) !== latestAllowedDate.slice(0, 4))) {
+    return "Mutual applications must stay within the current year.";
+  }
+
+  return null;
+}
+
 /** Converts a scoped session into the database column payload used on inserts. */
 function toDatabaseScope(scope: ActionScope) {
   return {
@@ -518,9 +559,23 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     };
   }
 
-  const scopeMonth = input.updates[0]?.date.slice(0, 7);
-  const scopedSnapshot = scopeMonth ? await getSchedulerSnapshot(scopeMonth, session) : null;
-  const scopedEmployeeMap = scopedSnapshot ? getEmployeeMap(scopedSnapshot.schedules) : {};
+  const touchedMonths = Array.from(new Set(input.updates.map((update) => update.date.slice(0, 7))));
+  const scopedSnapshots = await Promise.all(touchedMonths.map((month) => getSchedulerSnapshot(month, session)));
+  const scopedEmployeeMap = scopedSnapshots.reduce<Record<string, ReturnType<typeof getEmployeeMap>[string]>>(
+    (map, snapshot) => ({
+      ...map,
+      ...getEmployeeMap(snapshot.schedules),
+    }),
+    {},
+  );
+  const scopedAssignmentMap = new Map(
+    scopedSnapshots.flatMap((snapshot) =>
+      snapshot.assignments.map((assignment) => [
+        createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date),
+        assignment,
+      ] as const),
+    ),
+  );
 
   const rowsToUpsert = input.updates
     .filter((update) => update.competencyId || update.timeCodeId || (update.notes?.trim().length ?? 0) > 0)
@@ -553,6 +608,22 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
       employee_id: update.employeeId,
       assignment_date: update.date,
     }));
+
+  const overtimeDeleteTargets = rowsToDelete.filter((row) => {
+    const existingAssignment = scopedAssignmentMap.get(
+      createAssignmentKey(row.schedule_id, row.employee_id, row.assignment_date),
+    );
+
+    return Boolean(parseOvertimeAssignmentNote(existingAssignment?.notes).claimantEmployeeId);
+  });
+
+  if (overtimeDeleteTargets.length > 0) {
+    return {
+      ok: false,
+      message:
+        "Overtime-filled cells cannot be cleared from the schedule directly. Release the posting from the Overtime page instead.",
+    };
+  }
 
   /**
    * The home/original schedule is the source of truth for borrowed work. If a
@@ -1803,6 +1874,15 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
     };
   }
 
+  const mutualDateWindowError = getMutualPostingDateWindowError(dates);
+
+  if (mutualDateWindowError) {
+    return {
+      ok: false,
+      message: mutualDateWindowError,
+    };
+  }
+
   const month = dates[0].slice(0, 7);
 
   const snapshot = await getSchedulerSnapshot(month, session);
@@ -2186,6 +2266,15 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     return {
       ok: false,
       message: "Your application must offer the same number of shifts as the original posting.",
+    };
+  }
+
+  const mutualDateWindowError = getMutualApplicationDateWindowError(dates);
+
+  if (mutualDateWindowError) {
+    return {
+      ok: false,
+      message: mutualDateWindowError,
     };
   }
 
@@ -3207,6 +3296,7 @@ export async function saveSchedules(input: SaveSchedulesInput) {
     day_shift_days: update.dayShiftDays,
     night_shift_days: update.nightShiftDays,
     off_days: update.offDays,
+    is_active: update.isActive,
     ...toDatabaseScope(sessionScope),
   }));
 

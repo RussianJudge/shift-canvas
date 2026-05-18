@@ -70,6 +70,7 @@ export interface Schedule extends OrganizationScope {
   dayShiftDays: number;
   nightShiftDays: number;
   offDays: number;
+  isActive: boolean;
   employees: Employee[];
   competencyIds: string[];
 }
@@ -301,6 +302,7 @@ export interface ScheduleUpdate {
   dayShiftDays: number;
   nightShiftDays: number;
   offDays: number;
+  isActive: boolean;
 }
 
 export interface SaveSchedulesInput {

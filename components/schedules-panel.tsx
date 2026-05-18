@@ -12,6 +12,7 @@ type EditableSchedule = {
   dayShiftDays: number;
   nightShiftDays: number;
   offDays: number;
+  isActive: boolean;
   employeeCount: number;
 };
 
@@ -29,6 +30,7 @@ function normalizeSchedule(schedule: EditableSchedule): ScheduleUpdate {
     dayShiftDays: schedule.dayShiftDays,
     nightShiftDays: schedule.nightShiftDays,
     offDays: schedule.offDays,
+    isActive: schedule.isActive,
   };
 }
 
@@ -71,6 +73,7 @@ export function SchedulesPanel({
         dayShiftDays: schedule.dayShiftDays,
         nightShiftDays: schedule.nightShiftDays,
         offDays: schedule.offDays,
+        isActive: schedule.isActive,
         employeeCount: schedule.employees.length,
       })),
     [snapshot],
@@ -130,6 +133,7 @@ export function SchedulesPanel({
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      isActive: true,
       employeeCount: 0,
     };
 
@@ -231,6 +235,7 @@ export function SchedulesPanel({
               <th>Off days</th>
               <th>Cycle</th>
               <th>Employees</th>
+              <th>Status</th>
               <th />
             </tr>
           </thead>
@@ -317,7 +322,24 @@ export function SchedulesPanel({
                 </td>
                 <td>{schedule.employeeCount}</td>
                 <td>
+                  <span className={`legend-pill ${schedule.isActive ? "legend-pill--teal" : "legend-pill--slate"}`}>
+                    {schedule.isActive ? "Active" : "Inactive"}
+                  </span>
+                </td>
+                <td>
                   <div className="table-actions-cell">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() =>
+                        updateSchedule(schedule.id, (current) => ({
+                          ...current,
+                          isActive: !current.isActive,
+                        }))
+                      }
+                    >
+                      {schedule.isActive ? "Set inactive" : "Set active"}
+                    </button>
                     {invalidScheduleIds.has(schedule.id) ? (
                       <p className="row-issue">{getScheduleIssues(schedule).join(" · ")}</p>
                     ) : null}
@@ -340,7 +362,7 @@ export function SchedulesPanel({
             ))}
             {schedules.length === 0 ? (
               <tr>
-                <td colSpan={8}>
+                  <td colSpan={9}>
                   <div className="empty-state">
                     <strong>No shifts yet.</strong>
                     <span>Add a shift to start building rotations.</span>

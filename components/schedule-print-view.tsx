@@ -87,6 +87,25 @@ function getSelectionCode(
   return "";
 }
 
+function getScheduleCellComment({
+  notes,
+  employeeName,
+  employeeMap,
+}: {
+  notes: string | null | undefined;
+  employeeName: string;
+  employeeMap: Record<string, Employee>;
+}) {
+  const parsedMutual = parseMutualAssignmentNote(notes);
+
+  if (parsedMutual.partnerEmployeeId) {
+    const partnerName = employeeMap[parsedMutual.partnerEmployeeId]?.name ?? "their mutual partner";
+    return `${employeeName} working for ${partnerName}`;
+  }
+
+  return notes ?? undefined;
+}
+
 function getSelectionForCell(
   scheduleId: string,
   employeeId: string,
@@ -258,6 +277,7 @@ function PrintScheduleSheet({
   projectedAssignmentIndex,
   competencyMap,
   timeCodeMap,
+  employeeMap,
   employees,
 }: {
   schedule: Schedule;
@@ -266,6 +286,7 @@ function PrintScheduleSheet({
   projectedAssignmentIndex: Record<string, SchedulerSnapshot["projectedAssignments"][number]>;
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
+  employeeMap: Record<string, Employee>;
   employees: DisplayEmployee[];
 }) {
   const monthDays = getMonthDays(monthKey);
@@ -338,10 +359,18 @@ function PrintScheduleSheet({
                 const selectionCode = isBorrowedCellVisible
                   ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)
                   : "";
+                const cellTitle = projectedAssignment
+                  ? `${projectedAssignment.subScheduleName ?? "Sub-schedule"} manages this cell`
+                  : getScheduleCellComment({
+                      notes: selection.notes,
+                      employeeName: employee.name,
+                      employeeMap,
+                    });
 
                 return (
                   <div
                     key={`print-cell-${schedule.id}-${employee.rowId}-${day.date}`}
+                    title={cellTitle}
                   className={`shift-cell print-cell shift-cell--${getShiftTone(shiftKind)} ${
                     day.isWeekend ? "shift-cell--weekend" : ""
                   } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
@@ -399,6 +428,7 @@ export function SchedulePrintView({
           projectedAssignmentIndex={projectedAssignmentIndex}
           competencyMap={competencyMap}
           timeCodeMap={timeCodeMap}
+          employeeMap={employeeMap}
           employees={buildDisplayEmployeesForSchedule({
             schedule,
             snapshot,

@@ -21,6 +21,25 @@ import {
 } from "@/lib/scheduling";
 import type { AppSession, MutualShiftPosting, MutualsSnapshot, ShiftKind } from "@/lib/types";
 
+function getCurrentUtcMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function getCurrentUtcYearMonthOptions() {
+  const currentYear = Number.parseInt(new Date().toISOString().slice(0, 4), 10);
+
+  return Array.from({ length: 12 }, (_, index) => {
+    const month = `${index + 1}`.padStart(2, "0");
+    return `${currentYear}-${month}`;
+  });
+}
+
+function getCurrentUtcFutureYearMonthOptions() {
+  const currentMonth = getCurrentUtcMonthKey();
+
+  return getCurrentUtcYearMonthOptions().filter((month) => month >= currentMonth);
+}
+
 /** Formats a mutual date chip using the short month/day style used throughout the app. */
 function formatShortDate(isoDate: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -144,26 +163,32 @@ function MutualApplyModal({
 
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[selectedEmployeeId];
-  const [offerMonth, setOfferMonth] = useState(snapshot.month);
+  const monthOptions = useMemo(
+    () => getCurrentUtcFutureYearMonthOptions(),
+    [],
+  );
+  const [offerMonth, setOfferMonth] = useState(monthOptions[0] ?? getCurrentUtcMonthKey());
   const schedule = employee ? snapshot.schedules.find((entry) => entry.id === employee.scheduleId) ?? null : null;
   const postingOwner = employeeMap[posting.ownerEmployeeId];
   const postingOwnerSchedule = postingOwner
     ? snapshot.schedules.find((entry) => entry.id === postingOwner.scheduleId) ?? null
     : null;
-  const monthOptions = useMemo(
-    () => Array.from({ length: 6 }, (_, index) => shiftMonthKey(snapshot.month, index)),
-    [snapshot.month],
-  );
+  const minimumApplicationDate = new Date().toISOString().slice(0, 10);
   const availableDates =
     employee && schedule && postingOwnerSchedule
       ? getMonthDays(offerMonth)
           .filter(
             (day) =>
+              day.date >= minimumApplicationDate &&
               shiftForDate(schedule, day.date) !== "OFF" &&
               shiftForDate(postingOwnerSchedule, day.date) === "OFF",
           )
           .map((day) => ({ date: day.date, shiftKind: shiftForDate(schedule, day.date) }))
       : [];
+
+  useEffect(() => {
+    setOfferMonth((current) => (monthOptions.includes(current) ? current : monthOptions[0] ?? getCurrentUtcMonthKey()));
+  }, [monthOptions]);
 
   return createPortal(
     <div className="assignment-modal-backdrop" onClick={onClose}>
@@ -273,7 +298,11 @@ export function MutualsPanel({
   const [selectedPostingEmployeeId, setSelectedPostingEmployeeId] = useState(
     canPostForOthers ? allEmployees[0]?.id ?? "" : viewer.employeeId ?? "",
   );
-  const [postingMonth, setPostingMonth] = useState(snapshot.month);
+  const postingMonthOptions = useMemo(
+    () => getCurrentUtcYearMonthOptions(),
+    [],
+  );
+  const [postingMonth, setPostingMonth] = useState(postingMonthOptions[0] ?? getCurrentUtcMonthKey());
   const [postingDates, setPostingDates] = useState<string[]>([]);
   const [applyPostingId, setApplyPostingId] = useState<string | null>(null);
   const [applicationEmployeeId, setApplicationEmployeeId] = useState(
@@ -287,10 +316,6 @@ export function MutualsPanel({
   const selectedPostingSchedule = selectedPostingEmployee
     ? snapshot.schedules.find((entry) => entry.id === selectedPostingEmployee.scheduleId) ?? null
     : null;
-  const postingMonthOptions = useMemo(
-    () => Array.from({ length: 6 }, (_, index) => shiftMonthKey(snapshot.month, index)),
-    [snapshot.month],
-  );
   const postingShiftDates =
     selectedPostingEmployee && selectedPostingSchedule
       ? getMonthDays(postingMonth)
@@ -310,6 +335,12 @@ export function MutualsPanel({
     setViewSnapshot(snapshot);
     setViewMonth(snapshot.month);
   }, [snapshot]);
+
+  useEffect(() => {
+    setPostingMonth((current) =>
+      postingMonthOptions.includes(current) ? current : postingMonthOptions[0] ?? getCurrentUtcMonthKey(),
+    );
+  }, [postingMonthOptions]);
 
   function syncMonthInUrl(nextMonth: string) {
     if (typeof window === "undefined") {
