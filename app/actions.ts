@@ -15,10 +15,11 @@ import type {
   ReleaseOvertimePostingInput,
   SaveAssignmentsInput,
   SaveCompetenciesInput,
-  SavePersonnelInput,
-  SaveSchedulesInput,
-  SaveSubScheduleAssignmentsInput,
-  SaveSubSchedulesInput,
+    SavePersonnelInput,
+    SaveSchedulesInput,
+    SaveSubScheduleAssignmentsInput,
+    SaveSubScheduleCompetenciesInput,
+    SaveSubSchedulesInput,
   SaveTimeCodesInput,
   SetScheduleCompletionInput,
   ShiftKind,
@@ -418,9 +419,13 @@ async function removeStaleOvertimeClaims(
       continue;
     }
 
+    const mainScheduleClaimsToRemove = claimsToRemove.filter(
+      (claim): claim is (typeof claimsToRemove)[number] & { scheduleId: string } => Boolean(claim.scheduleId),
+    );
+
     const restoreResult = await restoreSwappedAssignmentsForClaims(
       supabase,
-      claimsToRemove.map((claim) => ({
+      mainScheduleClaimsToRemove.map((claim) => ({
         scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
@@ -449,7 +454,7 @@ async function removeStaleOvertimeClaims(
 
     const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
       supabase,
-      claimsToRemove.map((claim) => ({
+      mainScheduleClaimsToRemove.map((claim) => ({
         scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
@@ -1000,19 +1005,38 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
 
   const month = monthKeys[0] ?? "";
   const snapshot = await getSchedulerSnapshot(month, session);
-  const schedule = getScheduleById(snapshot, input.scheduleId);
+  const targetScheduleId = input.scheduleId ?? null;
+  const targetSubScheduleId = input.subScheduleId ?? null;
+  const schedule = targetScheduleId ? getScheduleById(snapshot, targetScheduleId) : null;
+  const subSchedule = targetSubScheduleId
+    ? snapshot.subSchedules.find((entry) => entry.id === targetSubScheduleId) ?? null
+    : null;
   const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
 
-  if (!schedule || !competency) {
+  if ((targetScheduleId ? 1 : 0) + (targetSubScheduleId ? 1 : 0) !== 1) {
     return {
       ok: false,
-      message: "Could not find the selected team or competency.",
+      message: "Choose exactly one target: either a main schedule or a sub-schedule.",
     };
   }
 
-  const shiftKinds = dates.map((date) => shiftForDate(schedule, date));
+  if ((!schedule && !subSchedule) || !competency) {
+    return {
+      ok: false,
+      message: "Could not find the selected target or competency.",
+    };
+  }
 
-  if (shiftKinds.some((shiftKind) => shiftKind === "OFF")) {
+  if (subSchedule && !subSchedule.competencyIds.includes(competency.id)) {
+    return {
+      ok: false,
+      message: "That competency is not enabled for the selected sub-schedule.",
+    };
+  }
+
+  const shiftKinds = schedule ? dates.map((date) => shiftForDate(schedule, date)) : dates.map(() => "DAY" as const);
+
+  if (schedule && shiftKinds.some((shiftKind) => shiftKind === "OFF")) {
     return {
       ok: false,
       message: "Manual overtime postings can only be created on worked schedule days.",
@@ -1030,7 +1054,8 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
 
   const duplicatePosting = snapshot.manualOvertimePostings.some(
     (posting) =>
-      posting.scheduleId === input.scheduleId &&
+      posting.scheduleId === targetScheduleId &&
+      (posting.subScheduleId ?? null) === targetSubScheduleId &&
       posting.competencyId === input.competencyId &&
       posting.dates.length === dates.length &&
       posting.dates.every((date, index) => date === dates[index]),
@@ -1044,14 +1069,15 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   }
 
   const postingScope = {
-    companyId: schedule.companyId ?? sessionScope.companyId,
-    siteId: schedule.siteId ?? sessionScope.siteId,
-    businessAreaId: schedule.businessAreaId ?? sessionScope.businessAreaId,
+    companyId: schedule?.companyId ?? subSchedule?.companyId ?? sessionScope.companyId,
+    siteId: schedule?.siteId ?? subSchedule?.siteId ?? sessionScope.siteId,
+    businessAreaId: schedule?.businessAreaId ?? subSchedule?.businessAreaId ?? sessionScope.businessAreaId,
   };
 
   const { error } = await supabase.from("manual_overtime_postings").insert({
     id: `manual-ot-${crypto.randomUUID()}`,
-    schedule_id: schedule.id,
+    schedule_id: schedule?.id ?? null,
+    sub_schedule_id: subSchedule?.id ?? null,
     competency_id: competency.id,
     month_key: month,
     shift_kind: uniqueShiftKinds[0],
@@ -1067,10 +1093,11 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   }
 
   revalidatePath("/overtime");
+  revalidatePath("/sub-schedules");
 
   return {
     ok: true,
-    message: `Manual overtime posting created for ${competency.code}.`,
+    message: `Manual overtime posting created for ${competency.code}${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
   };
 }
 
@@ -1098,7 +1125,7 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
 
   const { data: posting, error: postingError } = await supabase
     .from("manual_overtime_postings")
-    .select("id, company_id, site_id, business_area_id")
+    .select("id, sub_schedule_id, company_id, site_id, business_area_id")
     .eq("id", input.postingId)
     .maybeSingle();
 
@@ -1152,6 +1179,9 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
   }
 
   revalidatePath("/overtime");
+  if ((posting as { sub_schedule_id?: string | null }).sub_schedule_id) {
+    revalidatePath("/sub-schedules");
+  }
 
   return {
     ok: true,
@@ -1198,12 +1228,25 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     };
   }
 
+  const targetScheduleId = input.scheduleId ?? null;
+  const targetSubScheduleId = input.subScheduleId ?? null;
+
+  if ((targetScheduleId ? 1 : 0) + (targetSubScheduleId ? 1 : 0) !== 1) {
+    return {
+      ok: false,
+      message: "Choose exactly one overtime target: either a main schedule or a sub-schedule.",
+    };
+  }
+
   const month = normalizedDates[0]?.slice(0, 7);
   const snapshot = await getSchedulerSnapshot(month, session);
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
-  const targetSchedule = getScheduleById(snapshot, input.scheduleId);
+  const targetSchedule = targetScheduleId ? getScheduleById(snapshot, targetScheduleId) : null;
+  const targetSubSchedule = targetSubScheduleId
+    ? snapshot.subSchedules.find((entry) => entry.id === targetSubScheduleId) ?? null
+    : null;
   const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
   const coverageCompetencyId = input.coverageCompetencyId ?? input.competencyId;
   const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
@@ -1212,7 +1255,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     ? snapshot.manualOvertimePostings.find((posting) => posting.id === input.manualPostingId)
     : null;
 
-  if (!employee || !employeeSchedule || !competency || !coverageCompetency || !targetSchedule) {
+  if (!employee || !employeeSchedule || !competency || !coverageCompetency || (!targetSchedule && !targetSubSchedule)) {
     return {
       ok: false,
       message: "Could not find the employee or competency for this posting.",
@@ -1226,6 +1269,127 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     };
   }
 
+  if (targetSubSchedule) {
+    if (!targetSubSchedule.competencyIds.includes(input.competencyId)) {
+      return {
+        ok: false,
+        message: "That competency is not enabled for the selected sub-schedule.",
+      };
+    }
+
+    if (input.manualPostingId) {
+      if (!manualPosting) {
+        return {
+          ok: false,
+          message: "That manual overtime posting no longer exists.",
+        };
+      }
+
+      if (
+        manualPosting.subScheduleId !== targetSubSchedule.id ||
+        manualPosting.competencyId !== input.competencyId ||
+        manualPosting.dates.length !== normalizedDates.length ||
+        manualPosting.dates.some((date, index) => date !== normalizedDates[index])
+      ) {
+        return {
+          ok: false,
+          message: "That manual overtime posting changed. Refresh and try again.",
+        };
+      }
+    }
+
+    if (coverageCompetencyId !== input.competencyId || input.swapEmployeeId) {
+      return {
+        ok: false,
+        message: "Sub-schedule overtime postings only support direct claims.",
+      };
+    }
+
+    for (const date of normalizedDates) {
+      const hasMainAssignment = snapshot.assignments.some(
+        (assignment) =>
+          assignment.employeeId === employee.id &&
+          assignment.date === date &&
+          Boolean(assignment.competencyId || assignment.timeCodeId),
+      );
+      const hasSubScheduleAssignment = snapshot.subScheduleAssignments.some(
+        (assignment) =>
+          assignment.employeeId === employee.id &&
+          assignment.date === date &&
+          Boolean(assignment.competencyId || assignment.timeCodeId),
+      );
+
+      if (shiftForDate(employeeSchedule, date) !== "OFF" || hasMainAssignment || hasSubScheduleAssignment) {
+        return {
+          ok: false,
+          message: `${employee.name} is not available for every shift in that posting.`,
+        };
+      }
+    }
+
+    const subScheduleScope = {
+      companyId: targetSubSchedule.companyId ?? session.companyId ?? "",
+      siteId: targetSubSchedule.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSubSchedule.businessAreaId ?? session.businessAreaId ?? "",
+    };
+    const assignmentRows = normalizedDates.map((date) => ({
+      id: `sub-ot-${targetSubSchedule.id}-${input.employeeId}-${input.competencyId}-${date}`,
+      sub_schedule_id: targetSubSchedule.id,
+      employee_id: input.employeeId,
+      assignment_date: date,
+      competency_id: input.competencyId,
+      time_code_id: null,
+      notes: buildOvertimeAssignmentNote({
+        claimantEmployeeId: input.employeeId,
+        claimedCompetencyId: input.competencyId,
+        coverageCompetencyId,
+        swapEmployeeId: null,
+      }),
+      ...toDatabaseScope(subScheduleScope),
+    }));
+    const claimRows = normalizedDates.map((date) => ({
+      id: `ot-sub-${targetSubSchedule.id}-${input.employeeId}-${input.competencyId}-${date}`,
+      schedule_id: null,
+      sub_schedule_id: targetSubSchedule.id,
+      employee_id: input.employeeId,
+      competency_id: input.competencyId,
+      assignment_date: date,
+      manual_posting_id: input.manualPostingId ?? null,
+      ...toDatabaseScope(subScheduleScope),
+    }));
+
+    const { error: assignmentError } = await supabase.from("sub_schedule_assignments").upsert(assignmentRows, {
+      onConflict: "sub_schedule_id,employee_id,assignment_date",
+    });
+
+    if (assignmentError) {
+      return {
+        ok: false,
+        message: `Could not save sub-schedule overtime assignments: ${assignmentError.message}`,
+      };
+    }
+
+    const { error: claimError } = await supabase.from("overtime_claims").upsert(claimRows, {
+      onConflict: "id",
+    });
+
+    if (claimError) {
+      return {
+        ok: false,
+        message: `Could not save overtime claim: ${claimError.message}`,
+      };
+    }
+
+    revalidatePath("/schedule");
+    revalidatePath("/sub-schedules");
+    revalidatePath("/overtime");
+
+    return {
+      ok: true,
+      message: `${employee.name} was added to the overtime posting.`,
+    };
+  }
+
   if (input.manualPostingId) {
     if (!manualPosting) {
       return {
@@ -1235,7 +1399,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     }
 
     if (
-      manualPosting.scheduleId !== input.scheduleId ||
+      manualPosting.scheduleId !== targetScheduleId ||
       manualPosting.competencyId !== input.competencyId ||
       manualPosting.dates.length !== normalizedDates.length ||
       manualPosting.dates.some((date, index) => date !== normalizedDates[index])
@@ -1261,7 +1425,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       manualPostingClaims.some(
         (claim) =>
           claim.employeeId !== input.employeeId ||
-          claim.scheduleId !== input.scheduleId ||
+          claim.scheduleId !== targetScheduleId ||
           claim.competencyId !== input.competencyId,
       )
     ) {
@@ -1284,7 +1448,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
     const swapEmployee = employeeMap[input.swapEmployeeId];
 
-    if (!swapEmployee || swapEmployee.scheduleId !== input.scheduleId) {
+    if (!swapEmployee || swapEmployee.scheduleId !== targetScheduleId) {
       return {
         ok: false,
         message: "Could not find the team member to rotate for that posting.",
@@ -1299,7 +1463,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     }
 
     for (const date of normalizedDates) {
-      const swapSelection = assignmentIndex[createAssignmentKey(input.scheduleId, swapEmployee.id, date)] ?? {
+      const swapSelection = assignmentIndex[createAssignmentKey(targetScheduleId ?? "", swapEmployee.id, date)] ?? {
         competencyId: null,
         timeCodeId: null,
       };
@@ -1318,13 +1482,13 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       coverageCompetencyId,
       swapEmployeeId: swapEmployee.id,
       dates: normalizedDates,
-      targetScheduleId: input.scheduleId,
-      shiftKindForDate: (date) => shiftForDate(targetSchedule, date),
+      targetScheduleId: targetScheduleId ?? "",
+      shiftKindForDate: (date) => shiftForDate(targetSchedule!, date),
     });
   }
 
   if (!manualPosting) {
-    const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), normalizedDates[0] ?? null);
+    const fullSetDays = getWorkedSetDays(targetSchedule!, getExtendedMonthDays(month), normalizedDates[0] ?? null);
     const completedSetRangeKeys = new Set(
       snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
     );
@@ -1333,7 +1497,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       fullSetDays.length === 0 ||
       !completedSetRangeKeys.has(
         createSetRangeKey(
-          input.scheduleId,
+          targetScheduleId ?? "",
           fullSetDays[0].date,
           fullSetDays[fullSetDays.length - 1].date,
         ),
@@ -1365,7 +1529,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
   const assignmentRows = normalizedDates.map((date) => ({
     employee_id: input.employeeId,
-    schedule_id: input.scheduleId,
+    schedule_id: targetScheduleId,
     assignment_date: date,
     competency_id: input.competencyId,
     time_code_id: null,
@@ -1375,35 +1539,36 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       coverageCompetencyId,
       swapEmployeeId: input.swapEmployeeId ?? null,
     }),
-    shift_kind: shiftForDate(targetSchedule, date),
+    shift_kind: shiftForDate(targetSchedule!, date),
     ...toDatabaseScope({
-      companyId: targetSchedule.companyId ?? session.companyId ?? "",
-      siteId: targetSchedule.siteId ?? session.siteId ?? "",
-      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+      companyId: targetSchedule!.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule!.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule!.businessAreaId ?? session.businessAreaId ?? "",
     }),
   }));
 
   const claimRows = normalizedDates.map((date) => ({
-    id: `ot-${input.scheduleId}-${input.employeeId}-${input.competencyId}-${date}`,
-    schedule_id: input.scheduleId,
+    id: `ot-${targetScheduleId}-${input.employeeId}-${input.competencyId}-${date}`,
+    schedule_id: targetScheduleId,
+    sub_schedule_id: null,
     employee_id: input.employeeId,
     competency_id: input.competencyId,
     assignment_date: date,
     manual_posting_id: input.manualPostingId ?? null,
     ...toDatabaseScope({
-      companyId: targetSchedule.companyId ?? session.companyId ?? "",
-      siteId: targetSchedule.siteId ?? session.siteId ?? "",
-      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+      companyId: targetSchedule!.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule!.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule!.businessAreaId ?? session.businessAreaId ?? "",
     }),
   }));
 
   swapAssignmentRows = swapAssignmentRows.map((row) => ({
     ...row,
-    schedule_id: input.scheduleId,
+    schedule_id: targetScheduleId,
     ...toDatabaseScope({
-      companyId: targetSchedule.companyId ?? session.companyId ?? "",
-      siteId: targetSchedule.siteId ?? session.siteId ?? "",
-      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+      companyId: targetSchedule!.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule!.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule!.businessAreaId ?? session.businessAreaId ?? "",
     }),
   }));
 
@@ -1475,10 +1640,57 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     };
   }
 
+  if (input.subScheduleId) {
+    const { error: claimDeleteError } = await supabase
+      .from("overtime_claims")
+      .delete()
+      .eq("sub_schedule_id", input.subScheduleId)
+      .eq("employee_id", input.employeeId)
+      .eq("competency_id", input.competencyId)
+      .in("assignment_date", input.dates);
+
+    if (claimDeleteError) {
+      return {
+        ok: false,
+        message: `Could not release overtime claim: ${claimDeleteError.message}`,
+      };
+    }
+
+    const deleteResults = await Promise.all(
+      input.dates.map((date) =>
+        supabase
+          .from("sub_schedule_assignments")
+          .delete()
+          .eq("sub_schedule_id", input.subScheduleId)
+          .eq("employee_id", input.employeeId)
+          .eq("assignment_date", date)
+          .eq("competency_id", input.competencyId),
+      ),
+    );
+
+    const deleteError = deleteResults.find((result) => result.error)?.error;
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not clear sub-schedule overtime assignments: ${deleteError.message}`,
+      };
+    }
+
+    revalidatePath("/schedule");
+    revalidatePath("/sub-schedules");
+    revalidatePath("/overtime");
+
+    return {
+      ok: true,
+      message: "Overtime claim released.",
+    };
+  }
+
   const restoreResult = await restoreSwappedAssignmentsForClaims(
     supabase,
     input.dates.map((date) => ({
-      scheduleId: input.scheduleId,
+      scheduleId: input.scheduleId ?? "",
       employeeId: input.employeeId,
       competencyId: input.competencyId,
       date,
@@ -1495,7 +1707,7 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
   const { error: claimDeleteError } = await supabase
     .from("overtime_claims")
     .delete()
-    .eq("schedule_id", input.scheduleId)
+    .eq("schedule_id", input.scheduleId ?? "")
     .eq("employee_id", input.employeeId)
     .eq("competency_id", input.competencyId)
     .in("assignment_date", input.dates);
@@ -1510,7 +1722,7 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
   const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
     supabase,
     input.dates.map((date) => ({
-      scheduleId: input.scheduleId,
+      scheduleId: input.scheduleId ?? "",
       employeeId: input.employeeId,
       competencyId: input.competencyId,
       date,
@@ -3269,6 +3481,129 @@ export async function saveSubSchedules(input: SaveSubSchedulesInput) {
   };
 }
 
+/** Persists the competency set allowed inside one selected sub-schedule. */
+export async function saveSubScheduleCompetencies(input: SaveSubScheduleCompetenciesInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can change sub-schedule competencies.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Sub-schedule competencies are unavailable.",
+    };
+  }
+
+  const subScheduleResult = await supabase
+    .from("sub_schedules")
+    .select("id, is_archived, company_id, site_id, business_area_id")
+    .eq("id", input.subScheduleId)
+    .maybeSingle();
+
+  const subSchedule = subScheduleResult.data as ({ id: string; is_archived: boolean } & ScopedDatabaseRow) | null;
+
+  if (subScheduleResult.error || !subSchedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected sub-schedule.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(subSchedule))) {
+    return {
+      ok: false,
+      message: "You do not have permission to edit that sub-schedule.",
+    };
+  }
+
+  if (subSchedule.is_archived) {
+    return {
+      ok: false,
+      message: "Archived sub-schedules are read-only.",
+    };
+  }
+
+  const competencyIds = Array.from(new Set(input.competencyIds.filter(Boolean)));
+  const competencyRowsResult =
+    competencyIds.length > 0
+      ? await supabase
+          .from("competencies")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", competencyIds)
+      : { data: [], error: null };
+
+  const competencyRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+  if (competencyRowsResult.error || competencyRows.length !== competencyIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected competencies.",
+    };
+  }
+
+  const subScheduleScope = scopeFromRow(subSchedule);
+
+  for (const row of competencyRows) {
+    const competencyScope = scopeFromRow(row);
+
+    if (
+      competencyScope.companyId !== subScheduleScope.companyId ||
+      competencyScope.siteId !== subScheduleScope.siteId ||
+      competencyScope.businessAreaId !== subScheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Sub-schedule competencies must come from the same company, site, and business area as the sub-schedule.",
+      };
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("sub_schedule_competencies")
+    .delete()
+    .eq("sub_schedule_id", input.subScheduleId);
+
+  if (deleteError) {
+    return {
+      ok: false,
+      message: `Could not clear existing sub-schedule competencies: ${deleteError.message}`,
+    };
+  }
+
+  if (competencyIds.length > 0) {
+    const { error: insertError } = await supabase.from("sub_schedule_competencies").insert(
+      competencyIds.map((competencyId) => ({
+        sub_schedule_id: input.subScheduleId,
+        competency_id: competencyId,
+        ...toDatabaseScope(subScheduleScope),
+      })),
+    );
+
+    if (insertError) {
+      return {
+        ok: false,
+        message: `Could not save sub-schedule competencies: ${insertError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/competencies");
+  revalidatePath("/sub-schedules");
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: "Sub-schedule competencies saved to Supabase.",
+  };
+}
+
 /** Saves one month of detailed staffing inside a selected sub-schedule. */
 export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmentsInput) {
   const session = await requireActionRole(["admin", "leader"]);
@@ -3335,7 +3670,7 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
     new Set(input.updates.map((update) => update.timeCodeId).filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId))),
   );
 
-  const [employeeRowsResult, competencyRowsResult, timeCodeRowsResult] = await Promise.all([
+  const [employeeRowsResult, competencyRowsResult, timeCodeRowsResult, subScheduleCompetencyRowsResult] = await Promise.all([
     employeeIds.length > 0
       ? supabase
           .from("employees")
@@ -3354,6 +3689,10 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
           .select("id, usage_mode, company_id, site_id, business_area_id")
           .in("id", timeCodeIds)
       : Promise.resolve({ data: [], error: null }),
+    supabase
+      .from("sub_schedule_competencies")
+      .select("competency_id")
+      .eq("sub_schedule_id", input.subScheduleId),
   ]);
 
   const employeeRows = (employeeRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
@@ -3382,10 +3721,22 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
     };
   }
 
+  if (subScheduleCompetencyRowsResult.error) {
+    return {
+      ok: false,
+      message: "Could not resolve the allowed competencies for this sub-schedule.",
+    };
+  }
+
   const subScheduleScope = scopeFromRow(subSchedule);
   const employeeScopeMap = new Map(employeeRows.map((row) => [row.id, scopeFromRow(row)]));
   const competencyScopeMap = new Map(competencyRows.map((row) => [row.id, scopeFromRow(row)]));
   const timeCodeRowsById = new Map(timeCodeRows.map((row) => [row.id, row]));
+  const allowedCompetencyIds = new Set(
+    (((subScheduleCompetencyRowsResult.data as Array<{ competency_id: string }> | null) ?? []).map(
+      (row) => row.competency_id,
+    )),
+  );
 
   for (const employeeScope of employeeScopeMap.values()) {
     if (
@@ -3440,6 +3791,13 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
       return {
         ok: false,
         message: "Each sub-schedule cell can hold either a post or a time code, not both.",
+      };
+    }
+
+    if (update.competencyId && !allowedCompetencyIds.has(update.competencyId)) {
+      return {
+        ok: false,
+        message: "That competency is not assigned to the selected sub-schedule.",
       };
     }
   }

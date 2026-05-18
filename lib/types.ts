@@ -92,6 +92,7 @@ export interface SubSchedule extends OrganizationScope {
   name: string;
   summaryTimeCodeId: string;
   isArchived: boolean;
+  competencyIds: string[];
 }
 
 export interface SubScheduleAssignment extends OrganizationScope {
@@ -106,7 +107,8 @@ export interface SubScheduleAssignment extends OrganizationScope {
 
 export interface OvertimeClaim extends OrganizationScope {
   id: string;
-  scheduleId: string;
+  scheduleId: string | null;
+  subScheduleId?: string | null;
   employeeId: string;
   competencyId: string;
   date: string;
@@ -115,7 +117,8 @@ export interface OvertimeClaim extends OrganizationScope {
 
 export interface ManualOvertimePosting extends OrganizationScope {
   id: string;
-  scheduleId: string;
+  scheduleId: string | null;
+  subScheduleId?: string | null;
   competencyId: string;
   month: string;
   shiftKind: Exclude<ShiftKind, "OFF">;
@@ -204,7 +207,8 @@ export interface SaveAssignmentsInput {
 }
 
 export interface ClaimOvertimePostingInput {
-  scheduleId: string;
+  scheduleId?: string | null;
+  subScheduleId?: string | null;
   employeeId: string;
   competencyId: string;
   coverageCompetencyId?: string | null;
@@ -214,14 +218,16 @@ export interface ClaimOvertimePostingInput {
 }
 
 export interface ReleaseOvertimePostingInput {
-  scheduleId: string;
+  scheduleId?: string | null;
+  subScheduleId?: string | null;
   employeeId: string;
   competencyId: string;
   dates: string[];
 }
 
 export interface CreateManualOvertimePostingInput {
-  scheduleId: string;
+  scheduleId?: string | null;
+  subScheduleId?: string | null;
   competencyId: string;
   dates: string[];
 }
@@ -336,6 +342,11 @@ export interface SubScheduleUpdate {
 
 export interface SaveSubSchedulesInput {
   updates: SubScheduleUpdate[];
+}
+
+export interface SaveSubScheduleCompetenciesInput {
+  subScheduleId: string;
+  competencyIds: string[];
 }
 
 export interface SubScheduleAssignmentUpdate {

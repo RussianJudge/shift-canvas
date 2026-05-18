@@ -34,6 +34,7 @@ type EditableSubSchedule = {
   name: string;
   summaryTimeCodeId: string;
   isArchived: boolean;
+  competencyIds: string[];
 };
 
 type SubScheduleCellSelection = {
@@ -339,6 +340,7 @@ export function SubSchedulesPanel({
         name: subSchedule.name,
         summaryTimeCodeId: subSchedule.summaryTimeCodeId,
         isArchived: subSchedule.isArchived,
+        competencyIds: subSchedule.competencyIds,
       })),
     [snapshot.subSchedules],
   );
@@ -471,8 +473,13 @@ export function SubSchedulesPanel({
           notes: null,
         }
       : { competencyId: null, timeCodeId: null, notes: null };
+  const allowedSubScheduleCompetencyIds = useMemo(
+    () => new Set(activeSubSchedule?.competencyIds ?? []),
+    [activeSubSchedule],
+  );
   const editorCompetencies = editorEmployee
     ? editorEmployee.competencyIds
+        .filter((competencyId) => allowedSubScheduleCompetencyIds.has(competencyId))
         .map((competencyId) => competencyMap[competencyId])
         .filter((competency): competency is Competency => Boolean(competency))
     : [];
@@ -500,6 +507,7 @@ export function SubSchedulesPanel({
       name: "New sub-schedule",
       summaryTimeCodeId: defaultSummaryTimeCodeId,
       isArchived: false,
+      competencyIds: [],
     };
 
     setSubSchedules((current) => [nextSubSchedule, ...current]);
@@ -862,6 +870,8 @@ export function SubSchedulesPanel({
                   <p className="toolbar-status">Save this new sub-schedule definition before staffing it.</p>
                 ) : activeSubSchedule.isArchived ? (
                   <p className="toolbar-status">Archived sub-schedules stay visible for history but cannot be edited.</p>
+                ) : activeSubSchedule.competencyIds.length === 0 ? (
+                  <p className="toolbar-status">Assign competencies to this sub-schedule first, then staff its monthly builder.</p>
                 ) : assignmentMessage ? (
                   <p className="toolbar-status">{assignmentMessage}</p>
                 ) : null}

@@ -9,7 +9,7 @@ import type { ShiftKind } from "@/lib/types";
  */
 export type OvertimeAssignmentRow = {
   employee_id: string;
-  schedule_id?: string;
+  schedule_id?: string | null;
   assignment_date: string;
   competency_id: string | null;
   time_code_id: string | null;

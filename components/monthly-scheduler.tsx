@@ -1890,7 +1890,7 @@ export function MonthlyScheduler({
       }
 
       const removedClaims = snapshot.overtimeClaims.filter(
-        (claim) =>
+        (claim): claim is (typeof snapshot.overtimeClaims)[number] & { scheduleId: string } =>
           claim.scheduleId === activeSchedule.id &&
           claim.date >= startDate &&
           claim.date <= endDate,

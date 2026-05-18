@@ -343,12 +343,23 @@ function getOvertimeMetricEntries(
   overtimeClaims: OvertimeClaim[],
   assignmentHistory: StoredAssignment[],
 ) {
-  const claimEntries = overtimeClaims.map<OvertimeMetricEntry>((claim) => ({
-    scheduleId: claim.scheduleId,
-    employeeId: claim.employeeId,
-    competencyId: claim.competencyId,
-    date: claim.date,
-  }));
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const claimEntries = overtimeClaims.flatMap<OvertimeMetricEntry>((claim) => {
+    const metricScheduleId = claim.scheduleId ?? employeeMap[claim.employeeId]?.scheduleId;
+
+    if (!metricScheduleId) {
+      return [];
+    }
+
+    return [
+      {
+        scheduleId: metricScheduleId,
+        employeeId: claim.employeeId,
+        competencyId: claim.competencyId,
+        date: claim.date,
+      },
+    ];
+  });
 
   return [
     ...claimEntries,
