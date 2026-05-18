@@ -311,6 +311,16 @@ export function MutualsPanel({
     setViewMonth(snapshot.month);
   }, [snapshot]);
 
+  function syncMonthInUrl(nextMonth: string) {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("month", nextMonth);
+    window.history.replaceState(null, "", nextUrl.toString());
+  }
+
   function loadMutualsMonth(nextMonth: string) {
     startMonthTransition(async () => {
       setStatusMessage(`Loading ${formatMonthLabel(nextMonth)}`);
@@ -328,6 +338,7 @@ export function MutualsPanel({
 
         setViewSnapshot(nextSnapshot);
         setViewMonth(nextSnapshot.month);
+        syncMonthInUrl(nextSnapshot.month);
         setApplyPostingId((current) =>
           current && nextSnapshot.postings.some((posting) => posting.id === current) ? current : null,
         );
