@@ -27,7 +27,6 @@ type EditableCompetency = {
 };
 
 type ScheduleTargetKey = `schedule:${string}` | `sub:${string}`;
-type AvailabilityMode = "main" | "sub";
 
 function cloneCompetencies(competencies: EditableCompetency[]) {
   return competencies.map((competency) => ({ ...competency }));
@@ -106,7 +105,6 @@ export function CompetenciesPanel({
   const [isSaving, startSaveTransition] = useTransition();
   const [isSavingScheduleCompetencies, startScheduleSaveTransition] = useTransition();
   const [isSavingSubScheduleCompetencies, startSubScheduleSaveTransition] = useTransition();
-  const [availabilityMode, setAvailabilityMode] = useState<AvailabilityMode>("main");
   const [selectedTargetKey, setSelectedTargetKey] = useState<ScheduleTargetKey | "">(buildInitialTargetKey(snapshot));
 
   useEffect(() => {
@@ -130,17 +128,6 @@ export function CompetenciesPanel({
     });
   }, [snapshot.schedules, snapshot.subSchedules]);
 
-  useEffect(() => {
-    if (selectedTargetKey.startsWith("schedule:")) {
-      setAvailabilityMode("main");
-      return;
-    }
-
-    if (selectedTargetKey.startsWith("sub:")) {
-      setAvailabilityMode("sub");
-    }
-  }, [selectedTargetKey]);
-
   const selectedScheduleId = selectedTargetKey.startsWith("schedule:") ? selectedTargetKey.slice("schedule:".length) : "";
   const selectedSubScheduleId = selectedTargetKey.startsWith("sub:") ? selectedTargetKey.slice("sub:".length) : "";
   const selectedSchedule = snapshot.schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
@@ -150,18 +137,6 @@ export function CompetenciesPanel({
     : selectedSubSchedule?.name ?? null;
   const selectedTargetIsArchived = selectedSubSchedule?.isArchived ?? false;
   const selectedTargetCompetencyIds = selectedSchedule?.competencyIds ?? selectedSubSchedule?.competencyIds ?? [];
-  const visibleTargetKey =
-    availabilityMode === "main"
-      ? selectedSchedule?.id
-        ? (`schedule:${selectedSchedule.id}` as const)
-        : snapshot.schedules[0]?.id
-          ? (`schedule:${snapshot.schedules[0].id}` as const)
-          : ""
-      : selectedSubSchedule?.id
-        ? (`sub:${selectedSubSchedule.id}` as const)
-        : snapshot.subSchedules[0]?.id
-          ? (`sub:${snapshot.subSchedules[0].id}` as const)
-          : "";
   const [baselineTargetCompetencyIds, setBaselineTargetCompetencyIds] = useState<string[]>(
     selectedTargetCompetencyIds,
   );
@@ -319,30 +294,6 @@ export function CompetenciesPanel({
     setStatusMessage("Changes reverted.");
   }
 
-  function handleAvailabilityModeChange(nextMode: AvailabilityMode) {
-    setAvailabilityMode(nextMode);
-    setStatusMessage("");
-
-    if (nextMode === "main") {
-      setSelectedTargetKey(
-        selectedSchedule?.id
-          ? (`schedule:${selectedSchedule.id}` as const)
-          : snapshot.schedules[0]?.id
-            ? (`schedule:${snapshot.schedules[0].id}` as const)
-            : "",
-      );
-      return;
-    }
-
-    setSelectedTargetKey(
-      selectedSubSchedule?.id
-        ? (`sub:${selectedSubSchedule.id}` as const)
-        : snapshot.subSchedules[0]?.id
-          ? (`sub:${snapshot.subSchedules[0].id}` as const)
-          : "",
-    );
-  }
-
   return (
     <section className="panel-frame">
       <div className="panel-heading panel-heading--simple">
@@ -385,36 +336,29 @@ export function CompetenciesPanel({
             </>
           ) : (
             <>
-              <button
-                type="button"
-                className={availabilityMode === "main" ? "primary-button" : "ghost-button"}
-                onClick={() => handleAvailabilityModeChange("main")}
-              >
-                Main schedules
-              </button>
-              <button
-                type="button"
-                className={availabilityMode === "sub" ? "primary-button" : "ghost-button"}
-                onClick={() => handleAvailabilityModeChange("sub")}
-              >
-                Sub-schedules
-              </button>
               <label className="field">
+                <span>Schedule</span>
                 <select
-                  value={visibleTargetKey}
-                  onChange={(event) => setSelectedTargetKey(event.target.value as ScheduleTargetKey)}
+                  value={selectedTargetKey}
+                  onChange={(event) => {
+                    setSelectedTargetKey(event.target.value as ScheduleTargetKey);
+                    setStatusMessage("");
+                  }}
                 >
-                  {availabilityMode === "main"
-                    ? snapshot.schedules.map((schedule) => (
-                        <option key={`schedule:${schedule.id}`} value={`schedule:${schedule.id}`}>
-                          Shift {schedule.name}
-                        </option>
-                      ))
-                    : snapshot.subSchedules.map((subSchedule) => (
-                        <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
-                          {subSchedule.name}{subSchedule.isArchived ? " (Archived)" : ""}
-                        </option>
-                      ))}
+                  <optgroup label="Main schedules">
+                    {snapshot.schedules.map((schedule) => (
+                      <option key={`schedule:${schedule.id}`} value={`schedule:${schedule.id}`}>
+                        Shift {schedule.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Sub-schedules">
+                    {snapshot.subSchedules.map((subSchedule) => (
+                      <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
+                        {subSchedule.name}{subSchedule.isArchived ? " (Archived)" : ""}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </label>
               <button

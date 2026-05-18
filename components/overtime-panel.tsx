@@ -25,6 +25,7 @@ import {
 import type { AppSession, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
 
 type OvertimeTargetMode = "main" | "sub";
+type OvertimeTargetKey = `schedule:${string}` | `sub:${string}`;
 
 /**
  * Overtime board for packaging claimable work into one operational queue.
@@ -191,6 +192,18 @@ function getCellSelection(
   };
 }
 
+function buildInitialTargetKey(snapshot: SchedulerSnapshot): OvertimeTargetKey | "" {
+  if (snapshot.schedules[0]?.id) {
+    return `schedule:${snapshot.schedules[0].id}`;
+  }
+
+  if (snapshot.subSchedules[0]?.id) {
+    return `sub:${snapshot.subSchedules[0].id}`;
+  }
+
+  return "";
+}
+
 function getClaimStatus(
   employee: Employee | null,
   posting: OvertimePosting,
@@ -247,14 +260,10 @@ function getClaimStatus(
 /** Modal used by leaders/admins to author a manual overtime posting. */
 function ManualOvertimePostingModal({
   snapshot,
-  targetMode,
-  selectedScheduleId,
-  selectedSubScheduleId,
+  selectedTargetKey,
   selectedCompetencyId,
   selectedDates,
-  onTargetModeChange,
-  onScheduleChange,
-  onSubScheduleChange,
+  onTargetChange,
   onCompetencyChange,
   onToggleDate,
   onClose,
@@ -262,14 +271,10 @@ function ManualOvertimePostingModal({
   isSubmitting,
 }: {
   snapshot: SchedulerSnapshot;
-  targetMode: OvertimeTargetMode;
-  selectedScheduleId: string;
-  selectedSubScheduleId: string;
+  selectedTargetKey: OvertimeTargetKey | "";
   selectedCompetencyId: string;
   selectedDates: string[];
-  onTargetModeChange: (targetMode: OvertimeTargetMode) => void;
-  onScheduleChange: (scheduleId: string) => void;
-  onSubScheduleChange: (subScheduleId: string) => void;
+  onTargetChange: (targetKey: OvertimeTargetKey) => void;
   onCompetencyChange: (competencyId: string) => void;
   onToggleDate: (date: string) => void;
   onClose: () => void;
@@ -281,13 +286,14 @@ function ManualOvertimePostingModal({
   }
 
   const selectedSchedule =
-    targetMode === "main"
-      ? snapshot.schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null
+    selectedTargetKey.startsWith("schedule:")
+      ? snapshot.schedules.find((schedule) => schedule.id === selectedTargetKey.slice("schedule:".length)) ?? null
       : null;
   const selectedSubSchedule =
-    targetMode === "sub"
-      ? snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleId) ?? null
+    selectedTargetKey.startsWith("sub:")
+      ? snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedTargetKey.slice("sub:".length)) ?? null
       : null;
+  const targetMode: OvertimeTargetMode = selectedSubSchedule ? "sub" : "main";
   const availableSubSchedules = snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived);
   const availableCompetencies =
     targetMode === "main"
@@ -324,42 +330,24 @@ function ManualOvertimePostingModal({
         </div>
 
         <div className="metrics-transfer-grid">
-          <div className="planner-actions">
-            <button
-              type="button"
-              className={targetMode === "main" ? "primary-button" : "ghost-button"}
-              onClick={() => onTargetModeChange("main")}
-            >
-              Main schedules
-            </button>
-            <button
-              type="button"
-              className={targetMode === "sub" ? "primary-button" : "ghost-button"}
-              onClick={() => onTargetModeChange("sub")}
-            >
-              Sub-schedules
-            </button>
-          </div>
-
           <label className="field">
-            <span>{targetMode === "main" ? "Team" : "Sub-schedule"}</span>
-            {targetMode === "main" ? (
-              <select value={selectedScheduleId} onChange={(event) => onScheduleChange(event.target.value)}>
+            <span>Schedule</span>
+            <select value={selectedTargetKey} onChange={(event) => onTargetChange(event.target.value as OvertimeTargetKey)}>
+              <optgroup label="Main schedules">
                 {snapshot.schedules.map((schedule) => (
-                  <option key={schedule.id} value={schedule.id}>
-                    {schedule.name}
+                  <option key={`schedule:${schedule.id}`} value={`schedule:${schedule.id}`}>
+                    Shift {schedule.name}
                   </option>
                 ))}
-              </select>
-            ) : (
-              <select value={selectedSubScheduleId} onChange={(event) => onSubScheduleChange(event.target.value)}>
+              </optgroup>
+              <optgroup label="Sub-schedules">
                 {availableSubSchedules.map((subSchedule) => (
-                  <option key={subSchedule.id} value={subSchedule.id}>
+                  <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
                     {subSchedule.name}
                   </option>
                 ))}
-              </select>
-            )}
+              </optgroup>
+            </select>
           </label>
 
           <label className="field">
@@ -441,22 +429,25 @@ export function OvertimePanel({
   // The board is built from snapshot state only; claiming/releasing triggers a
   // server refresh instead of trying to locally simulate every OT side effect.
   const router = useRouter();
-  const [viewMode, setViewMode] = useState<OvertimeTargetMode>("main");
   const [claimingEmployeeId, setClaimingEmployeeId] = useState(
     viewer.role === "worker"
       ? viewer.employeeId ?? ""
       : snapshot.schedules.flatMap((schedule) => schedule.employees).sort((left, right) => left.name.localeCompare(right.name))[0]?.id ?? "",
   );
-  const [selectedScheduleFilter, setSelectedScheduleFilter] = useState("all");
+  const [selectedTargetKey, setSelectedTargetKey] = useState<OvertimeTargetKey | "">(buildInitialTargetKey(snapshot));
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
-  const [manualTargetMode, setManualTargetMode] = useState<OvertimeTargetMode>("main");
-  const [manualScheduleId, setManualScheduleId] = useState(snapshot.schedules[0]?.id ?? "");
-  const [manualSubScheduleId, setManualSubScheduleId] = useState(
-    snapshot.subSchedules.find((subSchedule) => !subSchedule.isArchived)?.id ?? snapshot.subSchedules[0]?.id ?? "",
+  const [manualTargetKey, setManualTargetKey] = useState<OvertimeTargetKey | "">(
+    snapshot.schedules[0]?.id
+      ? (`schedule:${snapshot.schedules[0].id}` as const)
+      : snapshot.subSchedules.find((subSchedule) => !subSchedule.isArchived)?.id
+        ? (`sub:${snapshot.subSchedules.find((subSchedule) => !subSchedule.isArchived)!.id}` as const)
+        : snapshot.subSchedules[0]?.id
+          ? (`sub:${snapshot.subSchedules[0].id}` as const)
+          : "",
   );
   const [manualCompetencyId, setManualCompetencyId] = useState(snapshot.competencies[0]?.id ?? "");
   const [manualPostingDates, setManualPostingDates] = useState<string[]>([]);
@@ -492,6 +483,16 @@ export function OvertimePanel({
     () => snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived),
     [snapshot.subSchedules],
   );
+  const selectedTargetMode: OvertimeTargetMode = selectedTargetKey.startsWith("sub:") ? "sub" : "main";
+  const selectedScheduleFilter =
+    selectedTargetKey.startsWith("schedule:") ? selectedTargetKey.slice("schedule:".length) : "";
+  const selectedSubScheduleFilter =
+    selectedTargetKey.startsWith("sub:") ? selectedTargetKey.slice("sub:".length) : "";
+  const manualTargetMode: OvertimeTargetMode = manualTargetKey.startsWith("sub:") ? "sub" : "main";
+  const manualScheduleId =
+    manualTargetKey.startsWith("schedule:") ? manualTargetKey.slice("schedule:".length) : "";
+  const manualSubScheduleId =
+    manualTargetKey.startsWith("sub:") ? manualTargetKey.slice("sub:".length) : "";
   const selectedManualSubSchedule =
     snapshot.subSchedules.find((subSchedule) => subSchedule.id === manualSubScheduleId) ?? null;
   const selectedManualSchedule =
@@ -514,21 +515,30 @@ export function OvertimePanel({
 
       return allEmployees.some((employee) => employee.id === current) ? current : allEmployees[0]?.id ?? "";
     });
-    setSelectedScheduleFilter((current) =>
-      current === "all" || snapshot.schedules.some((schedule) => schedule.id === current) ? current : "all",
+    setSelectedTargetKey((current) =>
+      current &&
+      (snapshot.schedules.some((schedule) => `schedule:${schedule.id}` === current) ||
+        snapshot.subSchedules.some((subSchedule) => `sub:${subSchedule.id}` === current))
+        ? current
+        : buildInitialTargetKey(snapshot),
     );
     setSelectedCompetencyFilter((current) =>
       current === "all" || snapshot.competencies.some((competency) => competency.id === current) ? current : "all",
     );
     setSelectedPostingByGroup({});
     setStatusMessage("");
-    setManualScheduleId((current) =>
-      snapshot.schedules.some((schedule) => schedule.id === current) ? current : snapshot.schedules[0]?.id ?? "",
-    );
-    setManualSubScheduleId((current) =>
-      snapshot.subSchedules.some((subSchedule) => subSchedule.id === current)
+    setManualTargetKey((current) =>
+      current &&
+      (snapshot.schedules.some((schedule) => `schedule:${schedule.id}` === current) ||
+        snapshot.subSchedules.some((subSchedule) => `sub:${subSchedule.id}` === current))
         ? current
-        : availableSubSchedules[0]?.id ?? snapshot.subSchedules[0]?.id ?? "",
+        : snapshot.schedules[0]?.id
+          ? (`schedule:${snapshot.schedules[0].id}` as const)
+          : availableSubSchedules[0]?.id
+            ? (`sub:${availableSubSchedules[0].id}` as const)
+            : snapshot.subSchedules[0]?.id
+              ? (`sub:${snapshot.subSchedules[0].id}` as const)
+              : "",
     );
     setManualCompetencyId((current) =>
       snapshot.competencies.some((competency) => competency.id === current)
@@ -548,15 +558,14 @@ export function OvertimePanel({
   ]);
 
   useEffect(() => {
-    setSelectedScheduleFilter("all");
+    setManualPostingDates([]);
+  }, [manualTargetKey]);
+
+  useEffect(() => {
     setSelectedCompetencyFilter("all");
     setSelectedPostingByGroup({});
     setStatusMessage("");
-  }, [viewMode]);
-
-  useEffect(() => {
-    setManualPostingDates([]);
-  }, [manualTargetMode, manualScheduleId, manualSubScheduleId]);
+  }, [selectedTargetKey]);
 
   useEffect(() => {
     setManualCompetencyId((current) =>
@@ -939,13 +948,15 @@ export function OvertimePanel({
   const filteredPostings = useMemo(
     () =>
       postings.filter((posting) => {
-        if (posting.targetMode !== viewMode) {
+        if (selectedTargetMode !== posting.targetMode) {
           return false;
         }
 
         const targetId = posting.targetMode === "main" ? posting.scheduleId : posting.subScheduleId;
+        const selectedTargetId =
+          posting.targetMode === "main" ? selectedScheduleFilter : selectedSubScheduleFilter;
 
-        if (selectedScheduleFilter !== "all" && targetId !== selectedScheduleFilter) {
+        if (targetId !== selectedTargetId) {
           return false;
         }
 
@@ -955,7 +966,7 @@ export function OvertimePanel({
 
         return true;
       }),
-    [postings, selectedCompetencyFilter, selectedScheduleFilter],
+    [postings, selectedCompetencyFilter, selectedScheduleFilter, selectedSubScheduleFilter, selectedTargetMode],
   );
   const groupedPostings = useMemo(
     () =>
@@ -1084,23 +1095,6 @@ export function OvertimePanel({
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--overtime">
-        <div className="planner-actions">
-          <button
-            type="button"
-            className={viewMode === "main" ? "primary-button" : "ghost-button"}
-            onClick={() => setViewMode("main")}
-          >
-            Main schedules
-          </button>
-          <button
-            type="button"
-            className={viewMode === "sub" ? "primary-button" : "ghost-button"}
-            onClick={() => setViewMode("sub")}
-          >
-            Sub-schedules
-          </button>
-        </div>
-
         <label className="field">
           <span>Month</span>
           <select
@@ -1141,23 +1135,25 @@ export function OvertimePanel({
         )}
 
         <label className="field">
-          <span>{viewMode === "main" ? "Team" : "Sub-schedule"}</span>
+          <span>Schedule</span>
           <select
-            value={selectedScheduleFilter}
-            onChange={(event) => setSelectedScheduleFilter(event.target.value)}
+            value={selectedTargetKey}
+            onChange={(event) => setSelectedTargetKey(event.target.value as OvertimeTargetKey)}
           >
-            <option value="all">{viewMode === "main" ? "All teams" : "All sub-schedules"}</option>
-            {viewMode === "main"
-              ? snapshot.schedules.map((schedule) => (
-                  <option key={schedule.id} value={schedule.id}>
-                    {schedule.name}
-                  </option>
-                ))
-              : snapshot.subSchedules.map((subSchedule) => (
-                  <option key={subSchedule.id} value={subSchedule.id}>
-                    {subSchedule.name}
-                  </option>
-                ))}
+            <optgroup label="Main schedules">
+              {snapshot.schedules.map((schedule) => (
+                <option key={`schedule:${schedule.id}`} value={`schedule:${schedule.id}`}>
+                  Shift {schedule.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Sub-schedules">
+              {snapshot.subSchedules.map((subSchedule) => (
+                <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
+                  {subSchedule.name}{subSchedule.isArchived ? " (Archived)" : ""}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
 
@@ -1170,22 +1166,14 @@ export function OvertimePanel({
             <option value="all">All competencies</option>
             {snapshot.competencies
               .filter((competency) => {
-                if (viewMode === "main") {
-                  if (selectedScheduleFilter === "all") {
-                    return snapshot.schedules.some((schedule) => schedule.competencyIds.includes(competency.id));
-                  }
-
+                if (selectedTargetMode === "main") {
                   return (
                     snapshot.schedules.find((schedule) => schedule.id === selectedScheduleFilter)?.competencyIds.includes(competency.id) ?? false
                   );
                 }
 
-                if (selectedScheduleFilter === "all") {
-                  return snapshot.subSchedules.some((subSchedule) => subSchedule.competencyIds.includes(competency.id));
-                }
-
                 return (
-                  snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedScheduleFilter)?.competencyIds.includes(competency.id) ?? false
+                  snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleFilter)?.competencyIds.includes(competency.id) ?? false
                 );
               })
               .map((competency) => (
@@ -1227,7 +1215,7 @@ export function OvertimePanel({
                   <div className="overtime-group__header">
                     <div>
                       <p className="overtime-card-team">
-                        {viewMode === "main" ? `Shift ${group.scheduleName}` : group.scheduleName}
+                        {selectedTargetMode === "main" ? `Shift ${group.scheduleName}` : group.scheduleName}
                       </p>
                       <h2 className="overtime-card-title">
                         {formatShortDate(group.dates[0])} - {formatShortDate(group.dates[group.dates.length - 1])}
@@ -1370,7 +1358,7 @@ export function OvertimePanel({
           <div className="empty-state">
             <strong>No overtime postings.</strong>
             <span>
-              {viewMode === "main"
+              {selectedTargetMode === "main"
                 ? "Complete a set on the Schedule page, or all completed sets are fully staffed."
                 : "Create a manual posting for a sub-schedule to make overtime claimable here."}
             </span>
@@ -1381,18 +1369,11 @@ export function OvertimePanel({
       {isManualModalOpen ? (
         <ManualOvertimePostingModal
           snapshot={snapshot}
-          targetMode={manualTargetMode}
-          selectedScheduleId={manualScheduleId}
-          selectedSubScheduleId={manualSubScheduleId}
+          selectedTargetKey={manualTargetKey}
           selectedCompetencyId={manualCompetencyId}
           selectedDates={manualPostingDates}
-          onTargetModeChange={setManualTargetMode}
-          onScheduleChange={(scheduleId) => {
-            setManualScheduleId(scheduleId);
-            setManualPostingDates([]);
-          }}
-          onSubScheduleChange={(subScheduleId) => {
-            setManualSubScheduleId(subScheduleId);
+          onTargetChange={(targetKey) => {
+            setManualTargetKey(targetKey);
             setManualPostingDates([]);
           }}
           onCompetencyChange={setManualCompetencyId}
