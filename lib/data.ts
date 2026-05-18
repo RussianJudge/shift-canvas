@@ -1619,7 +1619,6 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
   const candidateMonths = Array.from(
     new Set(
       [
-        currentMonth,
         ...(((completedSetsResult.data as Array<{ month_key: string }> | null) ?? []).map((row) => row.month_key)),
         ...(((overtimeClaimsResult.data as Array<{ assignment_date: string }> | null) ?? []).map((row) =>
           getMonthKeyFromDate(row.assignment_date),

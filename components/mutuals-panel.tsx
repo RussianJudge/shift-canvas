@@ -579,6 +579,14 @@ export function MutualsPanel({
     });
   }
 
+  function confirmAction(message: string, action: () => Promise<{ ok: boolean; message: string }>) {
+    if (typeof window !== "undefined" && !window.confirm(message)) {
+      return;
+    }
+
+    runAction(action);
+  }
+
   return (
     <section className="panel-frame mutuals-page">
       <div className="panel-heading panel-heading--simple">
@@ -593,24 +601,16 @@ export function MutualsPanel({
         </div>
       ) : null}
 
-      <section className="metrics-section mutuals-section">
-        <div className="metrics-section__header">
-          <h2 className="metrics-section__title">Create Mutual</h2>
-        </div>
-
-        <div className="metrics-card">
-          <div className="metrics-transfer-actions">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => setIsPostModalOpen(true)}
-              disabled={isSubmitting}
-            >
-              Create post mutual
-            </button>
-          </div>
-        </div>
-      </section>
+      <div className="metrics-transfer-actions">
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => setIsPostModalOpen(true)}
+          disabled={isSubmitting}
+        >
+          Create post mutual
+        </button>
+      </div>
 
       <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
@@ -673,7 +673,12 @@ export function MutualsPanel({
                       <button
                         type="button"
                         className="ghost-button"
-                        onClick={() => runAction(() => withdrawMutualPosting({ postingId: posting.id }))}
+                        onClick={() =>
+                          confirmAction(
+                            `Cancel this open mutual for ${posting.ownerEmployeeName}?`,
+                            () => withdrawMutualPosting({ postingId: posting.id }),
+                          )
+                        }
                         disabled={isSubmitting}
                       >
                         Cancel mutual
@@ -946,7 +951,12 @@ export function MutualsPanel({
                       <button
                         type="button"
                         className="ghost-button"
-                        onClick={() => runAction(() => cancelAcceptedMutual({ postingId: posting.id }))}
+                        onClick={() =>
+                          confirmAction(
+                            `Cancel this accepted mutual for ${posting.ownerEmployeeName}? This will restore the original schedule cells.`,
+                            () => cancelAcceptedMutual({ postingId: posting.id }),
+                          )
+                        }
                         disabled={isSubmitting}
                       >
                         Cancel mutual

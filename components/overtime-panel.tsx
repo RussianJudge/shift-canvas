@@ -1108,23 +1108,30 @@ export function OvertimePanel({
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--overtime">
-        <label className="field">
-          <span>Month</span>
-          <select
-            value={snapshot.month}
-            onChange={(event) => router.push(`/overtime?month=${event.target.value}`)}
-          >
-            {availableMonths.map((month) => (
-              <option key={month} value={month}>
-                {new Intl.DateTimeFormat("en-US", {
-                  month: "long",
-                  year: "numeric",
-                  timeZone: "UTC",
-                }).format(new Date(`${month}-01T00:00:00Z`))}
-              </option>
-            ))}
-          </select>
-        </label>
+        {availableMonths.length > 0 ? (
+          <label className="field">
+            <span>Month</span>
+            <select
+              value={snapshot.month}
+              onChange={(event) => router.push(`/overtime?month=${event.target.value}`)}
+            >
+              {availableMonths.map((month) => (
+                <option key={month} value={month}>
+                  {new Intl.DateTimeFormat("en-US", {
+                    month: "long",
+                    year: "numeric",
+                    timeZone: "UTC",
+                  }).format(new Date(`${month}-01T00:00:00Z`))}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="field field--static">
+            <span>Month</span>
+            <strong>No overtime months</strong>
+          </div>
+        )}
 
         {viewer.role === "worker" ? (
           <div className="field field--static">
