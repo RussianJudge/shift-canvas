@@ -65,6 +65,14 @@ type ScheduleRow = {
   business_area_id: string;
 };
 
+type ScheduleCompetencyRow = {
+  schedule_id: string;
+  competency_id: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
 type EmployeeRow = {
   id: string;
   schedule_id: string;
@@ -587,7 +595,17 @@ function buildEmployeesBySchedule(
   }, {});
 }
 
-function mapSchedules(scheduleRows: ScheduleRow[], employeesBySchedule: Record<string, Employee[]>) {
+function mapSchedules(
+  scheduleRows: ScheduleRow[],
+  employeesBySchedule: Record<string, Employee[]>,
+  scheduleCompetencyRows: ScheduleCompetencyRow[],
+) {
+  const competencyIdsBySchedule = scheduleCompetencyRows.reduce<Record<string, string[]>>((map, row) => {
+    map[row.schedule_id] ??= [];
+    map[row.schedule_id].push(row.competency_id);
+    return map;
+  }, {});
+
   return scheduleRows.map<Schedule>((row) => ({
     id: row.id,
     name: row.name,
@@ -596,6 +614,7 @@ function mapSchedules(scheduleRows: ScheduleRow[], employeesBySchedule: Record<s
     nightShiftDays: row.night_shift_days,
     offDays: row.off_days,
     employees: employeesBySchedule[row.id] ?? [],
+    competencyIds: competencyIdsBySchedule[row.id] ?? [],
     companyId: row.company_id,
     siteId: row.site_id,
     businessAreaId: row.business_area_id,
@@ -681,7 +700,7 @@ async function getScopedSchedulesWithEmployees(
   }
 
   const { includeEmployeeCompetencies = false } = options;
-  const [schedulesResult, employeesResult, employeeCompetenciesResult] = await Promise.all([
+  const [schedulesResult, employeesResult, employeeCompetenciesResult, scheduleCompetenciesResult] = await Promise.all([
     applySessionScope(
       supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
       session,
@@ -698,23 +717,29 @@ async function getScopedSchedulesWithEmployees(
     includeEmployeeCompetencies
       ? applySessionScope(
           supabase.from("employee_competencies").select("employee_id, competency_id, company_id, site_id, business_area_id"),
-          session,
-        )
+        session,
+      )
       : Promise.resolve({ data: [], error: null }),
+    applySessionScope(
+      supabase.from("schedule_competencies").select("schedule_id, competency_id, company_id, site_id, business_area_id"),
+      session,
+    ),
   ]);
 
   const employeeRows = (employeesResult.data as EmployeeRow[] | null) ?? [];
   const employeeCompetencyRows = (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [];
+  const scheduleCompetencyRows = (scheduleCompetenciesResult.data as ScheduleCompetencyRow[] | null) ?? [];
   const employeesBySchedule = buildEmployeesBySchedule(employeeRows, employeeCompetencyRows);
 
   return {
-    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
+    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule, scheduleCompetencyRows),
     employeeRows,
     employeeCompetencyRows,
     errors: [
       ["schedules", schedulesResult.error],
       ["employees", employeesResult.error],
       ["employee_competencies", employeeCompetenciesResult.error],
+      ["schedule_competencies", scheduleCompetenciesResult.error],
     ] as Array<[string, { message?: string } | null | undefined]>,
   };
 }
@@ -752,6 +777,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     subSchedulesResult,
     subScheduleCompetenciesResult,
     schedulesResult,
+    scheduleCompetenciesResult,
     employeesResult,
     employeeCompetenciesResult,
     overtimeClaimsResult,
@@ -788,6 +814,10 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
       session,
     ).order("name"),
+    applySessionScope(
+      supabase.from("schedule_competencies").select("schedule_id, competency_id, company_id, site_id, business_area_id"),
+      session,
+    ),
     applySessionScope(
       supabase
       .from("employees")
@@ -962,6 +992,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     ["time_codes", timeCodesResult.error],
     ["sub_schedules", subSchedulesResult.error],
     ["sub_schedule_competencies", subScheduleCompetenciesResult.error],
+    ["schedule_competencies", scheduleCompetenciesResult.error],
     ["employees", employeesResult.error],
     ["employee_competencies", employeeCompetenciesResult.error],
     ["schedule_assignments", assignmentsResult.error],
@@ -984,16 +1015,22 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     employeeRows,
     (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
+  const scheduleCompetencyRows = (scheduleCompetenciesResult.data as ScheduleCompetencyRow[] | null) ?? [];
+  const mappedSchedules = mapSchedules(
+    (schedulesResult.data as ScheduleRow[] | null) ?? [],
+    employeesBySchedule,
+    scheduleCompetencyRows,
+  );
 
   return {
     month,
     productionUnits: mapProductionUnits((unitsResult.data as ProductionUnitRow[] | null) ?? []),
     competencies: mapCompetencies([...competencyRowsById.values()]),
     timeCodes: mapTimeCodes([...timeCodeRowsById.values()]),
-    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
+    schedules: mappedSchedules,
     assignments: mapAssignments(filteredAssignmentRows),
     projectedAssignments: buildProjectedSubScheduleAssignments({
-      schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
+      schedules: mappedSchedules,
       subSchedules: mapSubSchedules(subScheduleRows, subScheduleCompetencyRows),
       subScheduleAssignments: mappedSubScheduleAssignments,
     }),
@@ -1015,7 +1052,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     return emptySnapshot(month);
   }
 
-  const [unitsResult, competenciesResult, schedulesResult, employeesResult, employeeCompetenciesResult] =
+  const [unitsResult, competenciesResult, schedulesResult, scheduleCompetenciesResult, employeesResult, employeeCompetenciesResult] =
     await Promise.all([
       applySessionScope(
         supabase.from("production_units").select("id, name, description, company_id, site_id, business_area_id"),
@@ -1029,6 +1066,10 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
         supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
         session,
       ).order("name"),
+      applySessionScope(
+        supabase.from("schedule_competencies").select("schedule_id, competency_id, company_id, site_id, business_area_id"),
+        session,
+      ),
       applySessionScope(
         supabase
         .from("employees")
@@ -1048,6 +1089,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     ["production_units", unitsResult.error],
     ["competencies", competenciesResult.error],
     ["schedules", schedulesResult.error],
+    ["schedule_competencies", scheduleCompetenciesResult.error],
     ["employees", employeesResult.error],
     ["employee_competencies", employeeCompetenciesResult.error],
   ]);
@@ -1056,6 +1098,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     (employeesResult.data as EmployeeRow[] | null) ?? [],
     (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
+  const scheduleCompetencyRows = (scheduleCompetenciesResult.data as ScheduleCompetencyRow[] | null) ?? [];
 
   logScopedEmptyState(
     "Personnel snapshot",
@@ -1072,7 +1115,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     productionUnits: mapProductionUnits((unitsResult.data as ProductionUnitRow[] | null) ?? []),
     competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
     timeCodes: [],
-    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
+    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule, scheduleCompetencyRows),
     assignments: [],
     projectedAssignments: [],
     overtimeClaims: [],
@@ -1199,7 +1242,7 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
   }
 
   const yearStart = getYearStart(today);
-  const [assignmentResult, subSchedulesResult, subScheduleCompetenciesResult, subScheduleAssignmentsResult, schedulesResult, employeesResult] =
+  const [assignmentResult, subSchedulesResult, subScheduleCompetenciesResult, subScheduleAssignmentsResult, schedulesResult, scheduleCompetenciesResult, employeesResult] =
     await Promise.all([
       fetchAllRows<AssignmentRow>(
         applySessionScope(
@@ -1244,6 +1287,10 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
         session,
       ).order("name"),
       applySessionScope(
+        supabase.from("schedule_competencies").select("schedule_id, competency_id, company_id, site_id, business_area_id"),
+        session,
+      ),
+      applySessionScope(
         supabase
           .from("employees")
           .select(EMPLOYEE_SELECT_COLUMNS),
@@ -1259,6 +1306,7 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
     subScheduleCompetenciesResult.error ||
     subScheduleAssignmentsResult.error ||
     schedulesResult.error ||
+    scheduleCompetenciesResult.error ||
     employeesResult.error
   ) {
     return [];
@@ -1268,7 +1316,11 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
     (employeesResult.data as EmployeeRow[] | null) ?? [],
     [],
   );
-  const schedules = mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule);
+  const schedules = mapSchedules(
+    (schedulesResult.data as ScheduleRow[] | null) ?? [],
+    employeesBySchedule,
+    (scheduleCompetenciesResult.data as ScheduleCompetencyRow[] | null) ?? [],
+  );
   const subSchedules = mapSubSchedules(
     (subSchedulesResult.data as SubScheduleRow[] | null) ?? [],
     (subScheduleCompetenciesResult.data as SubScheduleCompetencyRow[] | null) ?? [],
@@ -1395,6 +1447,7 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
   const [
     competenciesResult,
     schedulesResult,
+    scheduleCompetenciesResult,
     employeesResult,
     employeeCompetenciesResult,
     subSchedulesResult,
@@ -1408,6 +1461,10 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
       supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, company_id, site_id, business_area_id"),
       session,
     ).order("name"),
+    applySessionScope(
+      supabase.from("schedule_competencies").select("schedule_id, competency_id, company_id, site_id, business_area_id"),
+      session,
+    ),
     applySessionScope(
       supabase
       .from("employees")
@@ -1440,6 +1497,7 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
   logSnapshotQueryErrors("Competencies snapshot", [
     ["competencies", competenciesResult.error],
     ["schedules", schedulesResult.error],
+    ["schedule_competencies", scheduleCompetenciesResult.error],
     ["employees", employeesResult.error],
     ["employee_competencies", employeeCompetenciesResult.error],
     ["sub_schedules", subSchedulesResult.error],
@@ -1450,13 +1508,14 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     (employeesResult.data as EmployeeRow[] | null) ?? [],
     (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
+  const scheduleCompetencyRows = (scheduleCompetenciesResult.data as ScheduleCompetencyRow[] | null) ?? [];
 
   return {
     month,
     productionUnits: [],
     competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
     timeCodes: [],
-    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule),
+    schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule, scheduleCompetencyRows),
     assignments: [],
     projectedAssignments: [],
     overtimeClaims: [],

@@ -965,6 +965,10 @@ select {
   align-items: center;
 }
 
+.workspace-toolbar--actions .planner-actions {
+  align-items: flex-end;
+}
+
 .workspace-toolbar--personnel-page {
   grid-template-columns: repeat(2, minmax(12rem, 16rem)) auto minmax(0, 1fr);
   align-items: end;

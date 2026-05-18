@@ -2,10 +2,15 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
-import { saveCompetencies, saveSubScheduleCompetencies } from "@/app/actions";
+import {
+  saveCompetencies,
+  saveScheduleCompetencies,
+  saveSubScheduleCompetencies,
+} from "@/app/actions";
 import type {
   CompetencyUpdate,
   SaveCompetenciesInput,
+  SaveScheduleCompetenciesInput,
   SaveSubScheduleCompetenciesInput,
   SchedulerSnapshot,
 } from "@/lib/types";
@@ -20,6 +25,8 @@ type EditableCompetency = {
   requiredStaff: number;
   qualifiedEmployeeCount: number;
 };
+
+type ScheduleTargetKey = `schedule:${string}` | `sub:${string}`;
 
 function cloneCompetencies(competencies: EditableCompetency[]) {
   return competencies.map((competency) => ({ ...competency }));
@@ -58,12 +65,24 @@ function getCompetencyIssues(competency: EditableCompetency) {
   return issues;
 }
 
+function buildInitialTargetKey(snapshot: SchedulerSnapshot): ScheduleTargetKey | "" {
+  if (snapshot.schedules[0]?.id) {
+    return `schedule:${snapshot.schedules[0].id}`;
+  }
+
+  if (snapshot.subSchedules[0]?.id) {
+    return `sub:${snapshot.subSchedules[0].id}`;
+  }
+
+  return "";
+}
+
 export function CompetenciesPanel({
   snapshot,
 }: {
   snapshot: SchedulerSnapshot;
 }) {
-  const [viewMode, setViewMode] = useState<"main" | "sub">("main");
+  const [viewMode, setViewMode] = useState<"library" | "availability">("library");
   const initialCompetencies = useMemo<EditableCompetency[]>(
     () =>
       snapshot.competencies.map((competency) => ({
@@ -72,9 +91,9 @@ export function CompetenciesPanel({
         label: competency.label,
         colorToken: competency.colorToken,
         requiredStaff: competency.requiredStaff,
-        qualifiedEmployeeCount: snapshot.schedules.flatMap((schedule) => schedule.employees).filter((employee) =>
-          employee.competencyIds.includes(competency.id),
-        ).length,
+        qualifiedEmployeeCount: snapshot.schedules
+          .flatMap((schedule) => schedule.employees)
+          .filter((employee) => employee.competencyIds.includes(competency.id)).length,
       })),
     [snapshot.competencies, snapshot.schedules],
   );
@@ -84,14 +103,9 @@ export function CompetenciesPanel({
   const [deletedCompetencyIds, setDeletedCompetencyIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
+  const [isSavingScheduleCompetencies, startScheduleSaveTransition] = useTransition();
   const [isSavingSubScheduleCompetencies, startSubScheduleSaveTransition] = useTransition();
-  const availableSubSchedules = useMemo(
-    () => snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived),
-    [snapshot.subSchedules],
-  );
-  const [selectedSubScheduleId, setSelectedSubScheduleId] = useState(
-    availableSubSchedules[0]?.id ?? snapshot.subSchedules[0]?.id ?? "",
-  );
+  const [selectedTargetKey, setSelectedTargetKey] = useState<ScheduleTargetKey | "">(buildInitialTargetKey(snapshot));
 
   useEffect(() => {
     setCompetencies(cloneCompetencies(initialCompetencies));
@@ -101,28 +115,40 @@ export function CompetenciesPanel({
   }, [initialCompetencies]);
 
   useEffect(() => {
-    setSelectedSubScheduleId((current) =>
-      snapshot.subSchedules.some((subSchedule) => subSchedule.id === current)
-        ? current
-        : availableSubSchedules[0]?.id ?? snapshot.subSchedules[0]?.id ?? "",
-    );
-  }, [availableSubSchedules, snapshot.subSchedules]);
+    setSelectedTargetKey((current) => {
+      if (
+        current &&
+        (snapshot.schedules.some((schedule) => `schedule:${schedule.id}` === current) ||
+          snapshot.subSchedules.some((subSchedule) => `sub:${subSchedule.id}` === current))
+      ) {
+        return current;
+      }
 
-  const selectedSubSchedule =
-    snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleId) ?? null;
-  const [baselineSubScheduleCompetencyIds, setBaselineSubScheduleCompetencyIds] = useState<string[]>(
-    selectedSubSchedule?.competencyIds ?? [],
+      return buildInitialTargetKey(snapshot);
+    });
+  }, [snapshot.schedules, snapshot.subSchedules]);
+
+  const selectedScheduleId = selectedTargetKey.startsWith("schedule:") ? selectedTargetKey.slice("schedule:".length) : "";
+  const selectedSubScheduleId = selectedTargetKey.startsWith("sub:") ? selectedTargetKey.slice("sub:".length) : "";
+  const selectedSchedule = snapshot.schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
+  const selectedSubSchedule = snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleId) ?? null;
+  const selectedTargetLabel = selectedSchedule
+    ? `Shift ${selectedSchedule.name}`
+    : selectedSubSchedule?.name ?? null;
+  const selectedTargetIsArchived = selectedSubSchedule?.isArchived ?? false;
+  const selectedTargetCompetencyIds = selectedSchedule?.competencyIds ?? selectedSubSchedule?.competencyIds ?? [];
+  const [baselineTargetCompetencyIds, setBaselineTargetCompetencyIds] = useState<string[]>(
+    selectedTargetCompetencyIds,
   );
-  const [draftSubScheduleCompetencyIds, setDraftSubScheduleCompetencyIds] = useState<string[]>(
-    selectedSubSchedule?.competencyIds ?? [],
+  const [draftTargetCompetencyIds, setDraftTargetCompetencyIds] = useState<string[]>(
+    selectedTargetCompetencyIds,
   );
 
   useEffect(() => {
-    const nextIds = selectedSubSchedule?.competencyIds ?? [];
-    setBaselineSubScheduleCompetencyIds(nextIds);
-    setDraftSubScheduleCompetencyIds(nextIds);
+    setBaselineTargetCompetencyIds(selectedTargetCompetencyIds);
+    setDraftTargetCompetencyIds(selectedTargetCompetencyIds);
     setStatusMessage("");
-  }, [selectedSubScheduleId, selectedSubSchedule?.competencyIds]);
+  }, [selectedTargetKey, selectedTargetCompetencyIds]);
 
   const baselineMap = useMemo(
     () => new Map(baselineCompetencies.map((competency) => [competency.id, normalizeCompetency(competency)])),
@@ -155,11 +181,11 @@ export function CompetenciesPanel({
       (competency) =>
         JSON.stringify(baselineMap.get(competency.competencyId)) !== JSON.stringify(competency),
     );
-  const hasChanges = dirtyUpdates.length > 0 || deletedCompetencyIds.length > 0;
+  const hasLibraryChanges = dirtyUpdates.length > 0 || deletedCompetencyIds.length > 0;
   const hasValidationErrors = invalidCompetencyIds.size > 0;
-  const hasSubScheduleCompetencyChanges =
-    JSON.stringify([...baselineSubScheduleCompetencyIds].sort()) !==
-    JSON.stringify([...draftSubScheduleCompetencyIds].sort());
+  const hasAvailabilityChanges =
+    JSON.stringify([...baselineTargetCompetencyIds].sort()) !==
+    JSON.stringify([...draftTargetCompetencyIds].sort());
 
   function updateCompetency(
     competencyId: string,
@@ -194,7 +220,7 @@ export function CompetenciesPanel({
     setStatusMessage("");
   }
 
-  function handleSave() {
+  function handleSaveLibrary() {
     if (hasValidationErrors) {
       setStatusMessage("Fix the highlighted competencies before saving.");
       return;
@@ -214,14 +240,14 @@ export function CompetenciesPanel({
     });
   }
 
-  function handleRevert() {
+  function handleRevertLibrary() {
     setCompetencies(cloneCompetencies(baselineCompetencies));
     setDeletedCompetencyIds([]);
     setStatusMessage("Changes reverted.");
   }
 
-  function toggleSubScheduleCompetency(competencyId: string) {
-    setDraftSubScheduleCompetencyIds((current) =>
+  function toggleTargetCompetency(competencyId: string) {
+    setDraftTargetCompetencyIds((current) =>
       current.includes(competencyId)
         ? current.filter((id) => id !== competencyId)
         : [...current, competencyId],
@@ -229,27 +255,42 @@ export function CompetenciesPanel({
     setStatusMessage("");
   }
 
-  function handleSaveSubScheduleCompetencySet() {
-    if (!selectedSubSchedule) {
-      setStatusMessage("Select a sub-schedule first.");
+  function handleSaveAvailability() {
+    if (!selectedSchedule && !selectedSubSchedule) {
+      setStatusMessage("Select a schedule first.");
+      return;
+    }
+
+    if (selectedSchedule) {
+      startScheduleSaveTransition(async () => {
+        const result = await saveScheduleCompetencies({
+          scheduleId: selectedSchedule.id,
+          competencyIds: draftTargetCompetencyIds,
+        } as SaveScheduleCompetenciesInput);
+        setStatusMessage(result.message);
+
+        if (result.ok) {
+          setBaselineTargetCompetencyIds([...draftTargetCompetencyIds]);
+        }
+      });
       return;
     }
 
     startSubScheduleSaveTransition(async () => {
       const result = await saveSubScheduleCompetencies({
-        subScheduleId: selectedSubSchedule.id,
-        competencyIds: draftSubScheduleCompetencyIds,
+        subScheduleId: selectedSubSchedule!.id,
+        competencyIds: draftTargetCompetencyIds,
       } as SaveSubScheduleCompetenciesInput);
       setStatusMessage(result.message);
 
       if (result.ok) {
-        setBaselineSubScheduleCompetencyIds([...draftSubScheduleCompetencyIds]);
+        setBaselineTargetCompetencyIds([...draftTargetCompetencyIds]);
       }
     });
   }
 
-  function handleRevertSubScheduleCompetencySet() {
-    setDraftSubScheduleCompetencyIds([...baselineSubScheduleCompetencyIds]);
+  function handleRevertAvailability() {
+    setDraftTargetCompetencyIds([...baselineTargetCompetencyIds]);
     setStatusMessage("Changes reverted.");
   }
 
@@ -263,32 +304,32 @@ export function CompetenciesPanel({
         <div className="planner-actions">
           <button
             type="button"
-            className={viewMode === "main" ? "primary-button" : "ghost-button"}
-            onClick={() => setViewMode("main")}
+            className={viewMode === "library" ? "primary-button" : "ghost-button"}
+            onClick={() => setViewMode("library")}
           >
-            Main schedules
+            Competency library
           </button>
           <button
             type="button"
-            className={viewMode === "sub" ? "primary-button" : "ghost-button"}
-            onClick={() => setViewMode("sub")}
+            className={viewMode === "availability" ? "primary-button" : "ghost-button"}
+            onClick={() => setViewMode("availability")}
           >
-            Sub-schedules
+            Schedule availability
           </button>
 
-          {viewMode === "main" ? (
+          {viewMode === "library" ? (
             <>
               <button type="button" className="ghost-button" onClick={handleAddCompetency}>
                 Add competency
               </button>
-              <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+              <button type="button" className="ghost-button" onClick={handleRevertLibrary} disabled={isSaving || !hasLibraryChanges}>
                 Revert
               </button>
               <button
                 type="button"
                 className="primary-button"
-                onClick={handleSave}
-                disabled={isSaving || !hasChanges || hasValidationErrors}
+                onClick={handleSaveLibrary}
+                disabled={isSaving || !hasLibraryChanges || hasValidationErrors}
               >
                 {isSaving ? "Saving..." : "Save"}
               </button>
@@ -296,59 +337,72 @@ export function CompetenciesPanel({
           ) : (
             <>
               <label className="field">
-                <span>Sub-schedule</span>
                 <select
-                  value={selectedSubScheduleId}
-                  onChange={(event) => setSelectedSubScheduleId(event.target.value)}
+                  value={selectedTargetKey}
+                  onChange={(event) => setSelectedTargetKey(event.target.value as ScheduleTargetKey)}
                 >
-                  {snapshot.subSchedules.map((subSchedule) => (
-                    <option key={subSchedule.id} value={subSchedule.id}>
-                      {subSchedule.name}{subSchedule.isArchived ? " (Archived)" : ""}
-                    </option>
-                  ))}
+                  <optgroup label="Main schedules">
+                    {snapshot.schedules.map((schedule) => (
+                      <option key={`schedule:${schedule.id}`} value={`schedule:${schedule.id}`}>
+                        Shift {schedule.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Sub-schedules">
+                    {snapshot.subSchedules.map((subSchedule) => (
+                      <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
+                        {subSchedule.name}{subSchedule.isArchived ? " (Archived)" : ""}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </label>
               <button
                 type="button"
                 className="ghost-button"
-                onClick={handleRevertSubScheduleCompetencySet}
-                disabled={isSavingSubScheduleCompetencies || !hasSubScheduleCompetencyChanges}
+                onClick={handleRevertAvailability}
+                disabled={
+                  isSavingScheduleCompetencies ||
+                  isSavingSubScheduleCompetencies ||
+                  !hasAvailabilityChanges
+                }
               >
                 Revert
               </button>
               <button
                 type="button"
                 className="primary-button"
-                onClick={handleSaveSubScheduleCompetencySet}
+                onClick={handleSaveAvailability}
                 disabled={
+                  isSavingScheduleCompetencies ||
                   isSavingSubScheduleCompetencies ||
-                  !selectedSubSchedule ||
-                  selectedSubSchedule.isArchived ||
-                  !hasSubScheduleCompetencyChanges
+                  !selectedTargetLabel ||
+                  selectedTargetIsArchived ||
+                  !hasAvailabilityChanges
                 }
               >
-                {isSavingSubScheduleCompetencies ? "Saving..." : "Save"}
+                {isSavingScheduleCompetencies || isSavingSubScheduleCompetencies ? "Saving..." : "Save"}
               </button>
             </>
           )}
         </div>
 
         <div className="toolbar-status-wrap">
-          {viewMode === "main" && hasValidationErrors ? (
+          {viewMode === "library" && hasValidationErrors ? (
             <p className="toolbar-status">Fix the highlighted competencies before saving.</p>
           ) : statusMessage ? (
             <p className="toolbar-status">{statusMessage}</p>
-          ) : viewMode === "sub" && selectedSubSchedule ? (
+          ) : viewMode === "availability" && selectedTargetLabel ? (
             <p className="toolbar-status">
-              {selectedSubSchedule.isArchived
+              {selectedTargetIsArchived
                 ? "Archived sub-schedules stay visible for history but their competency set is read-only."
-                : "Choose which competencies this sub-schedule can use in its builder and overtime board."}
+                : `Choose which competencies ${selectedTargetLabel} can use in its builder and overtime board.`}
             </p>
           ) : null}
         </div>
       </div>
 
-      {viewMode === "main" ? (
+      {viewMode === "library" ? (
         <div className="personnel-table-wrap">
           <table className="personnel-table">
             <thead>
@@ -476,19 +530,19 @@ export function CompetenciesPanel({
               </tr>
             </thead>
             <tbody>
-              {selectedSubSchedule ? (
+              {selectedTargetLabel ? (
                 competencies.map((competency) => {
-                  const isEnabled = draftSubScheduleCompetencyIds.includes(competency.id);
+                  const isEnabled = draftTargetCompetencyIds.includes(competency.id);
 
                   return (
-                    <tr key={`${selectedSubSchedule.id}-${competency.id}`}>
+                    <tr key={`${selectedTargetKey}-${competency.id}`}>
                       <td>
                         <label className="subschedule-status-toggle">
                           <input
                             type="checkbox"
                             checked={isEnabled}
-                            disabled={selectedSubSchedule.isArchived}
-                            onChange={() => toggleSubScheduleCompetency(competency.id)}
+                            disabled={selectedTargetIsArchived}
+                            onChange={() => toggleTargetCompetency(competency.id)}
                           />
                           <span>{isEnabled ? "Included" : "Hidden"}</span>
                         </label>
@@ -509,8 +563,8 @@ export function CompetenciesPanel({
                 <tr>
                   <td colSpan={6}>
                     <div className="empty-state">
-                      <strong>No sub-schedules yet.</strong>
-                      <span>Create a sub-schedule first, then assign its allowed competencies here.</span>
+                      <strong>No schedules available.</strong>
+                      <span>Create a main schedule or sub-schedule first, then assign its allowed competencies here.</span>
                     </div>
                   </td>
                 </tr>

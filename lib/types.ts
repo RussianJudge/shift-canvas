@@ -71,6 +71,7 @@ export interface Schedule extends OrganizationScope {
   nightShiftDays: number;
   offDays: number;
   employees: Employee[];
+  competencyIds: string[];
 }
 
 export interface StoredAssignment extends OrganizationScope {
@@ -318,6 +319,11 @@ export interface CompetencyUpdate {
 export interface SaveCompetenciesInput {
   updates: CompetencyUpdate[];
   deletedCompetencyIds: string[];
+}
+
+export interface SaveScheduleCompetenciesInput {
+  scheduleId: string;
+  competencyIds: string[];
 }
 
 export interface TimeCodeUpdate {

@@ -291,7 +291,7 @@ function ManualOvertimePostingModal({
   const availableSubSchedules = snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived);
   const availableCompetencies =
     targetMode === "main"
-      ? snapshot.competencies
+      ? snapshot.competencies.filter((competency) => selectedSchedule?.competencyIds.includes(competency.id))
       : snapshot.competencies.filter((competency) =>
           selectedSubSchedule?.competencyIds.includes(competency.id),
         );
@@ -494,14 +494,16 @@ export function OvertimePanel({
   );
   const selectedManualSubSchedule =
     snapshot.subSchedules.find((subSchedule) => subSchedule.id === manualSubScheduleId) ?? null;
+  const selectedManualSchedule =
+    snapshot.schedules.find((schedule) => schedule.id === manualScheduleId) ?? null;
   const availableManualCompetencies = useMemo(
     () =>
       manualTargetMode === "main"
-        ? snapshot.competencies
+        ? snapshot.competencies.filter((competency) => selectedManualSchedule?.competencyIds.includes(competency.id))
         : snapshot.competencies.filter((competency) =>
             selectedManualSubSchedule?.competencyIds.includes(competency.id),
           ),
-    [manualTargetMode, selectedManualSubSchedule, snapshot.competencies],
+    [manualTargetMode, selectedManualSchedule, selectedManualSubSchedule, snapshot.competencies],
   );
 
   useEffect(() => {
@@ -589,7 +591,11 @@ export function OvertimePanel({
 
           const setDates = segment.dates;
 
-          for (const competency of snapshot.competencies) {
+          const scheduleCompetencies = snapshot.competencies.filter((competency) =>
+            schedule.competencyIds.includes(competency.id),
+          );
+
+          for (const competency of scheduleCompetencies) {
             const missingSlotsByDate = setDates.map((date) => {
               let filledCount = 0;
 
@@ -1163,13 +1169,25 @@ export function OvertimePanel({
           >
             <option value="all">All competencies</option>
             {snapshot.competencies
-              .filter((competency) =>
-                viewMode === "main" || selectedScheduleFilter === "all"
-                  ? true
-                  : snapshot.subSchedules
-                      .find((subSchedule) => subSchedule.id === selectedScheduleFilter)
-                      ?.competencyIds.includes(competency.id) ?? false,
-              )
+              .filter((competency) => {
+                if (viewMode === "main") {
+                  if (selectedScheduleFilter === "all") {
+                    return snapshot.schedules.some((schedule) => schedule.competencyIds.includes(competency.id));
+                  }
+
+                  return (
+                    snapshot.schedules.find((schedule) => schedule.id === selectedScheduleFilter)?.competencyIds.includes(competency.id) ?? false
+                  );
+                }
+
+                if (selectedScheduleFilter === "all") {
+                  return snapshot.subSchedules.some((subSchedule) => subSchedule.competencyIds.includes(competency.id));
+                }
+
+                return (
+                  snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedScheduleFilter)?.competencyIds.includes(competency.id) ?? false
+                );
+              })
               .map((competency) => (
               <option key={competency.id} value={competency.id}>
                 {competency.code}

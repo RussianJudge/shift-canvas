@@ -965,6 +965,13 @@ export function MonthlyScheduler({
   const extendedMonthDays = useMemo(() => getExtendedMonthDays(currentMonth), [currentMonth]);
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
   const activeScheduleId = activeSchedule?.id ?? "";
+  const activeScheduleCompetencies = useMemo(
+    () =>
+      activeSchedule
+        ? snapshot.competencies.filter((competency) => activeSchedule.competencyIds.includes(competency.id))
+        : [],
+    [activeSchedule, snapshot.competencies],
+  );
   const selectedSetDays = useMemo(
     () => (activeSchedule ? getWorkedSetDays(activeSchedule, extendedMonthDays, selectedSetAnchorDate) : []),
     [activeSchedule, extendedMonthDays, selectedSetAnchorDate],
@@ -1004,7 +1011,7 @@ export function MonthlyScheduler({
       return {};
     }
 
-    return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
+    return activeScheduleCompetencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
       let hasOvertime = false;
       const missingDates: string[] = [];
@@ -1064,7 +1071,7 @@ export function MonthlyScheduler({
 
       return map;
     }, {});
-  }, [activeSchedule, effectiveAssignments, employeeMap, selectedSetDays, snapshot.competencies, snapshot.overtimeClaims, snapshot.timeCodes]);
+  }, [activeSchedule, activeScheduleCompetencies, effectiveAssignments, employeeMap, selectedSetDays, snapshot.overtimeClaims, snapshot.timeCodes]);
   const unassignedSetCells = useMemo(() => {
     if (!activeSchedule || selectedSetDays.length === 0) {
       return [];
@@ -1268,7 +1275,10 @@ export function MonthlyScheduler({
         )
       : { competencyId: null, timeCodeId: null, notes: null };
   const editorEmployeeCompetencies = editorEmployee
-    ? editorEmployee.competencyIds.map((competencyId) => competencyMap[competencyId]).filter(isCompetency)
+    ? editorEmployee.competencyIds
+        .filter((competencyId) => activeSchedule?.competencyIds.includes(competencyId))
+        .map((competencyId) => competencyMap[competencyId])
+        .filter(isCompetency)
     : [];
   const highlightedMissingDates = selectedCoverageCompetencyId
     ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
@@ -1945,7 +1955,7 @@ export function MonthlyScheduler({
       setDays: selectedSetDays,
       assignments: draftAssignments,
       occupiedAssignments: effectiveAssignments,
-      competencies: snapshot.competencies,
+      competencies: activeScheduleCompetencies,
       timeCodes: snapshot.timeCodes,
     });
 
@@ -2284,7 +2294,7 @@ export function MonthlyScheduler({
             </div>
 
             <div className="set-builder-pills">
-              {snapshot.competencies.map((competency) => {
+              {activeScheduleCompetencies.map((competency) => {
                 const coverage = competencyCoverage[competency.id];
 
                 return (

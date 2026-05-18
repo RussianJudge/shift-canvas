@@ -15,8 +15,9 @@ import type {
   ReleaseOvertimePostingInput,
   SaveAssignmentsInput,
   SaveCompetenciesInput,
-    SavePersonnelInput,
-    SaveSchedulesInput,
+  SavePersonnelInput,
+  SaveScheduleCompetenciesInput,
+  SaveSchedulesInput,
     SaveSubScheduleAssignmentsInput,
     SaveSubScheduleCompetenciesInput,
     SaveSubSchedulesInput,
@@ -1027,6 +1028,13 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     };
   }
 
+  if (schedule && !schedule.competencyIds.includes(competency.id)) {
+    return {
+      ok: false,
+      message: "That competency is not enabled for the selected main schedule.",
+    };
+  }
+
   if (subSchedule && !subSchedule.competencyIds.includes(competency.id)) {
     return {
       ok: false,
@@ -1266,6 +1274,20 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     return {
       ok: false,
       message: `${employee.name} is not qualified for ${competency.code}.`,
+    };
+  }
+
+  if (targetSchedule && !targetSchedule.competencyIds.includes(input.competencyId)) {
+    return {
+      ok: false,
+      message: "That competency is not enabled for the selected main schedule.",
+    };
+  }
+
+  if (targetSchedule && !targetSchedule.competencyIds.includes(coverageCompetencyId)) {
+    return {
+      ok: false,
+      message: "That coverage competency is not enabled for the selected main schedule.",
     };
   }
 
@@ -3478,6 +3500,122 @@ export async function saveSubSchedules(input: SaveSubSchedulesInput) {
   return {
     ok: true,
     message: "Sub-schedule changes saved to Supabase.",
+  };
+}
+
+/** Persists the competency set allowed inside one selected main schedule. */
+export async function saveScheduleCompetencies(input: SaveScheduleCompetenciesInput) {
+  const session = await requireActionRole(["admin"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins can change main schedule competencies.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Main schedule competencies are unavailable.",
+    };
+  }
+
+  const scheduleResult = await supabase
+    .from("schedules")
+    .select("id, company_id, site_id, business_area_id")
+    .eq("id", input.scheduleId)
+    .maybeSingle();
+
+  const schedule = scheduleResult.data as ({ id: string } & ScopedDatabaseRow) | null;
+
+  if (scheduleResult.error || !schedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected main schedule.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(schedule))) {
+    return {
+      ok: false,
+      message: "You do not have permission to edit that main schedule.",
+    };
+  }
+
+  const competencyIds = Array.from(new Set(input.competencyIds.filter(Boolean)));
+  const competencyRowsResult =
+    competencyIds.length > 0
+      ? await supabase
+          .from("competencies")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", competencyIds)
+      : { data: [], error: null };
+
+  const competencyRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+  if (competencyRowsResult.error || competencyRows.length !== competencyIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected competencies.",
+    };
+  }
+
+  const scheduleScope = scopeFromRow(schedule);
+
+  for (const row of competencyRows) {
+    const competencyScope = scopeFromRow(row);
+
+    if (
+      competencyScope.companyId !== scheduleScope.companyId ||
+      competencyScope.siteId !== scheduleScope.siteId ||
+      competencyScope.businessAreaId !== scheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Schedule competencies must come from the same company, site, and business area as the schedule.",
+      };
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("schedule_competencies")
+    .delete()
+    .eq("schedule_id", input.scheduleId);
+
+  if (deleteError) {
+    return {
+      ok: false,
+      message: `Could not clear existing schedule competencies: ${deleteError.message}`,
+    };
+  }
+
+  if (competencyIds.length > 0) {
+    const { error: insertError } = await supabase.from("schedule_competencies").insert(
+      competencyIds.map((competencyId) => ({
+        schedule_id: input.scheduleId,
+        competency_id: competencyId,
+        ...toDatabaseScope(scheduleScope),
+      })),
+    );
+
+    if (insertError) {
+      return {
+        ok: false,
+        message: `Could not save schedule competencies: ${insertError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/schedule");
+  revalidatePath("/competencies");
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: "Main schedule competencies saved to Supabase.",
   };
 }
 

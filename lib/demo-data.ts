@@ -67,6 +67,7 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      competencyIds: ["comp-post-1", "comp-post-11", "comp-post-12", "comp-post-21", "comp-dock-2", "comp-dock-7", "comp-pack-3", "comp-pack-6", "comp-pack-9"],
       employees: [
         demoEmployee({ id: "emp-ava", name: "Ava Patel", role: "Senior Operator", scheduleId: "schedule-601", competencyIds: ["comp-post-1", "comp-post-11", "comp-post-12"] }),
         demoEmployee({ id: "emp-cam", name: "Cam Russell", role: "Dispatch Lead", scheduleId: "schedule-601", competencyIds: ["comp-dock-2", "comp-dock-7"] }),
@@ -83,6 +84,7 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      competencyIds: ["comp-post-11", "comp-post-12", "comp-post-21", "comp-dock-2", "comp-dock-7", "comp-dock-9", "comp-pack-3", "comp-pack-6", "comp-pack-9"],
       employees: [
         demoEmployee({ id: "emp-noah", name: "Noah Kim", role: "Relief Operator", scheduleId: "schedule-602", competencyIds: ["comp-post-11", "comp-post-21"] }),
         demoEmployee({ id: "emp-lena", name: "Lena Abbas", role: "Yard Specialist", scheduleId: "schedule-602", competencyIds: ["comp-dock-7", "comp-dock-9"] }),
@@ -99,6 +101,7 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      competencyIds: ["comp-post-11", "comp-post-12", "comp-post-21", "comp-dock-2", "comp-dock-7", "comp-dock-9", "comp-pack-3", "comp-pack-6", "comp-pack-9"],
       employees: [
         demoEmployee({ id: "emp-jules", name: "Jules Martin", role: "Coordinator", scheduleId: "schedule-603", competencyIds: ["comp-post-12", "comp-post-21"] }),
         demoEmployee({ id: "emp-eli", name: "Eli Foster", role: "Coordinator", scheduleId: "schedule-603", competencyIds: ["comp-dock-2", "comp-dock-9"] }),
@@ -115,6 +118,7 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      competencyIds: ["comp-post-1", "comp-post-12", "comp-dock-2", "comp-dock-7", "comp-dock-9", "comp-pack-3", "comp-pack-6"],
       employees: [
         demoEmployee({ id: "emp-mika", name: "Mika Stone", role: "Operator", scheduleId: "schedule-604", competencyIds: ["comp-post-1", "comp-post-12"] }),
         demoEmployee({ id: "emp-zara", name: "Zara Shah", role: "Relief Operator", scheduleId: "schedule-604", competencyIds: ["comp-dock-2", "comp-dock-7", "comp-dock-9"] }),
