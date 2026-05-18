@@ -20,6 +20,10 @@ async function MutualsBoard({
   return <MutualsPanel snapshot={snapshot} viewer={session} />;
 }
 
+function formatYearLabel(month: string) {
+  return month.slice(0, 4);
+}
+
 function MutualsBoardFallback({
   month,
   viewer,
@@ -32,9 +36,9 @@ function MutualsBoardFallback({
       <LoadingToolbarFields
         className="workspace-toolbar workspace-toolbar--personnel-page"
         fields={[
-          { label: "Month", value: formatMonthLabel(month) },
+          { label: "Year", value: formatYearLabel(month) },
           { label: "Viewer", value: viewer.displayName },
-          { label: "Status", value: "Loading mutual board..." },
+          { label: "Status", value: "Loading mutual year..." },
         ]}
       />
       <section className="metrics-section mutuals-section">
@@ -58,7 +62,7 @@ function MutualsBoardFallback({
           <div className="metrics-section__title-group">
             <h2 className="metrics-section__title">Open Mutuals</h2>
           </div>
-          <LoadingMonthNav monthLabel={formatMonthLabel(month)} />
+          <LoadingMonthNav monthLabel={formatYearLabel(month)} />
         </div>
         <LoadingCardList cards={3} />
       </section>

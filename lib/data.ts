@@ -471,6 +471,15 @@ function getMonthBounds(month: string) {
   };
 }
 
+function getYearBounds(month: string) {
+  const year = month.slice(0, 4);
+
+  return {
+    yearStart: `${year}-01-01`,
+    yearEnd: `${year}-12-31`,
+  };
+}
+
 function getYearStart(dateKey: string) {
   return `${dateKey.slice(0, 4)}-01-01`;
 }
@@ -1674,15 +1683,15 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
     };
   }
 
-  const { monthStart, monthEnd } = getMonthBounds(month);
+  const { yearStart, yearEnd } = getYearBounds(month);
   const postingIdsForMonthResult = await applySessionScope(
     supabase
     .from("mutual_shift_posting_dates")
     .select("posting_id, swap_date, shift_kind, company_id, site_id, business_area_id"),
     session,
   )
-    .gte("swap_date", monthStart)
-    .lte("swap_date", monthEnd)
+    .gte("swap_date", yearStart)
+    .lte("swap_date", yearEnd)
     .order("swap_date");
 
   const postingIds = Array.from(
