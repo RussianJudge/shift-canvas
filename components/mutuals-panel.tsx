@@ -589,8 +589,32 @@ export function MutualsPanel({
 
   return (
     <section className="panel-frame mutuals-page">
-      <div className="panel-heading panel-heading--simple">
+      <div className="panel-heading panel-heading--simple mutuals-topbar">
         <h1 className="panel-title">Mutuals</h1>
+        <div className="field field--static mutuals-topbar__year">
+          <span>Year</span>
+          <div className="mutuals-month-nav">
+            <strong>{formatYearLabel(viewMonth)}</strong>
+            <div className="mutuals-month-nav__buttons">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, -12))}
+                disabled={isMonthLoading}
+              >
+                Prev year
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, 12))}
+                disabled={isMonthLoading}
+              >
+                Next year
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {statusMessage ? (
@@ -601,44 +625,20 @@ export function MutualsPanel({
         </div>
       ) : null}
 
-      <div className="mutuals-create-action">
-        <button
-          type="button"
-          className="primary-button"
-          onClick={() => setIsPostModalOpen(true)}
-          disabled={isSubmitting}
-        >
-          Create post mutual
-        </button>
-      </div>
-
       <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
           <h2 className="metrics-section__title">Open Mutuals</h2>
-          <div className="field field--static">
-            <span>Year</span>
-            <div className="mutuals-month-nav">
-              <strong>{formatYearLabel(viewMonth)}</strong>
-              <div className="mutuals-month-nav__buttons">
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, -12))}
-                  disabled={isMonthLoading}
-                >
-                  Prev year
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, 12))}
-                  disabled={isMonthLoading}
-                >
-                  Next year
-                </button>
-              </div>
-            </div>
-          </div>
+        </div>
+
+        <div className="mutuals-create-action">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => setIsPostModalOpen(true)}
+            disabled={isSubmitting}
+          >
+            Create Mutual Posting
+          </button>
         </div>
 
         <div className="metrics-team-list">

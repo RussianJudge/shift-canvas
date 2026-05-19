@@ -134,10 +134,17 @@ export function CompetenciesPanel({
     ? "Main schedule"
     : selectedSubSchedule?.name ?? null;
   const selectedTargetIsArchived = selectedSubSchedule?.isArchived ?? false;
-  const selectedTargetCompetencyIds =
-    selectedTargetKey === "main"
-      ? Array.from(new Set(snapshot.schedules.flatMap((schedule) => schedule.competencyIds)))
-      : selectedSubSchedule?.competencyIds ?? [];
+  const selectedTargetCompetencyIds = useMemo(
+    () =>
+      selectedTargetKey === "main"
+        ? Array.from(new Set(snapshot.schedules.flatMap((schedule) => schedule.competencyIds))).sort()
+        : [...(selectedSubSchedule?.competencyIds ?? [])].sort(),
+    [selectedSubSchedule?.competencyIds, selectedTargetKey, snapshot.schedules],
+  );
+  const selectedTargetCompetencySignature = useMemo(
+    () => JSON.stringify(selectedTargetCompetencyIds),
+    [selectedTargetCompetencyIds],
+  );
   const [baselineTargetCompetencyIds, setBaselineTargetCompetencyIds] = useState<string[]>(
     selectedTargetCompetencyIds,
   );
@@ -149,7 +156,7 @@ export function CompetenciesPanel({
     setBaselineTargetCompetencyIds(selectedTargetCompetencyIds);
     setDraftTargetCompetencyIds(selectedTargetCompetencyIds);
     setStatusMessage("");
-  }, [selectedTargetKey, selectedTargetCompetencyIds]);
+  }, [selectedTargetCompetencySignature, selectedTargetKey]);
 
   const baselineMap = useMemo(
     () => new Map(baselineCompetencies.map((competency) => [competency.id, normalizeCompetency(competency)])),

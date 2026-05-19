@@ -835,7 +835,6 @@ select {
 .primary-button {
   background: var(--team-accent);
   color: white;
-  box-shadow: 0 12px 24px rgba(23, 20, 17, 0.16);
 }
 
 .primary-button:disabled,
@@ -972,6 +971,35 @@ select {
 .workspace-toolbar--personnel-page {
   grid-template-columns: repeat(2, minmax(12rem, 16rem)) auto minmax(0, 1fr);
   align-items: end;
+}
+
+.personnel-toolbar-actions {
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.personnel-actions-menu {
+  position: relative;
+}
+
+.personnel-actions-menu__panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 0.35rem;
+  min-width: 13rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 252, 247, 0.98);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
+}
+
+.personnel-actions-menu__item {
+  justify-content: flex-start;
+  width: 100%;
 }
 
 .workspace-toolbar--overtime {
@@ -1517,6 +1545,18 @@ select {
 
 .mutuals-page {
   padding-bottom: 1.5rem;
+}
+
+.mutuals-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 1rem;
+}
+
+.mutuals-topbar__year {
+  justify-self: end;
+  text-align: right;
 }
 
 .mutuals-section {
@@ -3054,6 +3094,15 @@ select {
     padding-inline: 0;
   }
 
+  .personnel-toolbar-actions {
+    justify-content: flex-start;
+  }
+
+  .personnel-actions-menu__panel {
+    right: auto;
+    left: 0;
+  }
+
   .metrics-grid,
   .mutuals-section {
     padding-inline: 1rem;
@@ -3099,6 +3148,15 @@ select {
   .mutual-applications,
   .mutual-accepted-grid {
     min-width: 0;
+  }
+
+  .mutuals-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .mutuals-topbar__year {
+    justify-self: stretch;
+    text-align: left;
   }
 
   .mutual-date-summary,

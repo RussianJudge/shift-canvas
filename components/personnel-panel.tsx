@@ -343,6 +343,7 @@ export function PersonnelPanel({
   viewer: AppSession;
 }) {
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
   const initialEmployees = useMemo<EditableEmployee[]>(
     () =>
       snapshot.schedules.flatMap((schedule) =>
@@ -369,6 +370,7 @@ export function PersonnelPanel({
   const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
   const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
   const [showInviteBuilder, setShowInviteBuilder] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [inviteDraft, setInviteDraft] = useState<InviteDraft>(createInviteDraft);
   const [inviteLink, setInviteLink] = useState("");
   const [inviteStatusMessage, setInviteStatusMessage] = useState("");
@@ -482,6 +484,7 @@ export function PersonnelPanel({
     setPendingCsvImport(null);
     setDraftEmployee(null);
     setShowInviteBuilder(false);
+    setShowActionsMenu(false);
     setInviteDraft(createInviteDraft());
     setInviteLink("");
     setInviteStatusMessage("");
@@ -516,6 +519,33 @@ export function PersonnelPanel({
       role: "worker",
     }));
   }, [canInviteAdmin, inviteDraft.role]);
+
+  useEffect(() => {
+    if (!showActionsMenu) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!actionsMenuRef.current?.contains(event.target as Node)) {
+        setShowActionsMenu(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowActionsMenu(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [showActionsMenu]);
+
   const hasValidationErrors = invalidEmployeeIds.size > 0;
   const draftEmployeeIssues = draftEmployee ? getEmployeeIssues(draftEmployee) : [];
   const draftEmployeeFieldIssues = draftEmployee ? getEmployeeFieldIssues(draftEmployee) : {};
@@ -623,6 +653,7 @@ export function PersonnelPanel({
       return;
     }
 
+    setShowActionsMenu(false);
     setDraftEmployee((current) => current ?? createDraftEmployee());
     setStatusMessage("");
   }
@@ -645,6 +676,7 @@ export function PersonnelPanel({
   }
 
   async function handleCsvImport(event: ChangeEvent<HTMLInputElement>) {
+    setShowActionsMenu(false);
     const file = event.target.files?.[0];
     event.target.value = "";
 
@@ -948,22 +980,51 @@ export function PersonnelPanel({
           </select>
         </label>
 
-        <div className="planner-actions">
-          <button type="button" className="ghost-button" onClick={handleAddEmployee}>
-            Add employee
-          </button>
-          {canManageInvites ? (
+        <div className="planner-actions personnel-toolbar-actions">
+          <div className="personnel-actions-menu" ref={actionsMenuRef}>
             <button
               type="button"
               className="ghost-button"
-              onClick={() => setShowInviteBuilder((current) => !current)}
+              aria-haspopup="menu"
+              aria-expanded={showActionsMenu}
+              onClick={() => setShowActionsMenu((current) => !current)}
             >
-              {showInviteBuilder ? "Hide invite builder" : "Invite account"}
+              Actions
             </button>
-          ) : null}
-          <button type="button" className="ghost-button" onClick={() => csvInputRef.current?.click()}>
-            Import CSV
-          </button>
+            {showActionsMenu ? (
+              <div className="personnel-actions-menu__panel" role="menu" aria-label="Personnel actions">
+                <button
+                  type="button"
+                  className="ghost-button personnel-actions-menu__item"
+                  onClick={handleAddEmployee}
+                >
+                  Add employee
+                </button>
+                {canManageInvites ? (
+                  <button
+                    type="button"
+                    className="ghost-button personnel-actions-menu__item"
+                    onClick={() => {
+                      setShowActionsMenu(false);
+                      setShowInviteBuilder((current) => !current);
+                    }}
+                  >
+                    {showInviteBuilder ? "Hide invite builder" : "Invite account"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="ghost-button personnel-actions-menu__item"
+                  onClick={() => {
+                    setShowActionsMenu(false);
+                    csvInputRef.current?.click();
+                  }}
+                >
+                  Import CSV
+                </button>
+              </div>
+            ) : null}
+          </div>
           <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
             Revert
           </button>
