@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { saveAssignments, saveSchedulePins, setScheduleSetCompletion } from "@/app/actions";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
@@ -59,6 +60,7 @@ import type {
 const STORAGE_KEY = "shift-canvas-drafts-v2";
 const AUTO_SAVE_DEBOUNCE_MS = 2500;
 const STALE_SNAPSHOT_PROTECTION_MS = 12000;
+const SCHEDULE_ROW_HEIGHT_PX = 51;
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes: string | null };
 type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
 type SelectedCell = { employeeId: string; date: string };
@@ -1330,6 +1332,13 @@ export function MonthlyScheduler({
   }
 
   const gridColumns = `var(--schedule-name-column-width, 7.75rem) repeat(${monthDays.length}, minmax(var(--schedule-day-column-width, 1.72rem), 1fr))`;
+  const rowVirtualizer = useVirtualizer({
+    count: visibleEmployees.length,
+    getScrollElement: () => scheduleBodyScrollRef.current,
+    estimateSize: () => SCHEDULE_ROW_HEIGHT_PX,
+    overscan: 8,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
 
   function replaceScheduleUrlState(month: string, scheduleId: string) {
     if (typeof window === "undefined") {
@@ -2386,93 +2395,119 @@ export function MonthlyScheduler({
           aria-label="Monthly schedule grid"
           aria-busy={isScheduleLocked}
         >
-          <div ref={scheduleGridRef} className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
-          <div className="employee-header sticky-column">
-            <span>{formatMonthLabel(currentMonth)}</span>
-            <strong>Employees</strong>
-          </div>
-
-          {monthDays.map((day) => {
-            const isSetDay = selectedSetDays.some((setDay) => setDay.date === day.date);
-            const isMissingDay = highlightedMissingDates.has(day.date);
-            const isCompletedDay = completedSetDates.has(day.date);
-
-            return (
-              <div
-                key={day.date}
-                className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
-                  isCompletedDay ? "day-header--completed" : ""
-                } ${
-                  selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
-                } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
-                title={`${day.dayName} ${day.date}`}
-                onClick={
-                  canManageSetBuilder && !isScheduleLocked
-                    ? () => {
-                        setSelectedSetAnchorDate(day.date);
-                        setSelectedCoverageCompetencyId(null);
-                      }
-                    : undefined
-                }
-              >
-                <span>{day.dayName.slice(0, 1)}</span>
-                <strong>{day.dayNumber}</strong>
+          <div ref={scheduleGridRef} className="schedule-grid">
+            <div className="schedule-grid__header" style={{ gridTemplateColumns: gridColumns }}>
+              <div className="employee-header sticky-column">
+                <span>{formatMonthLabel(currentMonth)}</span>
+                <strong>Employees</strong>
               </div>
-            );
-          })}
 
-          {visibleEmployees.map((employee) => (
-            <EmployeeRow
-              key={employee.rowId}
-              employee={employee}
-              isPinned={(pinnedEmployeesBySchedule[activeSchedule.id] ?? []).includes(employee.sourceEmployeeId)}
-              schedule={activeSchedule}
-              monthDays={monthDays}
-              assignments={effectiveAssignments}
-              projectedAssignmentIndex={projectedAssignmentIndex}
-              competencyMap={competencyMap}
-              timeCodeMap={timeCodeMap}
-              timeCodes={snapshot.timeCodes}
-              employeeMap={employeeMap}
-              completedSetDates={completedSetDates}
-              selectedCell={selectedCell}
-              dragRange={dragRange}
-              highlightedMissingDates={highlightedMissingDates}
-              selectedCoverageCompetencyId={selectedCoverageCompetencyId}
-              selectedSetDays={selectedSetDays}
-              canEdit={canEdit && !isScheduleLocked}
-              onPinToggle={handlePinToggle}
-              onCellPointerDown={handleCellPointerDown}
-              onDragHover={handleDragHover}
-              onCellClick={(cell) => {
-                if (!canEdit || isScheduleLocked) {
-                  return;
-                }
+              {monthDays.map((day) => {
+                const isSetDay = selectedSetDays.some((setDay) => setDay.date === day.date);
+                const isMissingDay = highlightedMissingDates.has(day.date);
+                const isCompletedDay = completedSetDates.has(day.date);
 
-                const projectedAssignment = getProjectedAssignmentForCell(cell.employeeId, cell.date);
-
-                if (projectedAssignment) {
-                  setStatusMessage(
-                    `This cell is managed by ${projectedAssignment.subScheduleName ?? "a sub-schedule"} and must be changed from Sub-Schedules.`,
-                  );
-                  return;
-                }
-
-                setSelectedCell(cell);
-                setEditorCell(cell);
-              }}
-            />
-          ))}
-
-          {visibleEmployees.length === 0 ? (
-            <div
-              className="empty-state sticky-column"
-              style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
-            >
-              <strong>No employees matched that search.</strong>
-              <span>Try a different name, role, or clear the filter.</span>
+                return (
+                  <div
+                    key={day.date}
+                    className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
+                      isCompletedDay ? "day-header--completed" : ""
+                    } ${
+                      selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
+                    } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
+                    title={`${day.dayName} ${day.date}`}
+                    onClick={
+                      canManageSetBuilder && !isScheduleLocked
+                        ? () => {
+                            setSelectedSetAnchorDate(day.date);
+                            setSelectedCoverageCompetencyId(null);
+                          }
+                        : undefined
+                    }
+                  >
+                    <span>{day.dayName.slice(0, 1)}</span>
+                    <strong>{day.dayNumber}</strong>
+                  </div>
+                );
+              })}
             </div>
-          ) : null}
+
+            {visibleEmployees.length > 0 ? (
+              <div
+                className="schedule-grid__rows"
+                style={{
+                  height: rowVirtualizer.getTotalSize(),
+                }}
+              >
+                {virtualRows.map((virtualRow) => {
+                  const employee = visibleEmployees[virtualRow.index];
+
+                  if (!employee) {
+                    return null;
+                  }
+
+                  return (
+                    <EmployeeRow
+                      key={employee.rowId}
+                      employee={employee}
+                      isPinned={(pinnedEmployeesBySchedule[activeSchedule.id] ?? []).includes(employee.sourceEmployeeId)}
+                      schedule={activeSchedule}
+                      monthDays={monthDays}
+                      assignments={effectiveAssignments}
+                      projectedAssignmentIndex={projectedAssignmentIndex}
+                      competencyMap={competencyMap}
+                      timeCodeMap={timeCodeMap}
+                      timeCodes={snapshot.timeCodes}
+                      employeeMap={employeeMap}
+                      completedSetDates={completedSetDates}
+                      selectedCell={selectedCell}
+                      dragRange={dragRange}
+                      highlightedMissingDates={highlightedMissingDates}
+                      selectedCoverageCompetencyId={selectedCoverageCompetencyId}
+                      selectedSetDays={selectedSetDays}
+                      canEdit={canEdit && !isScheduleLocked}
+                      onPinToggle={handlePinToggle}
+                      onCellPointerDown={handleCellPointerDown}
+                      onDragHover={handleDragHover}
+                      onCellClick={(cell) => {
+                        if (!canEdit || isScheduleLocked) {
+                          return;
+                        }
+
+                        const projectedAssignment = getProjectedAssignmentForCell(cell.employeeId, cell.date);
+
+                        if (projectedAssignment) {
+                          setStatusMessage(
+                            `This cell is managed by ${projectedAssignment.subScheduleName ?? "a sub-schedule"} and must be changed from Sub-Schedules.`,
+                          );
+                          return;
+                        }
+
+                        setSelectedCell(cell);
+                        setEditorCell(cell);
+                      }}
+                      rowStyle={{
+                        gridTemplateColumns: gridColumns,
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start}px)`,
+                        height: `${virtualRow.size}px`,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                className="empty-state sticky-column"
+                style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
+              >
+                <strong>No employees matched that search.</strong>
+                <span>Try a different name, role, or clear the filter.</span>
+              </div>
+            )}
           </div>
         </section>
       </div>
@@ -2534,6 +2569,7 @@ function EmployeeRow({
   onCellPointerDown,
   onDragHover,
   onCellClick,
+  rowStyle,
 }: {
   employee: DisplayEmployee;
   isPinned: boolean;
@@ -2561,13 +2597,14 @@ function EmployeeRow({
   ) => void;
   onDragHover: (employeeId: string, dayIndex: number) => void;
   onCellClick: (cell: SelectedCell) => void;
+  rowStyle?: CSSProperties;
 }) {
   const setDates = new Set(selectedSetDays.map((day) => day.date));
   const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
   const mutualDateSet = employee.mutualDates ? new Set(employee.mutualDates) : null;
 
   return (
-    <>
+    <div className="schedule-grid-row" style={rowStyle}>
       <div className="employee-cell sticky-column">
         <div className="employee-cell__main">
           <strong title={employee.name}>
@@ -2695,6 +2732,6 @@ function EmployeeRow({
           </div>
         );
       })}
-    </>
+    </div>
   );
 }

@@ -2220,6 +2220,16 @@ select {
   min-width: 100%;
 }
 
+.schedule-grid__header,
+.schedule-grid-row {
+  display: grid;
+  align-items: stretch;
+}
+
+.schedule-grid__rows {
+  position: relative;
+}
+
 .employee-header,
 .day-header,
 .employee-cell,
