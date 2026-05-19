@@ -264,23 +264,20 @@ export function CompetenciesPanel({
 
     if (selectedTargetKey === "main") {
       startScheduleSaveTransition(async () => {
-        const results = await Promise.all(
-          snapshot.schedules.map((schedule) =>
-            saveScheduleCompetencies({
-              scheduleId: schedule.id,
-              competencyIds: draftTargetCompetencyIds,
-            } as SaveScheduleCompetenciesInput),
-          ),
-        );
-        const failedResult = results.find((result) => !result.ok);
+        for (const schedule of snapshot.schedules) {
+          const result = await saveScheduleCompetencies({
+            scheduleId: schedule.id,
+            competencyIds: draftTargetCompetencyIds,
+          } as SaveScheduleCompetenciesInput);
 
-        if (failedResult) {
-          setStatusMessage(failedResult.message);
-          return;
+          if (!result.ok) {
+            setStatusMessage(result.message);
+            return;
+          }
         }
 
         setStatusMessage("Main schedule competencies saved.");
-        if (results.length > 0) {
+        if (snapshot.schedules.length > 0) {
           setBaselineTargetCompetencyIds([...draftTargetCompetencyIds]);
         }
       });

@@ -1049,6 +1049,7 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   }
 
   const dates = uniqueSortedDates(input.dates);
+  const slotCount = Math.max(1, Math.trunc(input.slotCount || 1));
 
   if (dates.length === 0) {
     return {
@@ -1122,7 +1123,7 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     };
   }
 
-  const duplicatePosting = snapshot.manualOvertimePostings.some(
+  const duplicatePosting = snapshot.manualOvertimePostings.find(
     (posting) =>
       posting.scheduleId === targetScheduleId &&
       (posting.subScheduleId ?? null) === targetSubScheduleId &&
@@ -1132,9 +1133,26 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   );
 
   if (duplicatePosting) {
+    const { error: updateError } = await supabase
+      .from("manual_overtime_postings")
+      .update({
+        slot_count: duplicatePosting.slotCount + slotCount,
+      })
+      .eq("id", duplicatePosting.id);
+
+    if (updateError) {
+      return {
+        ok: false,
+        message: `Could not expand overtime posting capacity: ${updateError.message}`,
+      };
+    }
+
+    revalidatePath("/overtime");
+    revalidatePath("/sub-schedules");
+
     return {
-      ok: false,
-      message: "That manual overtime posting already exists.",
+      ok: true,
+      message: `Added ${slotCount} more ${competency.code} slot${slotCount === 1 ? "" : "s"} to the existing posting${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
     };
   }
 
@@ -1149,6 +1167,7 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     schedule_id: schedule?.id ?? null,
     sub_schedule_id: subSchedule?.id ?? null,
     competency_id: competency.id,
+    slot_count: slotCount,
     month_key: month,
     shift_kind: uniqueShiftKinds[0],
     posting_dates: dates,
@@ -1167,7 +1186,7 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
 
   return {
     ok: true,
-    message: `Manual overtime posting created for ${competency.code}${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
+    message: `Manual overtime posting created for ${slotCount} ${competency.code} slot${slotCount === 1 ? "" : "s"}${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
   };
 }
 
@@ -1389,6 +1408,27 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       };
     }
 
+    if (input.manualPostingId) {
+      const manualPostingClaims = snapshot.overtimeClaims.filter(
+        (claim) => claim.manualPostingId === input.manualPostingId,
+      );
+      const distinctClaimants = Array.from(new Set(manualPostingClaims.map((claim) => claim.employeeId)));
+
+      if (distinctClaimants.includes(input.employeeId)) {
+        return {
+          ok: false,
+          message: `${employee.name} already claimed that manual overtime posting.`,
+        };
+      }
+
+      if (distinctClaimants.length >= manualPosting!.slotCount) {
+        return {
+          ok: false,
+          message: "That manual overtime posting has already been fully claimed.",
+        };
+      }
+    }
+
     for (const date of normalizedDates) {
       const hasMainAssignment = snapshot.assignments.some(
         (assignment) =>
@@ -1504,18 +1544,19 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     const manualPostingClaims = snapshot.overtimeClaims.filter(
       (claim) => claim.manualPostingId === input.manualPostingId,
     );
+    const distinctClaimants = Array.from(new Set(manualPostingClaims.map((claim) => claim.employeeId)));
 
-    if (
-      manualPostingClaims.some(
-        (claim) =>
-          claim.employeeId !== input.employeeId ||
-          claim.scheduleId !== targetScheduleId ||
-          claim.competencyId !== input.competencyId,
-      )
-    ) {
+    if (distinctClaimants.includes(input.employeeId)) {
       return {
         ok: false,
-        message: "That manual overtime posting has already been claimed.",
+        message: `${employee.name} already claimed that manual overtime posting.`,
+      };
+    }
+
+    if (distinctClaimants.length >= manualPosting.slotCount) {
+      return {
+        ok: false,
+        message: "That manual overtime posting has already been fully claimed.",
       };
     }
   }

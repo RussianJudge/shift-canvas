@@ -601,7 +601,7 @@ export function MutualsPanel({
         </div>
       ) : null}
 
-      <div className="metrics-transfer-actions">
+      <div className="mutuals-create-action">
         <button
           type="button"
           className="primary-button"

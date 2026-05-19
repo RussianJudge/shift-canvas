@@ -122,6 +122,7 @@ export interface ManualOvertimePosting extends OrganizationScope {
   scheduleId: string | null;
   subScheduleId?: string | null;
   competencyId: string;
+  slotCount: number;
   month: string;
   shiftKind: Exclude<ShiftKind, "OFF">;
   dates: string[];
@@ -231,6 +232,7 @@ export interface CreateManualOvertimePostingInput {
   scheduleId?: string | null;
   subScheduleId?: string | null;
   competencyId: string;
+  slotCount: number;
   dates: string[];
 }
 

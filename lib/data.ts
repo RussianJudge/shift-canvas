@@ -190,6 +190,7 @@ type ManualOvertimePostingRow = {
   schedule_id: string | null;
   sub_schedule_id: string | null;
   competency_id: string;
+  slot_count: number | null;
   month_key: string;
   shift_kind: Exclude<StoredAssignment["shiftKind"], "OFF">;
   posting_dates: string[];
@@ -668,6 +669,7 @@ function mapManualOvertimePostings(rows: ManualOvertimePostingRow[]) {
     scheduleId: row.schedule_id,
     subScheduleId: row.sub_schedule_id,
     competencyId: row.competency_id,
+    slotCount: Math.max(1, row.slot_count ?? 1),
     month: row.month_key,
     shiftKind: row.shift_kind,
     dates: [...row.posting_dates].sort(),
@@ -857,7 +859,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     applySessionScope(
       supabase
       .from("manual_overtime_postings")
-      .select("id, schedule_id, sub_schedule_id, competency_id, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
+      .select("id, schedule_id, sub_schedule_id, competency_id, slot_count, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
       session,
     )
       .eq("month_key", month),
