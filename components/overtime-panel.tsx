@@ -15,11 +15,14 @@ import {
   createAssignmentKey,
   createSetRangeKey,
   createSetRangeKeyFromEntry,
+  formatMonthLabel,
+  getCurrentMonthKey,
   getEmployeeMap,
   getExtendedMonthDays,
   getMonthDays,
   getScheduleById,
   getWorkedSetDays,
+  shiftMonthKey,
   shiftForDate,
 } from "@/lib/scheduling";
 import type { AppSession, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
@@ -361,11 +364,14 @@ function OvertimeEligibilityReportModal({
 /** Modal used by leaders/admins to author a manual overtime posting. */
 function ManualOvertimePostingModal({
   snapshot,
+  availableMonths,
+  selectedMonth,
   selectedTargetKey,
   selectedMainScheduleId,
   selectedAssignmentKey,
   selectedSlotCount,
   selectedDates,
+  onMonthChange,
   onTargetChange,
   onMainScheduleChange,
   onAssignmentChange,
@@ -376,11 +382,14 @@ function ManualOvertimePostingModal({
   isSubmitting,
 }: {
   snapshot: SchedulerSnapshot;
+  availableMonths: string[];
+  selectedMonth: string;
   selectedTargetKey: OvertimeTargetKey | "";
   selectedMainScheduleId: string;
   selectedAssignmentKey: string;
   selectedSlotCount: number;
   selectedDates: string[];
+  onMonthChange: (month: string) => void;
   onTargetChange: (targetKey: OvertimeTargetKey) => void;
   onMainScheduleChange: (scheduleId: string) => void;
   onAssignmentChange: (assignmentKey: string) => void;
@@ -439,7 +448,7 @@ function ManualOvertimePostingModal({
             })),
         ];
   const availableDates = selectedSchedule
-    ? getMonthDays(snapshot.month)
+    ? getMonthDays(selectedMonth)
         .map((day) => ({
           date: day.date,
           shiftKind: shiftForDate(selectedSchedule, day.date),
@@ -467,6 +476,17 @@ function ManualOvertimePostingModal({
         </div>
 
         <div className="metrics-transfer-grid">
+          <label className="field">
+            <span>Month</span>
+            <select value={selectedMonth} onChange={(event) => onMonthChange(event.target.value)}>
+              {availableMonths.map((month) => (
+                <option key={month} value={month}>
+                  {formatMonthLabel(month)}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="field">
             <span>Schedule</span>
             <select value={selectedTargetKey} onChange={(event) => onTargetChange(event.target.value as OvertimeTargetKey)}>
@@ -542,7 +562,7 @@ function ManualOvertimePostingModal({
             </div>
           ) : (
             <div className="mutual-picker__grid">
-              {getMonthDays(snapshot.month).map((entry) => {
+              {getMonthDays(selectedMonth).map((entry) => {
                 const isSelected = selectedDates.includes(entry.date);
 
                 return (
@@ -596,6 +616,11 @@ export function OvertimePanel({
   const [isClaiming, startClaimTransition] = useTransition();
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [eligibilityReportPostingId, setEligibilityReportPostingId] = useState<string | null>(null);
+  const currentPostingMonth = useMemo(() => getCurrentMonthKey("America/Edmonton"), []);
+  const manualAvailableMonths = useMemo(
+    () => Array.from({ length: 13 }, (_, index) => shiftMonthKey(currentPostingMonth, index)),
+    [currentPostingMonth],
+  );
   const [manualTargetKey, setManualTargetKey] = useState<OvertimeTargetKey | "">(
     snapshot.schedules.length > 0
       ? "main"
@@ -604,6 +629,9 @@ export function OvertimePanel({
         : snapshot.subSchedules[0]?.id
           ? (`sub:${snapshot.subSchedules[0].id}` as const)
           : "",
+  );
+  const [manualPostingMonth, setManualPostingMonth] = useState(
+    manualAvailableMonths.includes(snapshot.month) ? snapshot.month : manualAvailableMonths[0] ?? snapshot.month,
   );
   const [manualMainScheduleId, setManualMainScheduleId] = useState(snapshot.schedules[0]?.id ?? "");
   const [manualAssignmentKey, setManualAssignmentKey] = useState(
@@ -727,6 +755,7 @@ export function OvertimePanel({
     setIsManualModalOpen(false);
   }, [
     allEmployees,
+    manualAvailableMonths,
     availableSubSchedules,
     snapshot.competencies,
     snapshot.schedules,
@@ -737,8 +766,18 @@ export function OvertimePanel({
   ]);
 
   useEffect(() => {
+    setManualPostingMonth((current) =>
+      manualAvailableMonths.includes(current)
+        ? current
+        : manualAvailableMonths.includes(snapshot.month)
+          ? snapshot.month
+          : manualAvailableMonths[0] ?? snapshot.month,
+    );
+  }, [manualAvailableMonths, snapshot.month]);
+
+  useEffect(() => {
     setManualPostingDates([]);
-  }, [manualTargetKey]);
+  }, [manualPostingMonth, manualTargetKey]);
 
   useEffect(() => {
     setSelectedAssignmentFilter("all");
@@ -1653,11 +1692,14 @@ export function OvertimePanel({
       {isManualModalOpen ? (
         <ManualOvertimePostingModal
           snapshot={snapshot}
+          availableMonths={manualAvailableMonths}
+          selectedMonth={manualPostingMonth}
           selectedTargetKey={manualTargetKey}
           selectedMainScheduleId={manualMainScheduleId}
           selectedAssignmentKey={manualAssignmentKey}
           selectedSlotCount={manualSlotCount}
           selectedDates={manualPostingDates}
+          onMonthChange={setManualPostingMonth}
           onTargetChange={(targetKey) => {
             setManualTargetKey(targetKey);
             setManualPostingDates([]);
