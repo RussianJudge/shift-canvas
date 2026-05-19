@@ -47,11 +47,13 @@ type OvertimePosting = {
   subScheduleId: string | null;
   scheduleName: string;
   shiftKind: Exclude<ShiftKind, "OFF">;
-  competencyId: string;
+  competencyId: string | null;
+  timeCodeId: string | null;
+  assignmentKey: string;
   slotCount: number;
   competencyCode: string;
   competencyLabel: string;
-  coverageCompetencyId: string;
+  coverageCompetencyId: string | null;
   coverageCompetencyCode: string;
   coverageCompetencyLabel: string;
   colorToken: string;
@@ -117,6 +119,18 @@ function getShiftLabel(shiftKind: Exclude<ShiftKind, "OFF">, count: number) {
 
 function getShiftBadgeLabel(shiftKind: Exclude<ShiftKind, "OFF">) {
   return shiftKind === "DAY" ? "D" : "N";
+}
+
+function buildOvertimeAssignmentKey(competencyId: string | null, timeCodeId: string | null) {
+  if (competencyId) {
+    return `comp:${competencyId}`;
+  }
+
+  if (timeCodeId) {
+    return `time:${timeCodeId}`;
+  }
+
+  return "";
 }
 
 /** Groups a schedule's month into worked sets and their day/night segments. */
@@ -227,7 +241,7 @@ function getClaimStatus(
     return { canClaim: false, reason: "This posting is fully claimed." };
   }
 
-  if (!employee.competencyIds.includes(posting.competencyId)) {
+  if (posting.competencyId && !employee.competencyIds.includes(posting.competencyId)) {
     return { canClaim: false, reason: "Employee is not qualified for this post." };
   }
 
@@ -269,12 +283,12 @@ function ManualOvertimePostingModal({
   snapshot,
   selectedTargetKey,
   selectedMainScheduleId,
-  selectedCompetencyId,
+  selectedAssignmentKey,
   selectedSlotCount,
   selectedDates,
   onTargetChange,
   onMainScheduleChange,
-  onCompetencyChange,
+  onAssignmentChange,
   onSlotCountChange,
   onToggleDate,
   onClose,
@@ -284,12 +298,12 @@ function ManualOvertimePostingModal({
   snapshot: SchedulerSnapshot;
   selectedTargetKey: OvertimeTargetKey | "";
   selectedMainScheduleId: string;
-  selectedCompetencyId: string;
+  selectedAssignmentKey: string;
   selectedSlotCount: number;
   selectedDates: string[];
   onTargetChange: (targetKey: OvertimeTargetKey) => void;
   onMainScheduleChange: (scheduleId: string) => void;
-  onCompetencyChange: (competencyId: string) => void;
+  onAssignmentChange: (assignmentKey: string) => void;
   onSlotCountChange: (slotCount: number) => void;
   onToggleDate: (date: string) => void;
   onClose: () => void;
@@ -310,12 +324,40 @@ function ManualOvertimePostingModal({
       : null;
   const targetMode: OvertimeTargetMode = selectedSubSchedule ? "sub" : "main";
   const availableSubSchedules = snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived);
-  const availableCompetencies =
+  const availableAssignments =
     targetMode === "main"
-      ? snapshot.competencies.filter((competency) => selectedSchedule?.competencyIds.includes(competency.id))
-      : snapshot.competencies.filter((competency) =>
-          selectedSubSchedule?.competencyIds.includes(competency.id),
-        );
+      ? [
+          ...snapshot.competencies
+            .filter((competency) => selectedSchedule?.competencyIds.includes(competency.id))
+            .map((competency) => ({
+              key: buildOvertimeAssignmentKey(competency.id, null),
+              code: competency.code,
+              label: competency.label,
+            })),
+          ...snapshot.timeCodes
+            .filter((timeCode) => timeCode.usageMode !== "projected_only")
+            .map((timeCode) => ({
+              key: buildOvertimeAssignmentKey(null, timeCode.id),
+              code: timeCode.code,
+              label: timeCode.label,
+            })),
+        ]
+      : [
+          ...snapshot.competencies
+            .filter((competency) => selectedSubSchedule?.competencyIds.includes(competency.id))
+            .map((competency) => ({
+              key: buildOvertimeAssignmentKey(competency.id, null),
+              code: competency.code,
+              label: competency.label,
+            })),
+          ...snapshot.timeCodes
+            .filter((timeCode) => timeCode.usageMode !== "projected_only")
+            .map((timeCode) => ({
+              key: buildOvertimeAssignmentKey(null, timeCode.id),
+              code: timeCode.code,
+              label: timeCode.label,
+            })),
+        ];
   const availableDates = selectedSchedule
     ? getMonthDays(snapshot.month)
         .map((day) => ({
@@ -373,11 +415,11 @@ function ManualOvertimePostingModal({
           ) : null}
 
           <label className="field">
-            <span>Competency</span>
-            <select value={selectedCompetencyId} onChange={(event) => onCompetencyChange(event.target.value)}>
-              {availableCompetencies.map((competency) => (
-                <option key={competency.id} value={competency.id}>
-                  {competency.code} · {competency.label}
+            <span>Assignment</span>
+            <select value={selectedAssignmentKey} onChange={(event) => onAssignmentChange(event.target.value)}>
+              {availableAssignments.map((assignment) => (
+                <option key={assignment.key} value={assignment.key}>
+                  {assignment.code} · {assignment.label}
                 </option>
               ))}
             </select>
@@ -468,7 +510,7 @@ export function OvertimePanel({
       : snapshot.schedules.flatMap((schedule) => schedule.employees).sort((left, right) => left.name.localeCompare(right.name))[0]?.id ?? "",
   );
   const [selectedTargetKey, setSelectedTargetKey] = useState<OvertimeTargetKey | "">(buildInitialTargetKey(snapshot));
-  const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
+  const [selectedAssignmentFilter, setSelectedAssignmentFilter] = useState("all");
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
@@ -483,7 +525,9 @@ export function OvertimePanel({
           : "",
   );
   const [manualMainScheduleId, setManualMainScheduleId] = useState(snapshot.schedules[0]?.id ?? "");
-  const [manualCompetencyId, setManualCompetencyId] = useState(snapshot.competencies[0]?.id ?? "");
+  const [manualAssignmentKey, setManualAssignmentKey] = useState(
+    buildOvertimeAssignmentKey(snapshot.competencies[0]?.id ?? null, null),
+  );
   const [manualSlotCount, setManualSlotCount] = useState(1);
   const [manualPostingDates, setManualPostingDates] = useState<string[]>([]);
   const [isManagingManual, startManualTransition] = useTransition();
@@ -529,14 +573,26 @@ export function OvertimePanel({
     snapshot.subSchedules.find((subSchedule) => subSchedule.id === manualSubScheduleId) ?? null;
   const selectedManualSchedule =
     snapshot.schedules.find((schedule) => schedule.id === manualMainScheduleId) ?? snapshot.schedules[0] ?? null;
-  const availableManualCompetencies = useMemo(
+  const availableManualAssignments = useMemo(
     () =>
       manualTargetMode === "main"
-        ? snapshot.competencies.filter((competency) => selectedManualSchedule?.competencyIds.includes(competency.id))
-        : snapshot.competencies.filter((competency) =>
-            selectedManualSubSchedule?.competencyIds.includes(competency.id),
-          ),
-    [manualTargetMode, selectedManualSchedule, selectedManualSubSchedule, snapshot.competencies],
+        ? [
+            ...snapshot.competencies
+              .filter((competency) => selectedManualSchedule?.competencyIds.includes(competency.id))
+              .map((competency) => buildOvertimeAssignmentKey(competency.id, null)),
+            ...snapshot.timeCodes
+              .filter((timeCode) => timeCode.usageMode !== "projected_only")
+              .map((timeCode) => buildOvertimeAssignmentKey(null, timeCode.id)),
+          ]
+        : [
+            ...snapshot.competencies
+              .filter((competency) => selectedManualSubSchedule?.competencyIds.includes(competency.id))
+              .map((competency) => buildOvertimeAssignmentKey(competency.id, null)),
+            ...snapshot.timeCodes
+              .filter((timeCode) => timeCode.usageMode !== "projected_only")
+              .map((timeCode) => buildOvertimeAssignmentKey(null, timeCode.id)),
+          ],
+    [manualTargetMode, selectedManualSchedule, selectedManualSubSchedule, snapshot.competencies, snapshot.timeCodes],
   );
 
   useEffect(() => {
@@ -555,8 +611,12 @@ export function OvertimePanel({
         ? current
         : buildInitialTargetKey(snapshot),
     );
-    setSelectedCompetencyFilter((current) =>
-      current === "all" || snapshot.competencies.some((competency) => competency.id === current) ? current : "all",
+    setSelectedAssignmentFilter((current) =>
+      current === "all" ||
+      snapshot.competencies.some((competency) => buildOvertimeAssignmentKey(competency.id, null) === current) ||
+      snapshot.timeCodes.some((timeCode) => buildOvertimeAssignmentKey(null, timeCode.id) === current)
+        ? current
+        : "all",
     );
     setSelectedPostingByGroup({});
     setStatusMessage("");
@@ -576,10 +636,10 @@ export function OvertimePanel({
     setManualMainScheduleId((current) =>
       snapshot.schedules.some((schedule) => schedule.id === current) ? current : snapshot.schedules[0]?.id ?? "",
     );
-    setManualCompetencyId((current) =>
-      snapshot.competencies.some((competency) => competency.id === current)
+    setManualAssignmentKey((current) =>
+      current && availableManualAssignments.includes(current)
         ? current
-        : snapshot.competencies[0]?.id ?? "",
+        : availableManualAssignments[0] ?? "",
     );
     setManualSlotCount(1);
     setManualPostingDates([]);
@@ -590,6 +650,7 @@ export function OvertimePanel({
     snapshot.competencies,
     snapshot.schedules,
     snapshot.subSchedules,
+    snapshot.timeCodes,
     viewer.employeeId,
     viewer.role,
   ]);
@@ -599,18 +660,18 @@ export function OvertimePanel({
   }, [manualTargetKey]);
 
   useEffect(() => {
-    setSelectedCompetencyFilter("all");
+    setSelectedAssignmentFilter("all");
     setSelectedPostingByGroup({});
     setStatusMessage("");
   }, [selectedTargetKey]);
 
   useEffect(() => {
-    setManualCompetencyId((current) =>
-      availableManualCompetencies.some((competency) => competency.id === current)
+    setManualAssignmentKey((current) =>
+      availableManualAssignments.includes(current)
         ? current
-        : availableManualCompetencies[0]?.id ?? "",
+        : availableManualAssignments[0] ?? "",
     );
-  }, [availableManualCompetencies]);
+  }, [availableManualAssignments]);
 
   const postings = useMemo<OvertimePosting[]>(() => {
     const nextPostings: OvertimePosting[] = [];
@@ -723,6 +784,8 @@ export function OvertimePanel({
                   scheduleName: schedule.name,
                   shiftKind: segment.shiftKind,
                   competencyId: competency.id,
+                  timeCodeId: null,
+                  assignmentKey: buildOvertimeAssignmentKey(competency.id, null),
                   slotCount: 1,
                   competencyCode: competency.code,
                   competencyLabel: competency.label,
@@ -813,16 +876,18 @@ export function OvertimePanel({
 
               const candidateEntries = Object.values(swapCandidates);
 
-              nextPostings.push({
-                id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
-                source: "auto",
-                targetMode: "main",
-                scheduleId: schedule.id,
-                subScheduleId: null,
-                scheduleName: schedule.name,
-                shiftKind: segment.shiftKind,
-                competencyId: competency.id,
-                slotCount: 1,
+                nextPostings.push({
+                  id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
+                  source: "auto",
+                  targetMode: "main",
+                  scheduleId: schedule.id,
+                  subScheduleId: null,
+                  scheduleName: schedule.name,
+                  shiftKind: segment.shiftKind,
+                  competencyId: competency.id,
+                  timeCodeId: null,
+                  assignmentKey: buildOvertimeAssignmentKey(competency.id, null),
+                  slotCount: 1,
                 competencyCode: competency.code,
                 competencyLabel: competency.label,
                 coverageCompetencyId: competency.id,
@@ -858,6 +923,8 @@ export function OvertimePanel({
                   scheduleName: schedule.name,
                   shiftKind: segment.shiftKind,
                   competencyId: candidate.competencyId,
+                  timeCodeId: null,
+                  assignmentKey: buildOvertimeAssignmentKey(candidate.competencyId, null),
                   slotCount: 1,
                   competencyCode: offeredCompetency.code,
                   competencyLabel: offeredCompetency.label,
@@ -891,9 +958,14 @@ export function OvertimePanel({
       const subSchedule = manualPosting.subScheduleId
         ? snapshot.subSchedules.find((entry) => entry.id === manualPosting.subScheduleId) ?? null
         : null;
-      const competency = snapshot.competencies.find((entry) => entry.id === manualPosting.competencyId);
+      const competency = manualPosting.competencyId
+        ? snapshot.competencies.find((entry) => entry.id === manualPosting.competencyId) ?? null
+        : null;
+      const timeCode = manualPosting.timeCodeId
+        ? snapshot.timeCodes.find((entry) => entry.id === manualPosting.timeCodeId) ?? null
+        : null;
 
-      if ((!schedule && !subSchedule) || !competency || manualPosting.dates.length === 0) {
+      if ((!schedule && !subSchedule) || (!competency && !timeCode) || manualPosting.dates.length === 0) {
         continue;
       }
 
@@ -904,7 +976,10 @@ export function OvertimePanel({
           for (const employee of schedule.employees) {
             const selection = getCellSelection(employee, schedule.id, date, assignmentIndex);
 
-            if (selection.competencyId === competency.id) {
+            if (
+              (competency && selection.competencyId === competency.id) ||
+              (timeCode && selection.timeCodeId === timeCode.id)
+            ) {
               filledCount += 1;
             }
           }
@@ -914,7 +989,8 @@ export function OvertimePanel({
 
             if (
               claim.scheduleId === schedule.id &&
-              claim.competencyId === competency.id &&
+              ((competency && claim.competencyId === competency.id) ||
+                (timeCode && claim.timeCodeId === timeCode.id)) &&
               claim.date === date &&
               claimEmployee?.scheduleId !== schedule.id
             ) {
@@ -929,7 +1005,8 @@ export function OvertimePanel({
           (assignment) =>
             assignment.subScheduleId === subSchedule?.id &&
             assignment.date === date &&
-            assignment.competencyId === competency.id,
+            ((competency && assignment.competencyId === competency.id) ||
+              (timeCode && assignment.timeCodeId === timeCode.id)),
         ).length;
 
         return count + filledCount;
@@ -952,14 +1029,16 @@ export function OvertimePanel({
         subScheduleId: subSchedule?.id ?? null,
         scheduleName: schedule?.name ?? subSchedule?.name ?? "Unknown schedule",
         shiftKind: manualPosting.shiftKind,
-        competencyId: competency.id,
+        competencyId: competency?.id ?? null,
+        timeCodeId: timeCode?.id ?? null,
+        assignmentKey: buildOvertimeAssignmentKey(competency?.id ?? null, timeCode?.id ?? null),
         slotCount: manualPosting.slotCount,
-        competencyCode: competency.code,
-        competencyLabel: competency.label,
-        coverageCompetencyId: competency.id,
-        coverageCompetencyCode: competency.code,
-        coverageCompetencyLabel: competency.label,
-        colorToken: competency.colorToken,
+        competencyCode: competency?.code ?? timeCode!.code,
+        competencyLabel: competency?.label ?? timeCode!.label,
+        coverageCompetencyId: competency?.id ?? null,
+        coverageCompetencyCode: competency?.code ?? timeCode!.code,
+        coverageCompetencyLabel: competency?.label ?? timeCode!.label,
+        colorToken: competency?.colorToken ?? timeCode!.colorToken,
         dates: manualPosting.dates,
         staffedPeople: manualPosting.dates.length > 0 ? filledCells / manualPosting.dates.length : 0,
         requiredStaff: manualPosting.slotCount,
@@ -1012,13 +1091,13 @@ export function OvertimePanel({
           return false;
         }
 
-        if (selectedCompetencyFilter !== "all" && posting.competencyId !== selectedCompetencyFilter) {
+        if (selectedAssignmentFilter !== "all" && posting.assignmentKey !== selectedAssignmentFilter) {
           return false;
         }
 
         return true;
       }),
-    [postings, selectedCompetencyFilter, selectedSubScheduleFilter, selectedTargetMode],
+    [postings, selectedAssignmentFilter, selectedSubScheduleFilter, selectedTargetMode],
   );
   const groupedPostings = useMemo(
     () =>
@@ -1056,6 +1135,7 @@ export function OvertimePanel({
         subScheduleId: posting.subScheduleId,
         employeeId: claimingEmployeeId,
         competencyId: posting.competencyId,
+        timeCodeId: posting.timeCodeId,
         coverageCompetencyId: posting.coverageCompetencyId,
         swapEmployeeId: posting.swapEmployeeId,
         manualPostingId: posting.manualPostingId,
@@ -1082,6 +1162,7 @@ export function OvertimePanel({
         subScheduleId: posting.subScheduleId,
         employeeId: claimingEmployeeId,
         competencyId: posting.competencyId,
+        timeCodeId: posting.timeCodeId,
         dates: posting.dates,
       });
 
@@ -1102,11 +1183,19 @@ export function OvertimePanel({
   }
 
   function handleCreateManualPosting() {
+    const manualCompetencyId = manualAssignmentKey.startsWith("comp:")
+      ? manualAssignmentKey.slice("comp:".length)
+      : null;
+    const manualTimeCodeId = manualAssignmentKey.startsWith("time:")
+      ? manualAssignmentKey.slice("time:".length)
+      : null;
+
     startManualTransition(async () => {
       const result = await createManualOvertimePosting({
         scheduleId: manualTargetMode === "main" ? manualMainScheduleId : null,
         subScheduleId: manualTargetMode === "sub" ? manualSubScheduleId : null,
         competencyId: manualCompetencyId,
+        timeCodeId: manualTimeCodeId,
         slotCount: manualSlotCount,
         dates: manualPostingDates,
       });
@@ -1213,31 +1302,42 @@ export function OvertimePanel({
         </label>
 
         <label className="field">
-          <span>Competency</span>
+          <span>Assignment</span>
           <select
-            value={selectedCompetencyFilter}
-            onChange={(event) => setSelectedCompetencyFilter(event.target.value)}
+            value={selectedAssignmentFilter}
+            onChange={(event) => setSelectedAssignmentFilter(event.target.value)}
           >
-            <option value="all">All competencies</option>
-            {snapshot.competencies
-              .filter((competency) => {
-                if (selectedTargetMode === "all") {
-                  return true;
-                }
+            <option value="all">All assignments</option>
+            {[
+              ...snapshot.competencies
+                .filter((competency) => {
+                  if (selectedTargetMode === "all") {
+                    return true;
+                  }
 
-                if (selectedTargetMode === "main") {
-                  return snapshot.schedules.some((schedule) => schedule.competencyIds.includes(competency.id));
-                }
+                  if (selectedTargetMode === "main") {
+                    return snapshot.schedules.some((schedule) => schedule.competencyIds.includes(competency.id));
+                  }
 
-                return (
-                  snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleFilter)?.competencyIds.includes(competency.id) ?? false
-                );
-              })
-              .map((competency) => (
-              <option key={competency.id} value={competency.id}>
-                {competency.code}
+                  return (
+                    snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleFilter)?.competencyIds.includes(competency.id) ?? false
+                  );
+                })
+                .map((competency) => ({
+                  key: buildOvertimeAssignmentKey(competency.id, null),
+                  label: competency.code,
+                })),
+              ...snapshot.timeCodes
+                .filter((timeCode) => timeCode.usageMode !== "projected_only")
+                .map((timeCode) => ({
+                  key: buildOvertimeAssignmentKey(null, timeCode.id),
+                  label: timeCode.code,
+                })),
+            ].map((assignment) => (
+              <option key={assignment.key} value={assignment.key}>
+                {assignment.label}
               </option>
-              ))}
+            ))}
           </select>
         </label>
 
@@ -1307,7 +1407,7 @@ export function OvertimePanel({
                       >
                         <strong>{posting.competencyCode.replace("Post ", "")}</strong>
                         <span>
-                          {posting.coverageCompetencyId !== posting.competencyId
+                          {posting.coverageCompetencyId && posting.competencyId && posting.coverageCompetencyId !== posting.competencyId
                             ? `fills ${posting.coverageCompetencyCode}`
                             : `${posting.openShifts} shift${posting.openShifts === 1 ? "" : "s"}`}
                         </span>
@@ -1320,19 +1420,19 @@ export function OvertimePanel({
                       <div className="overtime-card-top">
                         <div>
                           <p className="overtime-card-team">
-                            {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                            {selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
                               ? `Needed ${selectedPosting.coverageCompetencyCode}`
                               : selectedPosting.competencyCode}
                           </p>
                           <h3 className="overtime-card-title">
-                            {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                            {selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
                               ? selectedPosting.coverageCompetencyLabel
                               : selectedPosting.competencyLabel}
                           </h3>
                         </div>
                         <div className="metrics-transfer-pill-row">
                           <span className={`legend-pill legend-pill--${selectedPosting.colorToken.toLowerCase()}`}>
-                            {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                            {selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
                               ? `${selectedPosting.competencyCode.replace("Post ", "")} -> ${selectedPosting.coverageCompetencyCode.replace("Post ", "")}`
                               : selectedPosting.competencyCode.replace("Post ", "")}
                           </span>
@@ -1349,7 +1449,7 @@ export function OvertimePanel({
                         <span>{formatStaffCount(selectedPosting.staffedPeople)}/{selectedPosting.requiredStaff} staffed</span>
                       </div>
 
-                      {selectedPosting.coverageCompetencyId !== selectedPosting.competencyId ? (
+                      {selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId ? (
                         <div className="overtime-card-meta">
                           <span>
                             Claim {selectedPosting.competencyCode} to fill {selectedPosting.coverageCompetencyCode}
@@ -1368,7 +1468,7 @@ export function OvertimePanel({
                         <span className="overtime-card-hint">
                           {selectedPosting.claimedByName
                             ? `${selectedPosting.openShifts === 0 ? "Claimed" : "Partially claimed"} by ${selectedPosting.claimedByNames.join(", ")}${
-                                selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
+                                selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
                                   ? ` · resolves ${selectedPosting.coverageCompetencyCode}`
                                   : ""
                               }`
@@ -1437,7 +1537,7 @@ export function OvertimePanel({
           snapshot={snapshot}
           selectedTargetKey={manualTargetKey}
           selectedMainScheduleId={manualMainScheduleId}
-          selectedCompetencyId={manualCompetencyId}
+          selectedAssignmentKey={manualAssignmentKey}
           selectedSlotCount={manualSlotCount}
           selectedDates={manualPostingDates}
           onTargetChange={(targetKey) => {
@@ -1448,7 +1548,7 @@ export function OvertimePanel({
             setManualMainScheduleId(scheduleId);
             setManualPostingDates([]);
           }}
-          onCompetencyChange={setManualCompetencyId}
+          onAssignmentChange={setManualAssignmentKey}
           onSlotCountChange={setManualSlotCount}
           onToggleDate={toggleManualPostingDate}
           onClose={() => setIsManualModalOpen(false)}

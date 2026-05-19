@@ -76,7 +76,7 @@ type DisplayEmployee = {
   role: string;
   competencyIds: string[];
   overtimeDates?: string[];
-  overtimeCompetencyByDate?: Record<string, string>;
+  overtimeCompetencyByDate?: Record<string, string | null>;
   mutualDates?: string[];
 };
 

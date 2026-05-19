@@ -177,7 +177,8 @@ type OvertimeClaimRow = {
   schedule_id: string | null;
   sub_schedule_id: string | null;
   employee_id: string;
-  competency_id: string;
+  competency_id: string | null;
+  time_code_id: string | null;
   assignment_date: string;
   manual_posting_id: string | null;
   company_id: string;
@@ -189,7 +190,8 @@ type ManualOvertimePostingRow = {
   id: string;
   schedule_id: string | null;
   sub_schedule_id: string | null;
-  competency_id: string;
+  competency_id: string | null;
+  time_code_id: string | null;
   slot_count: number | null;
   month_key: string;
   shift_kind: Exclude<StoredAssignment["shiftKind"], "OFF">;
@@ -655,6 +657,7 @@ function mapOvertimeClaims(rows: OvertimeClaimRow[]) {
     subScheduleId: row.sub_schedule_id,
     employeeId: row.employee_id,
     competencyId: row.competency_id,
+    timeCodeId: row.time_code_id,
     date: row.assignment_date,
     manualPostingId: row.manual_posting_id,
     companyId: row.company_id,
@@ -669,6 +672,7 @@ function mapManualOvertimePostings(rows: ManualOvertimePostingRow[]) {
     scheduleId: row.schedule_id,
     subScheduleId: row.sub_schedule_id,
     competencyId: row.competency_id,
+    timeCodeId: row.time_code_id,
     slotCount: Math.max(1, row.slot_count ?? 1),
     month: row.month_key,
     shiftKind: row.shift_kind,
@@ -848,7 +852,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       applySessionScope(
         supabase
         .from("overtime_claims")
-        .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+        .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
         session,
       )
         .gte("assignment_date", monthStart)
@@ -859,7 +863,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     applySessionScope(
       supabase
       .from("manual_overtime_postings")
-      .select("id, schedule_id, sub_schedule_id, competency_id, slot_count, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
+      .select("id, schedule_id, sub_schedule_id, competency_id, time_code_id, slot_count, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
       session,
     )
       .eq("month_key", month),
@@ -960,6 +964,12 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
         ...subScheduleAssignmentRows
           .map((assignment) => assignment.time_code_id)
           .filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId)),
+        ...(((manualOvertimePostingsResult.data as ManualOvertimePostingRow[] | null) ?? [])
+          .map((posting) => posting.time_code_id)
+          .filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId))),
+        ...(((overtimeClaimsResult.data as OvertimeClaimRow[] | null) ?? [])
+          .map((claim) => claim.time_code_id)
+          .filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId))),
       ],
     ),
   ].filter((timeCodeId) => !loadedTimeCodeIds.has(timeCodeId));
@@ -1230,7 +1240,7 @@ export async function getMetricsOvertimeHistory(today: string, session?: AppSess
     applySessionScope(
       supabase
       .from("overtime_claims")
-      .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+      .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
       session,
     )
       .gte("assignment_date", getYearStart(today))

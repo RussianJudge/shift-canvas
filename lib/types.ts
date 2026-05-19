@@ -112,7 +112,8 @@ export interface OvertimeClaim extends OrganizationScope {
   scheduleId: string | null;
   subScheduleId?: string | null;
   employeeId: string;
-  competencyId: string;
+  competencyId: string | null;
+  timeCodeId?: string | null;
   date: string;
   manualPostingId?: string | null;
 }
@@ -121,7 +122,8 @@ export interface ManualOvertimePosting extends OrganizationScope {
   id: string;
   scheduleId: string | null;
   subScheduleId?: string | null;
-  competencyId: string;
+  competencyId: string | null;
+  timeCodeId?: string | null;
   slotCount: number;
   month: string;
   shiftKind: Exclude<ShiftKind, "OFF">;
@@ -213,7 +215,8 @@ export interface ClaimOvertimePostingInput {
   scheduleId?: string | null;
   subScheduleId?: string | null;
   employeeId: string;
-  competencyId: string;
+  competencyId?: string | null;
+  timeCodeId?: string | null;
   coverageCompetencyId?: string | null;
   swapEmployeeId?: string | null;
   manualPostingId?: string | null;
@@ -224,14 +227,16 @@ export interface ReleaseOvertimePostingInput {
   scheduleId?: string | null;
   subScheduleId?: string | null;
   employeeId: string;
-  competencyId: string;
+  competencyId?: string | null;
+  timeCodeId?: string | null;
   dates: string[];
 }
 
 export interface CreateManualOvertimePostingInput {
   scheduleId?: string | null;
   subScheduleId?: string | null;
-  competencyId: string;
+  competencyId?: string | null;
+  timeCodeId?: string | null;
   slotCount: number;
   dates: string[];
 }

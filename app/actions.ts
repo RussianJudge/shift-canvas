@@ -325,7 +325,7 @@ async function clearClaimantAssignmentsForClaims(
     }
 
     const fallbackDeleteResults = await Promise.all(
-      group.dates.map((date) =>
+      group.dates.flatMap((date) => [
         supabase
           .from("schedule_assignments")
           .delete()
@@ -333,7 +333,14 @@ async function clearClaimantAssignmentsForClaims(
           .eq("schedule_id", group.scheduleId)
           .eq("assignment_date", date)
           .eq("competency_id", group.competencyId),
-      ),
+        supabase
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", group.employeeId)
+          .eq("schedule_id", group.scheduleId)
+          .eq("assignment_date", date)
+          .eq("time_code_id", group.competencyId),
+      ]),
     );
     const fallbackDeleteError = fallbackDeleteResults.find((result) => result.error)?.error;
 
@@ -455,10 +462,14 @@ async function removeStaleOvertimeClaims(
     const mainScheduleClaimsToRemove = claimsToRemove.filter(
       (claim): claim is (typeof claimsToRemove)[number] & { scheduleId: string } => Boolean(claim.scheduleId),
     );
+    const restorableMainScheduleClaims = mainScheduleClaimsToRemove.filter(
+      (claim): claim is (typeof mainScheduleClaimsToRemove)[number] & { competencyId: string } =>
+        Boolean(claim.competencyId),
+    );
 
     const restoreResult = await restoreSwappedAssignmentsForClaims(
       supabase,
-      mainScheduleClaimsToRemove.map((claim) => ({
+      restorableMainScheduleClaims.map((claim) => ({
         scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
@@ -487,10 +498,14 @@ async function removeStaleOvertimeClaims(
 
     const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
       supabase,
-      mainScheduleClaimsToRemove.map((claim) => ({
+      mainScheduleClaimsToRemove
+        .filter((claim): claim is (typeof mainScheduleClaimsToRemove)[number] & { competencyId: string } =>
+          Boolean(claim.competencyId ?? claim.timeCodeId),
+        )
+        .map((claim) => ({
         scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
-        competencyId: claim.competencyId,
+        competencyId: claim.competencyId ?? claim.timeCodeId ?? "",
         date: claim.date,
       })),
     );
@@ -1071,11 +1086,19 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   const snapshot = await getSchedulerSnapshot(month, session);
   const targetScheduleId = input.scheduleId ?? null;
   const targetSubScheduleId = input.subScheduleId ?? null;
+  const targetCompetencyId = input.competencyId ?? null;
+  const targetTimeCodeId = input.timeCodeId ?? null;
+  const targetAssignmentId = targetCompetencyId ?? targetTimeCodeId;
   const schedule = targetScheduleId ? getScheduleById(snapshot, targetScheduleId) : null;
   const subSchedule = targetSubScheduleId
     ? snapshot.subSchedules.find((entry) => entry.id === targetSubScheduleId) ?? null
     : null;
-  const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
+  const competency = targetCompetencyId
+    ? snapshot.competencies.find((entry) => entry.id === targetCompetencyId) ?? null
+    : null;
+  const timeCode = targetTimeCodeId
+    ? snapshot.timeCodes.find((entry) => entry.id === targetTimeCodeId) ?? null
+    : null;
 
   if ((targetScheduleId ? 1 : 0) + (targetSubScheduleId ? 1 : 0) !== 1) {
     return {
@@ -1084,24 +1107,38 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     };
   }
 
-  if ((!schedule && !subSchedule) || !competency) {
+  if ((targetCompetencyId ? 1 : 0) + (targetTimeCodeId ? 1 : 0) !== 1) {
     return {
       ok: false,
-      message: "Could not find the selected target or competency.",
+      message: "Choose exactly one overtime assignment: either a competency or a time code.",
     };
   }
 
-  if (schedule && !schedule.competencyIds.includes(competency.id)) {
+  if ((!schedule && !subSchedule) || (!competency && !timeCode)) {
+    return {
+      ok: false,
+      message: "Could not find the selected target or assignment.",
+    };
+  }
+
+  if (schedule && competency && !schedule.competencyIds.includes(competency.id)) {
     return {
       ok: false,
       message: "That competency is not enabled for the selected main schedule.",
     };
   }
 
-  if (subSchedule && !subSchedule.competencyIds.includes(competency.id)) {
+  if (subSchedule && competency && !subSchedule.competencyIds.includes(competency.id)) {
     return {
       ok: false,
       message: "That competency is not enabled for the selected sub-schedule.",
+    };
+  }
+
+  if (timeCode && timeCode.usageMode === "projected_only") {
+    return {
+      ok: false,
+      message: "Projected-only time codes cannot be used for overtime postings.",
     };
   }
 
@@ -1127,7 +1164,8 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     (posting) =>
       posting.scheduleId === targetScheduleId &&
       (posting.subScheduleId ?? null) === targetSubScheduleId &&
-      posting.competencyId === input.competencyId &&
+      (posting.competencyId ?? null) === targetCompetencyId &&
+      (posting.timeCodeId ?? null) === targetTimeCodeId &&
       posting.dates.length === dates.length &&
       posting.dates.every((date, index) => date === dates[index]),
   );
@@ -1152,7 +1190,7 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
 
     return {
       ok: true,
-      message: `Added ${slotCount} more ${competency.code} slot${slotCount === 1 ? "" : "s"} to the existing posting${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
+      message: `Added ${slotCount} more ${(competency?.code ?? timeCode?.code) || "assignment"} slot${slotCount === 1 ? "" : "s"} to the existing posting${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
     };
   }
 
@@ -1166,7 +1204,8 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     id: `manual-ot-${crypto.randomUUID()}`,
     schedule_id: schedule?.id ?? null,
     sub_schedule_id: subSchedule?.id ?? null,
-    competency_id: competency.id,
+    competency_id: competency?.id ?? null,
+    time_code_id: timeCode?.id ?? null,
     slot_count: slotCount,
     month_key: month,
     shift_kind: uniqueShiftKinds[0],
@@ -1186,7 +1225,7 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
 
   return {
     ok: true,
-    message: `Manual overtime posting created for ${slotCount} ${competency.code} slot${slotCount === 1 ? "" : "s"}${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
+    message: `Manual overtime posting created for ${slotCount} ${(competency?.code ?? timeCode?.code) || "assignment"} slot${slotCount === 1 ? "" : "s"}${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
   };
 }
 
@@ -1319,11 +1358,20 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
   const targetScheduleId = input.scheduleId ?? null;
   const targetSubScheduleId = input.subScheduleId ?? null;
+  const targetCompetencyId = input.competencyId ?? null;
+  const targetTimeCodeId = input.timeCodeId ?? null;
 
   if ((targetScheduleId ? 1 : 0) + (targetSubScheduleId ? 1 : 0) !== 1) {
     return {
       ok: false,
       message: "Choose exactly one overtime target: either a main schedule or a sub-schedule.",
+    };
+  }
+
+  if ((targetCompetencyId ? 1 : 0) + (targetTimeCodeId ? 1 : 0) !== 1) {
+    return {
+      ok: false,
+      message: "Choose exactly one overtime assignment: either a competency or a time code.",
     };
   }
 
@@ -1336,44 +1384,59 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   const targetSubSchedule = targetSubScheduleId
     ? snapshot.subSchedules.find((entry) => entry.id === targetSubScheduleId) ?? null
     : null;
-  const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
-  const coverageCompetencyId = input.coverageCompetencyId ?? input.competencyId;
-  const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
+  const competency = targetCompetencyId
+    ? snapshot.competencies.find((entry) => entry.id === targetCompetencyId) ?? null
+    : null;
+  const timeCode = targetTimeCodeId
+    ? snapshot.timeCodes.find((entry) => entry.id === targetTimeCodeId) ?? null
+    : null;
+  const coverageCompetencyId = targetCompetencyId ? input.coverageCompetencyId ?? targetCompetencyId : null;
+  const coverageCompetency = coverageCompetencyId
+    ? snapshot.competencies.find((entry) => entry.id === coverageCompetencyId) ?? null
+    : null;
   const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
   const manualPosting = input.manualPostingId
     ? snapshot.manualOvertimePostings.find((posting) => posting.id === input.manualPostingId)
     : null;
+  const targetAssignmentId = competency?.id ?? timeCode?.id ?? null;
 
-  if (!employee || !employeeSchedule || !competency || !coverageCompetency || (!targetSchedule && !targetSubSchedule)) {
+  if (!employee || !employeeSchedule || (!competency && !timeCode) || (!targetSchedule && !targetSubSchedule)) {
     return {
       ok: false,
-      message: "Could not find the employee or competency for this posting.",
+      message: "Could not find the employee or assignment for this posting.",
     };
   }
 
-  if (!employee.competencyIds.includes(input.competencyId)) {
+  if (competency && !employee.competencyIds.includes(competency.id)) {
     return {
       ok: false,
       message: `${employee.name} is not qualified for ${competency.code}.`,
     };
   }
 
-  if (targetSchedule && !targetSchedule.competencyIds.includes(input.competencyId)) {
+  if (targetSchedule && competency && !targetSchedule.competencyIds.includes(competency.id)) {
     return {
       ok: false,
       message: "That competency is not enabled for the selected main schedule.",
     };
   }
 
-  if (targetSchedule && !targetSchedule.competencyIds.includes(coverageCompetencyId)) {
+  if (targetSchedule && coverageCompetencyId && !targetSchedule.competencyIds.includes(coverageCompetencyId)) {
     return {
       ok: false,
       message: "That coverage competency is not enabled for the selected main schedule.",
     };
   }
 
+  if (timeCode && timeCode.usageMode === "projected_only") {
+    return {
+      ok: false,
+      message: "Projected-only time codes cannot be used for overtime claims.",
+    };
+  }
+
   if (targetSubSchedule) {
-    if (!targetSubSchedule.competencyIds.includes(input.competencyId)) {
+    if (competency && !targetSubSchedule.competencyIds.includes(competency.id)) {
       return {
         ok: false,
         message: "That competency is not enabled for the selected sub-schedule.",
@@ -1390,7 +1453,8 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
       if (
         manualPosting.subScheduleId !== targetSubSchedule.id ||
-        manualPosting.competencyId !== input.competencyId ||
+        (manualPosting.competencyId ?? null) !== targetCompetencyId ||
+        (manualPosting.timeCodeId ?? null) !== targetTimeCodeId ||
         manualPosting.dates.length !== normalizedDates.length ||
         manualPosting.dates.some((date, index) => date !== normalizedDates[index])
       ) {
@@ -1401,7 +1465,14 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       }
     }
 
-    if (coverageCompetencyId !== input.competencyId || input.swapEmployeeId) {
+    if (timeCode) {
+      if (input.swapEmployeeId || coverageCompetencyId) {
+        return {
+          ok: false,
+          message: "Time-code overtime postings only support direct claims.",
+        };
+      }
+    } else if (coverageCompetencyId !== competency!.id || input.swapEmployeeId) {
       return {
         ok: false,
         message: "Sub-schedule overtime postings only support direct claims.",
@@ -1457,26 +1528,27 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       businessAreaId: targetSubSchedule.businessAreaId ?? session.businessAreaId ?? "",
     };
     const assignmentRows = normalizedDates.map((date) => ({
-      id: `sub-ot-${targetSubSchedule.id}-${input.employeeId}-${input.competencyId}-${date}`,
+      id: `sub-ot-${targetSubSchedule.id}-${input.employeeId}-${targetAssignmentId}-${date}`,
       sub_schedule_id: targetSubSchedule.id,
       employee_id: input.employeeId,
       assignment_date: date,
-      competency_id: input.competencyId,
-      time_code_id: null,
+      competency_id: competency?.id ?? null,
+      time_code_id: timeCode?.id ?? null,
       notes: buildOvertimeAssignmentNote({
         claimantEmployeeId: input.employeeId,
-        claimedCompetencyId: input.competencyId,
-        coverageCompetencyId,
+        claimedCompetencyId: targetAssignmentId!,
+        coverageCompetencyId: coverageCompetencyId ?? null,
         swapEmployeeId: null,
       }),
       ...toDatabaseScope(subScheduleScope),
     }));
     const claimRows = normalizedDates.map((date) => ({
-      id: `ot-sub-${targetSubSchedule.id}-${input.employeeId}-${input.competencyId}-${date}`,
+      id: `ot-sub-${targetSubSchedule.id}-${input.employeeId}-${targetAssignmentId}-${date}`,
       schedule_id: null,
       sub_schedule_id: targetSubSchedule.id,
       employee_id: input.employeeId,
-      competency_id: input.competencyId,
+      competency_id: competency?.id ?? null,
+      time_code_id: timeCode?.id ?? null,
       assignment_date: date,
       manual_posting_id: input.manualPostingId ?? null,
       ...toDatabaseScope(subScheduleScope),
@@ -1524,7 +1596,8 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
     if (
       manualPosting.scheduleId !== targetScheduleId ||
-      manualPosting.competencyId !== input.competencyId ||
+      (manualPosting.competencyId ?? null) !== targetCompetencyId ||
+      (manualPosting.timeCodeId ?? null) !== targetTimeCodeId ||
       manualPosting.dates.length !== normalizedDates.length ||
       manualPosting.dates.some((date, index) => date !== normalizedDates[index])
     ) {
@@ -1534,7 +1607,14 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       };
     }
 
-    if (coverageCompetencyId !== input.competencyId || input.swapEmployeeId) {
+    if (timeCode) {
+      if (input.swapEmployeeId || coverageCompetencyId) {
+        return {
+          ok: false,
+          message: "Time-code overtime postings only support direct claims.",
+        };
+      }
+    } else if (coverageCompetencyId !== competency!.id || input.swapEmployeeId) {
       return {
         ok: false,
         message: "Manual overtime postings only support direct claims.",
@@ -1563,7 +1643,14 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
   let swapAssignmentRows: OvertimeAssignmentRow[] = [];
 
-  if (coverageCompetencyId !== input.competencyId) {
+  if (timeCode) {
+    if (input.swapEmployeeId || coverageCompetencyId) {
+      return {
+        ok: false,
+        message: "Time-code overtime postings only support direct claims.",
+      };
+    }
+  } else if (coverageCompetencyId !== competency!.id) {
     if (!input.swapEmployeeId) {
       return {
         ok: false,
@@ -1580,10 +1667,10 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       };
     }
 
-    if (!swapEmployee.competencyIds.includes(coverageCompetencyId)) {
+    if (!swapEmployee.competencyIds.includes(coverageCompetencyId!)) {
       return {
         ok: false,
-        message: `${swapEmployee.name} cannot be moved to ${coverageCompetency.code}.`,
+        message: `${swapEmployee.name} cannot be moved to ${coverageCompetency!.code}.`,
       };
     }
 
@@ -1593,18 +1680,18 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
         timeCodeId: null,
       };
 
-      if (swapSelection.competencyId !== input.competencyId) {
+      if (swapSelection.competencyId !== competency!.id) {
         return {
           ok: false,
-          message: `${swapEmployee.name} is no longer on ${competency.code} for every shift in that posting.`,
+          message: `${swapEmployee.name} is no longer on ${competency!.code} for every shift in that posting.`,
         };
       }
     }
 
     swapAssignmentRows = buildSwapOvertimeAssignmentRows({
       claimantEmployeeId: input.employeeId,
-      claimedCompetencyId: input.competencyId,
-      coverageCompetencyId,
+      claimedCompetencyId: competency!.id,
+      coverageCompetencyId: coverageCompetencyId!,
       swapEmployeeId: swapEmployee.id,
       dates: normalizedDates,
       targetScheduleId: targetScheduleId ?? "",
@@ -1656,12 +1743,12 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     employee_id: input.employeeId,
     schedule_id: targetScheduleId,
     assignment_date: date,
-    competency_id: input.competencyId,
-    time_code_id: null,
+    competency_id: competency?.id ?? null,
+    time_code_id: timeCode?.id ?? null,
     notes: buildOvertimeAssignmentNote({
       claimantEmployeeId: input.employeeId,
-      claimedCompetencyId: input.competencyId,
-      coverageCompetencyId,
+      claimedCompetencyId: targetAssignmentId!,
+      coverageCompetencyId: coverageCompetencyId ?? null,
       swapEmployeeId: input.swapEmployeeId ?? null,
     }),
     shift_kind: shiftForDate(targetSchedule!, date),
@@ -1673,11 +1760,12 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   }));
 
   const claimRows = normalizedDates.map((date) => ({
-    id: `ot-${targetScheduleId}-${input.employeeId}-${input.competencyId}-${date}`,
+    id: `ot-${targetScheduleId}-${input.employeeId}-${targetAssignmentId}-${date}`,
     schedule_id: targetScheduleId,
     sub_schedule_id: null,
     employee_id: input.employeeId,
-    competency_id: input.competencyId,
+    competency_id: competency?.id ?? null,
+    time_code_id: timeCode?.id ?? null,
     assignment_date: date,
     manual_posting_id: input.manualPostingId ?? null,
     ...toDatabaseScope({
@@ -1765,14 +1853,30 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     };
   }
 
+  const targetCompetencyId = input.competencyId ?? null;
+  const targetTimeCodeId = input.timeCodeId ?? null;
+  const targetAssignmentId = targetCompetencyId ?? targetTimeCodeId;
+
+  if ((targetCompetencyId ? 1 : 0) + (targetTimeCodeId ? 1 : 0) !== 1) {
+    return {
+      ok: false,
+      message: "Choose exactly one overtime assignment to release.",
+    };
+  }
+
   if (input.subScheduleId) {
-    const { error: claimDeleteError } = await supabase
+    let claimDeleteQuery = supabase
       .from("overtime_claims")
       .delete()
       .eq("sub_schedule_id", input.subScheduleId)
       .eq("employee_id", input.employeeId)
-      .eq("competency_id", input.competencyId)
       .in("assignment_date", input.dates);
+
+    claimDeleteQuery = targetCompetencyId
+      ? claimDeleteQuery.eq("competency_id", targetCompetencyId)
+      : claimDeleteQuery.eq("time_code_id", targetTimeCodeId!);
+
+    const { error: claimDeleteError } = await claimDeleteQuery;
 
     if (claimDeleteError) {
       return {
@@ -1783,13 +1887,21 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
 
     const deleteResults = await Promise.all(
       input.dates.map((date) =>
-        supabase
-          .from("sub_schedule_assignments")
-          .delete()
-          .eq("sub_schedule_id", input.subScheduleId)
-          .eq("employee_id", input.employeeId)
-          .eq("assignment_date", date)
-          .eq("competency_id", input.competencyId),
+        (targetCompetencyId
+          ? supabase
+              .from("sub_schedule_assignments")
+              .delete()
+              .eq("sub_schedule_id", input.subScheduleId)
+              .eq("employee_id", input.employeeId)
+              .eq("assignment_date", date)
+              .eq("competency_id", targetCompetencyId)
+          : supabase
+              .from("sub_schedule_assignments")
+              .delete()
+              .eq("sub_schedule_id", input.subScheduleId)
+              .eq("employee_id", input.employeeId)
+              .eq("assignment_date", date)
+              .eq("time_code_id", targetTimeCodeId!)),
       ),
     );
 
@@ -1817,7 +1929,7 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     input.dates.map((date) => ({
       scheduleId: input.scheduleId ?? "",
       employeeId: input.employeeId,
-      competencyId: input.competencyId,
+      competencyId: targetAssignmentId ?? "",
       date,
     })),
   );
@@ -1834,8 +1946,8 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     .delete()
     .eq("schedule_id", input.scheduleId ?? "")
     .eq("employee_id", input.employeeId)
-    .eq("competency_id", input.competencyId)
-    .in("assignment_date", input.dates);
+    .in("assignment_date", input.dates)
+    .match(targetCompetencyId ? { competency_id: targetCompetencyId } : { time_code_id: targetTimeCodeId! });
 
   if (claimDeleteError) {
     return {
@@ -1849,7 +1961,7 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     input.dates.map((date) => ({
       scheduleId: input.scheduleId ?? "",
       employeeId: input.employeeId,
-      competencyId: input.competencyId,
+      competencyId: targetAssignmentId ?? "",
       date,
     })),
   );
