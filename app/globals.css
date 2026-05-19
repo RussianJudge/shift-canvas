@@ -1533,6 +1533,53 @@ select {
   gap: 0.85rem;
 }
 
+.overtime-eligibility-modal {
+  width: min(42rem, 100%);
+}
+
+.overtime-eligibility-modal__summary {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.overtime-eligibility-modal__summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+}
+
+.overtime-eligibility-modal__summary-row strong {
+  text-align: right;
+}
+
+.overtime-eligibility-modal__list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.overtime-eligibility-modal__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.45rem 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.overtime-eligibility-modal__row span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .mutuals-create-action {
   display: flex;
   justify-content: flex-start;

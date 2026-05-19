@@ -278,6 +278,86 @@ function getClaimStatus(
   return { canClaim: true, reason: "Available to claim." };
 }
 
+function OvertimeEligibilityReportModal({
+  posting,
+  eligibleEmployees,
+  onClose,
+}: {
+  posting: OvertimePosting;
+  eligibleEmployees: Array<{ id: string; name: string; scheduleName: string }>;
+  onClose: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section className="assignment-modal overtime-eligibility-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Eligible employees</h2>
+            <p className="assignment-modal__context">
+              Employees currently eligible to claim this overtime posting.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div className="overtime-eligibility-modal__summary">
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Schedule</span>
+            <strong>
+              {posting.targetMode === "main" ? `Main schedule · Shift ${posting.scheduleName}` : posting.scheduleName}
+            </strong>
+          </div>
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Assignment</span>
+            <strong>
+              {posting.competencyCode} · {posting.competencyLabel}
+            </strong>
+          </div>
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Dates</span>
+            <strong>
+              {formatShortDate(posting.dates[0])} - {formatShortDate(posting.dates[posting.dates.length - 1])}
+            </strong>
+          </div>
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Shift count</span>
+            <strong>{getShiftLabel(posting.shiftKind, posting.dates.length)}</strong>
+          </div>
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Open slots</span>
+            <strong>
+              {posting.openShifts} open shift{posting.openShifts === 1 ? "" : "s"}
+            </strong>
+          </div>
+        </div>
+
+        {eligibleEmployees.length > 0 ? (
+          <div className="overtime-eligibility-modal__list">
+            {eligibleEmployees.map((employee) => (
+              <div key={employee.id} className="overtime-eligibility-modal__row">
+                <strong>{employee.name}</strong>
+                <span>Shift {employee.scheduleName}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <strong>No eligible employees.</strong>
+            <span>No employees currently meet the claim requirements for this posting.</span>
+          </div>
+        )}
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 /** Modal used by leaders/admins to author a manual overtime posting. */
 function ManualOvertimePostingModal({
   snapshot,
@@ -515,6 +595,7 @@ export function OvertimePanel({
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [eligibilityReportPostingId, setEligibilityReportPostingId] = useState<string | null>(null);
   const [manualTargetKey, setManualTargetKey] = useState<OvertimeTargetKey | "">(
     snapshot.schedules.length > 0
       ? "main"
@@ -1122,6 +1203,32 @@ export function OvertimePanel({
   );
 
   const claimingEmployee = claimingEmployeeId ? employeeMap[claimingEmployeeId] ?? null : null;
+  const selectedEligibilityReportPosting = useMemo(
+    () => postings.find((posting) => posting.id === eligibilityReportPostingId) ?? null,
+    [eligibilityReportPostingId, postings],
+  );
+  const eligibleEmployeesForReport = useMemo(
+    () =>
+      selectedEligibilityReportPosting
+        ? allEmployees
+            .filter(
+              (employee) =>
+                getClaimStatus(employee, selectedEligibilityReportPosting, snapshot, assignmentIndex).canClaim,
+            )
+            .map((employee) => ({
+              id: employee.id,
+              name: employee.name,
+              scheduleName: getScheduleById(snapshot, employee.scheduleId)?.name ?? "Unknown",
+            }))
+        : [],
+    [allEmployees, assignmentIndex, selectedEligibilityReportPosting, snapshot],
+  );
+
+  useEffect(() => {
+    if (eligibilityReportPostingId && !selectedEligibilityReportPosting) {
+      setEligibilityReportPostingId(null);
+    }
+  }, [eligibilityReportPostingId, selectedEligibilityReportPosting]);
 
   function handleClaim(posting: OvertimePosting) {
     if (!claimingEmployeeId) {
@@ -1494,9 +1601,18 @@ export function OvertimePanel({
                             : selectedPostingClaimedByViewer
                             ? "Release Posting"
                             : selectedPosting.openShifts === 0
-                            ? "Claimed"
+                              ? "Claimed"
                             : "Claim Posting"}
                         </button>
+                        {canManageManualPostings ? (
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => setEligibilityReportPostingId(selectedPosting.id)}
+                          >
+                            Eligible employees
+                          </button>
+                        ) : null}
                         {canManageManualPostings &&
                         selectedPosting.source === "manual" &&
                         selectedPosting.claimedEmployeeIds.length === 0 ? (
@@ -1554,6 +1670,14 @@ export function OvertimePanel({
           onClose={() => setIsManualModalOpen(false)}
           onSubmit={handleCreateManualPosting}
           isSubmitting={isManagingManual}
+        />
+      ) : null}
+
+      {selectedEligibilityReportPosting ? (
+        <OvertimeEligibilityReportModal
+          posting={selectedEligibilityReportPosting}
+          eligibleEmployees={eligibleEmployeesForReport}
+          onClose={() => setEligibilityReportPostingId(null)}
         />
       ) : null}
     </section>
