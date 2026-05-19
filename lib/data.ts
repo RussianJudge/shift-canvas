@@ -1586,10 +1586,14 @@ export async function getTimeCodesSnapshot(month: string, session?: AppSession |
 
 export async function getOvertimeMonths(currentMonth: string, session?: AppSession | null) {
   const supabase = getDataClient();
+  const postingMonths =
+    session && session.role !== "worker"
+      ? Array.from({ length: 13 }, (_, index) => shiftMonthKey(currentMonth, index))
+      : [];
 
   if (!supabase) {
     console.error("Overtime month discovery unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
-    return [currentMonth];
+    return postingMonths.length > 0 ? postingMonths : [currentMonth];
   }
 
   /**
@@ -1625,12 +1629,13 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
   ]);
 
   if (completedSetsResult.error || overtimeClaimsResult.error || manualPostingsResult.error) {
-    return [currentMonth];
+    return postingMonths.length > 0 ? postingMonths : [currentMonth];
   }
 
   const candidateMonths = Array.from(
     new Set(
       [
+        ...postingMonths,
         ...(((completedSetsResult.data as Array<{ month_key: string }> | null) ?? []).map((row) => row.month_key)),
         ...(((overtimeClaimsResult.data as Array<{ assignment_date: string }> | null) ?? []).map((row) =>
           getMonthKeyFromDate(row.assignment_date),
@@ -1640,7 +1645,7 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
     ),
   ).sort();
 
-  return candidateMonths.length > 0 ? candidateMonths : [currentMonth];
+  return candidateMonths.length > 0 ? candidateMonths : postingMonths.length > 0 ? postingMonths : [currentMonth];
 }
 
 export async function getUserSchedulePins(email: string) {

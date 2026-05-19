@@ -1561,6 +1561,9 @@ select {
 .overtime-eligibility-modal__list {
   display: grid;
   gap: 0.7rem;
+  max-height: min(22rem, 52vh);
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .overtime-eligibility-modal__row {
@@ -2839,6 +2842,23 @@ select {
   font-size: 0.9rem;
 }
 
+.overtime-card-actions {
+  align-items: flex-start;
+}
+
+.overtime-card-actions__buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.55rem;
+  margin-left: auto;
+}
+
+.overtime-card-actions__buttons .primary-button,
+.overtime-card-actions__buttons .ghost-button {
+  width: auto;
+}
+
 .loading-stack {
   display: grid;
   gap: 0.55rem;
@@ -3265,7 +3285,14 @@ select {
     flex-direction: column;
   }
 
-  .overtime-card-actions .primary-button {
+  .overtime-card-actions__buttons {
+    width: 100%;
+    align-items: stretch;
+    margin-left: 0;
+  }
+
+  .overtime-card-actions__buttons .primary-button,
+  .overtime-card-actions__buttons .ghost-button {
     width: 100%;
   }
 

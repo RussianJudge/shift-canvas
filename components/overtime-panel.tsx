@@ -1581,50 +1581,52 @@ export function OvertimePanel({
                               }`
                             : claimStatus.reason}
                         </span>
-                        <button
-                          type="button"
-                          className="primary-button"
-                          onClick={() =>
-                            selectedPostingClaimedByViewer
-                              ? handleRelease(selectedPosting)
-                              : handleClaim(selectedPosting)
-                          }
-                          disabled={
-                            isClaiming ||
-                            (!selectedPostingClaimedByViewer && !claimStatus.canClaim)
-                          }
-                        >
-                          {isClaiming
-                            ? selectedPostingClaimedByViewer
-                              ? "Releasing..."
-                              : "Claiming..."
-                            : selectedPostingClaimedByViewer
-                            ? "Release Posting"
-                            : selectedPosting.openShifts === 0
+                        <div className="overtime-card-actions__buttons">
+                          <button
+                            type="button"
+                            className="primary-button"
+                            onClick={() =>
+                              selectedPostingClaimedByViewer
+                                ? handleRelease(selectedPosting)
+                                : handleClaim(selectedPosting)
+                            }
+                            disabled={
+                              isClaiming ||
+                              (!selectedPostingClaimedByViewer && !claimStatus.canClaim)
+                            }
+                          >
+                            {isClaiming
+                              ? selectedPostingClaimedByViewer
+                                ? "Releasing..."
+                                : "Claiming..."
+                              : selectedPostingClaimedByViewer
+                              ? "Release Posting"
+                              : selectedPosting.openShifts === 0
                               ? "Claimed"
-                            : "Claim Posting"}
-                        </button>
-                        {canManageManualPostings ? (
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => setEligibilityReportPostingId(selectedPosting.id)}
-                          >
-                            Eligible employees
+                              : "Claim Posting"}
                           </button>
-                        ) : null}
-                        {canManageManualPostings &&
-                        selectedPosting.source === "manual" &&
-                        selectedPosting.claimedEmployeeIds.length === 0 ? (
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => handleDeleteManualPosting(selectedPosting)}
-                            disabled={isManagingManual}
-                          >
-                            {isManagingManual ? "Deleting..." : "Delete Posting"}
-                          </button>
-                        ) : null}
+                          {canManageManualPostings ? (
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => setEligibilityReportPostingId(selectedPosting.id)}
+                            >
+                              Eligible employees
+                            </button>
+                          ) : null}
+                          {canManageManualPostings &&
+                          selectedPosting.source === "manual" &&
+                          selectedPosting.claimedEmployeeIds.length === 0 ? (
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => handleDeleteManualPosting(selectedPosting)}
+                              disabled={isManagingManual}
+                            >
+                              {isManagingManual ? "Deleting..." : "Delete Posting"}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     </>
                   ) : null}
