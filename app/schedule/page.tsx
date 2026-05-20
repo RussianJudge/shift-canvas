@@ -124,7 +124,7 @@ export default async function SchedulePage({
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
-  const initialSelectedScheduleId = resolvedSearchParams?.schedule?.trim() || null;
+  const initialSelectedScheduleId = resolvedSearchParams?.schedule?.trim() || session.scheduleId || null;
 
   return (
     <WorkspaceShell viewer={session}>

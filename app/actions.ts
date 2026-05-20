@@ -45,6 +45,7 @@ import {
   createSetRangeKey,
   getEmployeeMap,
   getExtendedMonthDays,
+  hasWorkedNightBeforeDate,
   getMonthDays,
   getMonthKeysForDateRange,
   getScheduleById,
@@ -1257,7 +1258,8 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
 }
 
 /**
- * Deletes a manual overtime posting as long as nobody has already claimed it.
+ * Deletes a manual overtime posting, automatically releasing any claims and
+ * clearing their derived assignments first.
  */
 export async function deleteManualOvertimePosting(input: DeleteManualOvertimePostingInput) {
   const session = await requireActionRole(["admin", "leader"]);
@@ -1280,7 +1282,7 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
 
   const { data: posting, error: postingError } = await supabase
     .from("manual_overtime_postings")
-    .select("id, sub_schedule_id, company_id, site_id, business_area_id")
+    .select("id, schedule_id, sub_schedule_id, competency_id, time_code_id, company_id, site_id, business_area_id")
     .eq("id", input.postingId)
     .maybeSingle();
 
@@ -1305,9 +1307,12 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
     };
   }
 
-  const { count, error: claimsError } = await supabase
+  const { data: claims, count, error: claimsError } = await supabase
     .from("overtime_claims")
-    .select("id", { count: "exact", head: true })
+    .select(
+      "id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date",
+      { count: "exact" },
+    )
     .eq("manual_posting_id", input.postingId);
 
   if (claimsError) {
@@ -1317,11 +1322,93 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
     };
   }
 
+  const claimRows = ((claims as Array<{
+    id: string;
+    schedule_id: string | null;
+    sub_schedule_id: string | null;
+    employee_id: string;
+    competency_id: string | null;
+    time_code_id: string | null;
+    assignment_date: string;
+  }> | null) ?? []);
+
+  const mainScheduleClaims = claimRows
+    .filter((claim): claim is typeof claim & { schedule_id: string } => Boolean(claim.schedule_id))
+    .map((claim) => ({
+      scheduleId: claim.schedule_id,
+      employeeId: claim.employee_id,
+      competencyId: claim.competency_id ?? claim.time_code_id ?? "",
+      date: claim.assignment_date,
+    }))
+    .filter((claim) => Boolean(claim.competencyId));
+
+  const subScheduleClaims = claimRows.filter(
+    (claim): claim is typeof claim & { sub_schedule_id: string } => Boolean(claim.sub_schedule_id),
+  );
+
+  if (mainScheduleClaims.length > 0) {
+    const restoreResult = await restoreSwappedAssignmentsForClaims(supabase, mainScheduleClaims);
+
+    if (!restoreResult.ok) {
+      return {
+        ok: false,
+        message: restoreResult.message,
+      };
+    }
+
+    const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(supabase, mainScheduleClaims);
+
+    if (!clearAssignmentsResult.ok) {
+      return {
+        ok: false,
+        message: clearAssignmentsResult.message,
+      };
+    }
+  }
+
+  if (subScheduleClaims.length > 0) {
+    const deleteResults = await Promise.all(
+      subScheduleClaims.map((claim) =>
+        (claim.competency_id
+          ? supabase
+              .from("sub_schedule_assignments")
+              .delete()
+              .eq("sub_schedule_id", claim.sub_schedule_id)
+              .eq("employee_id", claim.employee_id)
+              .eq("assignment_date", claim.assignment_date)
+              .eq("competency_id", claim.competency_id)
+          : supabase
+              .from("sub_schedule_assignments")
+              .delete()
+              .eq("sub_schedule_id", claim.sub_schedule_id)
+              .eq("employee_id", claim.employee_id)
+              .eq("assignment_date", claim.assignment_date)
+              .eq("time_code_id", claim.time_code_id!)),
+      ),
+    );
+
+    const deleteError = deleteResults.find((result) => result.error)?.error;
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not clear sub-schedule overtime assignments: ${deleteError.message}`,
+      };
+    }
+  }
+
   if ((count ?? 0) > 0) {
-    return {
-      ok: false,
-      message: "Release the current claim before deleting this manual posting.",
-    };
+    const { error: claimDeleteError } = await supabase
+      .from("overtime_claims")
+      .delete()
+      .eq("manual_posting_id", input.postingId);
+
+    if (claimDeleteError) {
+      return {
+        ok: false,
+        message: `Could not release overtime claims: ${claimDeleteError.message}`,
+      };
+    }
   }
 
   const { error } = await supabase.from("manual_overtime_postings").delete().eq("id", input.postingId);
@@ -1340,7 +1427,10 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
 
   return {
     ok: true,
-    message: "Manual overtime posting deleted.",
+    message:
+      (count ?? 0) > 0
+        ? `Manual overtime posting deleted and released ${count} claim${count === 1 ? "" : "s"}.`
+        : "Manual overtime posting deleted.",
   };
 }
 
@@ -1771,6 +1861,16 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       return {
         ok: false,
         message: `${employee.name} is not available for every shift in that posting.`,
+      };
+    }
+
+    if (
+      shiftForDate(targetSchedule!, date) === "DAY" &&
+      hasWorkedNightBeforeDate(employee, employeeSchedule, snapshot, date)
+    ) {
+      return {
+        ok: false,
+        message: `${employee.name} worked a night shift on the previous calendar day.`,
       };
     }
   }

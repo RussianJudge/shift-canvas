@@ -19,6 +19,7 @@ import {
   getCurrentMonthKey,
   getEmployeeMap,
   getExtendedMonthDays,
+  hasWorkedNightBeforeDate,
   getMonthDays,
   getScheduleById,
   getWorkedSetDays,
@@ -251,6 +252,13 @@ function getClaimStatus(
   const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
 
   for (const date of posting.dates) {
+    if (
+      posting.shiftKind === "DAY" &&
+      hasWorkedNightBeforeDate(employee, employeeSchedule, snapshot, date)
+    ) {
+      return { canClaim: false, reason: "Employee worked a night shift on the previous calendar day." };
+    }
+
     const hasExistingAssignment = snapshot.assignments.some(
       (assignment) =>
         assignment.employeeId === employee.id &&
@@ -1363,6 +1371,17 @@ export function OvertimePanel({
       return;
     }
 
+    const claimCount = posting.claimedEmployeeIds.length;
+    const shouldDelete = window.confirm(
+      claimCount > 0
+        ? `Delete this posting and release ${claimCount} claim${claimCount === 1 ? "" : "s"}? This will remove the posting and clear the related overtime assignments.`
+        : "Delete this posting? This will remove it from the overtime board.",
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
     startManualTransition(async () => {
       const result = await deleteManualOvertimePosting({
         postingId: manualPostingId,
@@ -1654,8 +1673,7 @@ export function OvertimePanel({
                             </button>
                           ) : null}
                           {canManageManualPostings &&
-                          selectedPosting.source === "manual" &&
-                          selectedPosting.claimedEmployeeIds.length === 0 ? (
+                          selectedPosting.source === "manual" ? (
                             <button
                               type="button"
                               className="ghost-button"

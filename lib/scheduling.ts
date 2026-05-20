@@ -91,6 +91,50 @@ export function shiftForDate(schedule: Pick<Schedule, "startDate" | "dayShiftDay
   return pattern[index];
 }
 
+/** Returns the previous calendar date in `YYYY-MM-DD` format. */
+export function getPreviousDate(isoDate: string) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Checks whether a worker already worked a night shift on the previous calendar
+ * day, which blocks next-day DAY overtime claims.
+ */
+export function hasWorkedNightBeforeDate(
+  employee: Employee,
+  employeeSchedule: Pick<Schedule, "startDate" | "dayShiftDays" | "nightShiftDays" | "offDays">,
+  snapshot: Pick<SchedulerSnapshot, "assignments" | "subScheduleAssignments">,
+  isoDate: string,
+) {
+  const previousDate = getPreviousDate(isoDate);
+  const homeShiftKind = shiftForDate(employeeSchedule, previousDate);
+
+  const hasNightMainAssignment = snapshot.assignments.some(
+    (assignment) =>
+      assignment.employeeId === employee.id &&
+      assignment.date === previousDate &&
+      assignment.shiftKind === "NIGHT" &&
+      Boolean(assignment.competencyId || assignment.timeCodeId),
+  );
+
+  if (hasNightMainAssignment) {
+    return true;
+  }
+
+  const hasNightSubScheduleAssignment =
+    snapshot.subScheduleAssignments.some(
+      (assignment) =>
+        assignment.employeeId === employee.id &&
+        assignment.date === previousDate &&
+        Boolean(assignment.competencyId || assignment.timeCodeId),
+    ) && homeShiftKind === "NIGHT";
+
+  return hasNightSubScheduleAssignment || homeShiftKind === "NIGHT";
+}
+
 /** Returns the visible calendar grid for a single month. */
 export function getMonthDays(monthKey: string): MonthDay[] {
   const [year, month] = monthKey.split("-").map(Number);
