@@ -27,7 +27,7 @@ import type {
   WithdrawMutualApplicationInput,
   WithdrawMutualPostingInput,
 } from "@/lib/types";
-import { getSchedulerSnapshot } from "@/lib/data";
+import { getScheduleReferenceSnapshot } from "@/lib/data";
 import {
   buildOvertimeAssignmentNote,
   buildSwapOvertimeAssignmentRows,
@@ -396,7 +396,18 @@ async function removeStaleOvertimeClaims(
   let removedClaims = 0;
 
   for (const month of uniqueMonths) {
-    const snapshot = await getSchedulerSnapshot(month, session);
+    const snapshot = await getScheduleReferenceSnapshot(month, session, {
+      includeEmployeeCompetencies: false,
+      includeCompetencies: true,
+      includeTimeCodes: false,
+      includeSubSchedules: false,
+      includeAssignments: true,
+      includeSubScheduleAssignments: true,
+      includeOvertimeClaims: true,
+      includeCompletedSets: true,
+      assignmentWindow: "month",
+      completedSetWindow: "extended",
+    });
     const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
     const monthDays = getMonthDays(month);
     const completedDateKeys = snapshot.completedSets.reduce<Set<string>>((set, completedSet) => {
@@ -566,7 +577,17 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   }
 
   const touchedMonths = Array.from(new Set(input.updates.map((update) => update.date.slice(0, 7))));
-  const scopedSnapshots = await Promise.all(touchedMonths.map((month) => getSchedulerSnapshot(month, session)));
+  const scopedSnapshots = await Promise.all(
+    touchedMonths.map((month) =>
+      getScheduleReferenceSnapshot(month, session, {
+        includeEmployeeCompetencies: false,
+        includeCompetencies: false,
+        includeTimeCodes: false,
+        includeSubSchedules: false,
+        includeAssignments: true,
+      }),
+    ),
+  );
   const scopedEmployeeMap = scopedSnapshots.reduce<Record<string, ReturnType<typeof getEmployeeMap>[string]>>(
     (map, snapshot) => ({
       ...map,
@@ -1083,7 +1104,13 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   }
 
   const month = monthKeys[0] ?? "";
-  const snapshot = await getSchedulerSnapshot(month, session);
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: false,
+    includeCompetencies: true,
+    includeTimeCodes: true,
+    includeSubSchedules: true,
+    includeManualOvertimePostings: true,
+  });
   const targetScheduleId = input.scheduleId ?? null;
   const targetSubScheduleId = input.subScheduleId ?? null;
   const targetCompetencyId = input.competencyId ?? null;
@@ -1376,7 +1403,16 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
   }
 
   const month = normalizedDates[0]?.slice(0, 7);
-  const snapshot = await getSchedulerSnapshot(month, session);
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: true,
+    includeCompetencies: true,
+    includeTimeCodes: true,
+    includeSubSchedules: true,
+    includeAssignments: true,
+    includeSubScheduleAssignments: true,
+    includeOvertimeClaims: true,
+    includeManualOvertimePostings: true,
+  });
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
@@ -2029,7 +2065,12 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
 
   const month = dates[0].slice(0, 7);
 
-  const snapshot = await getSchedulerSnapshot(month, session);
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: false,
+    includeCompetencies: false,
+    includeTimeCodes: false,
+    includeSubSchedules: false,
+  });
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
@@ -2422,7 +2463,12 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     };
   }
 
-  const snapshot = await getSchedulerSnapshot(posting.month_key, session);
+  const snapshot = await getScheduleReferenceSnapshot(posting.month_key, session, {
+    includeEmployeeCompetencies: false,
+    includeCompetencies: false,
+    includeTimeCodes: false,
+    includeSubSchedules: false,
+  });
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;

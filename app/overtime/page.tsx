@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { OvertimePanel } from "@/components/overtime-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { requireAppSession } from "@/lib/auth";
-import { getOvertimeMonths, getSchedulerSnapshot } from "@/lib/data";
+import { getOvertimeBoardSnapshot, getOvertimeMonths } from "@/lib/data";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ async function OvertimeBoard({
       : availableMonths.includes(currentMonth)
       ? currentMonth
       : availableMonths[0] ?? currentMonth;
-  const snapshot = await getSchedulerSnapshot(month, session);
+  const snapshot = await getOvertimeBoardSnapshot(month, session);
 
   return <OvertimePanel snapshot={snapshot} availableMonths={availableMonths} viewer={session} />;
 }

@@ -4,7 +4,7 @@ import { MetricsPanel } from "@/components/metrics-panel";
 import { LoadingMetricsGrid, LoadingMonthNav, LoadingPanelFrame } from "@/components/workspace-loading";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { requireAppSession } from "@/lib/auth";
-import { getMetricsAssignmentHistory, getMetricsOvertimeHistory, getSchedulerSnapshot } from "@/lib/data";
+import { getMetricsAssignmentHistory, getMetricsOvertimeHistory, getMetricsSnapshot } from "@/lib/data";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +30,7 @@ async function MetricsBoard({
 }) {
   const metricsHistoryEnd = getMonthEndDateKey(month);
   const [snapshot, overtimeHistory, assignmentHistory] = await Promise.all([
-    getSchedulerSnapshot(month, session),
+    getMetricsSnapshot(month, session),
     getMetricsOvertimeHistory(metricsHistoryEnd, session),
     getMetricsAssignmentHistory(metricsHistoryEnd, session),
   ]);

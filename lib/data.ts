@@ -1067,6 +1067,263 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
   };
 }
 
+type ScheduleReferenceSnapshotOptions = {
+  includeEmployeeCompetencies?: boolean;
+  includeCompetencies?: boolean;
+  includeTimeCodes?: boolean;
+  includeSubSchedules?: boolean;
+  includeAssignments?: boolean;
+  includeSubScheduleAssignments?: boolean;
+  includeOvertimeClaims?: boolean;
+  includeManualOvertimePostings?: boolean;
+  includeCompletedSets?: boolean;
+  includeProjectedAssignments?: boolean;
+  assignmentWindow?: "month" | "extended";
+  completedSetWindow?: "month" | "extended";
+};
+
+/**
+ * Loads a narrower schedule/roster snapshot for pages and actions that do not
+ * need the full scheduler board state.
+ */
+export async function getScheduleReferenceSnapshot(
+  month: string,
+  session?: AppSession | null,
+  options: ScheduleReferenceSnapshotOptions = {},
+) {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    console.error("Schedule reference snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
+    return emptySnapshot(month);
+  }
+
+  const {
+    includeEmployeeCompetencies = true,
+    includeCompetencies = true,
+    includeTimeCodes = true,
+    includeSubSchedules = true,
+    includeAssignments = false,
+    includeSubScheduleAssignments = false,
+    includeOvertimeClaims = false,
+    includeManualOvertimePostings = false,
+    includeCompletedSets = false,
+    includeProjectedAssignments = false,
+    assignmentWindow = "month",
+    completedSetWindow = "month",
+  } = options;
+
+  const scheduleReference = await getScopedSchedulesWithEmployees(session, {
+    includeEmployeeCompetencies,
+  });
+
+  if (!scheduleReference) {
+    return emptySnapshot(month);
+  }
+
+  const { monthStart, monthEnd, windowMonths } =
+    assignmentWindow === "extended" ? getExtendedMonthBounds(month) : { ...getMonthBounds(month), windowMonths: [month] };
+  const completedMonths =
+    completedSetWindow === "extended" ? getExtendedMonthBounds(month).windowMonths : [month];
+  const visibleEmployeeIds = scheduleReference.employeeRows.map((employee) => employee.id);
+
+  const [
+    competenciesResult,
+    timeCodesResult,
+    subSchedulesResult,
+    subScheduleCompetenciesResult,
+    assignmentsResult,
+    subScheduleAssignmentsResult,
+    overtimeClaimsResult,
+    manualOvertimePostingsResult,
+    completedSetsResult,
+  ] = await Promise.all([
+    includeCompetencies
+      ? applySessionScope(
+          supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
+          session,
+        ).order("code")
+      : Promise.resolve({ data: [], error: null }),
+    includeTimeCodes
+      ? applySessionScope(
+          supabase.from("time_codes").select("id, code, label, color_token, usage_mode, company_id, site_id, business_area_id"),
+          session,
+        ).order("code")
+      : Promise.resolve({ data: [], error: null }),
+    includeSubSchedules
+      ? applySessionScope(
+          supabase
+            .from("sub_schedules")
+            .select("id, name, summary_time_code_id, is_archived, company_id, site_id, business_area_id"),
+          session,
+        )
+          .order("is_archived")
+          .order("name")
+      : Promise.resolve({ data: [], error: null }),
+    includeSubSchedules
+      ? applySessionScope(
+          supabase
+            .from("sub_schedule_competencies")
+            .select("sub_schedule_id, competency_id, company_id, site_id, business_area_id"),
+          session,
+        )
+      : Promise.resolve({ data: [], error: null }),
+    includeAssignments
+      ? visibleEmployeeIds.length > 0
+        ? fetchAllRows<AssignmentRow>(
+            supabase
+              .from("schedule_assignments")
+              .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
+              .in("employee_id", visibleEmployeeIds)
+              .gte("assignment_date", monthStart)
+              .lte("assignment_date", monthEnd)
+              .order("assignment_date")
+              .order("employee_id")
+              .order("schedule_id", { nullsFirst: false }),
+          )
+        : Promise.resolve({ data: [], error: null })
+      : Promise.resolve({ data: [], error: null }),
+    includeSubScheduleAssignments
+      ? fetchAllRows<SubScheduleAssignmentRow>(
+          applySessionScope(
+            supabase
+              .from("sub_schedule_assignments")
+              .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, time_code_id, notes, company_id, site_id, business_area_id"),
+            session,
+          )
+            .gte("assignment_date", monthStart)
+            .lte("assignment_date", monthEnd)
+            .order("assignment_date")
+            .order("employee_id")
+            .order("sub_schedule_id"),
+        )
+      : Promise.resolve({ data: [], error: null }),
+    includeOvertimeClaims
+      ? fetchAllRows<OvertimeClaimRow>(
+          applySessionScope(
+            supabase
+              .from("overtime_claims")
+              .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+            session,
+          )
+            .gte("assignment_date", monthStart)
+            .lte("assignment_date", monthEnd)
+            .order("assignment_date")
+            .order("id"),
+        )
+      : Promise.resolve({ data: [], error: null }),
+    includeManualOvertimePostings
+      ? applySessionScope(
+          supabase
+            .from("manual_overtime_postings")
+            .select("id, schedule_id, sub_schedule_id, competency_id, time_code_id, slot_count, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
+          session,
+        ).eq("month_key", month)
+      : Promise.resolve({ data: [], error: null }),
+    includeCompletedSets
+      ? applySessionScope(
+          supabase
+            .from("completed_sets")
+            .select("schedule_id, month_key, start_date, end_date, company_id, site_id, business_area_id"),
+          session,
+        ).in("month_key", completedMonths)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  logSnapshotQueryErrors("Schedule reference snapshot", [
+    ...(scheduleReference.errors ?? []),
+    ["competencies", competenciesResult.error],
+    ["time_codes", timeCodesResult.error],
+    ["sub_schedules", subSchedulesResult.error],
+    ["sub_schedule_competencies", subScheduleCompetenciesResult.error],
+    ["schedule_assignments", assignmentsResult.error],
+    ["sub_schedule_assignments", subScheduleAssignmentsResult.error],
+    ["overtime_claims", overtimeClaimsResult.error],
+    ["manual_overtime_postings", manualOvertimePostingsResult.error],
+    ["completed_sets", completedSetsResult.error],
+  ]);
+
+  const assignmentRows = (assignmentsResult.data as AssignmentRow[] | null) ?? [];
+  const subScheduleAssignmentRows = (subScheduleAssignmentsResult.data as SubScheduleAssignmentRow[] | null) ?? [];
+  const mappedSubSchedules = includeSubSchedules
+    ? mapSubSchedules(
+        (subSchedulesResult.data as SubScheduleRow[] | null) ?? [],
+        (subScheduleCompetenciesResult.data as SubScheduleCompetencyRow[] | null) ?? [],
+      )
+    : [];
+  const mappedSubScheduleAssignments = includeSubScheduleAssignments
+    ? mapSubScheduleAssignments(subScheduleAssignmentRows)
+    : [];
+  const filteredAssignmentRows =
+    includeAssignments && includeSubScheduleAssignments
+      ? filterAssignmentsShadowedBySubSchedules(
+          assignmentRows.map((row) => ({
+            employeeId: row.employee_id,
+            date: row.assignment_date,
+            row,
+          })),
+          mappedSubScheduleAssignments,
+        ).map((entry) => entry.row)
+      : assignmentRows;
+
+  return {
+    month,
+    productionUnits: [],
+    competencies: includeCompetencies
+      ? mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? [])
+      : [],
+    timeCodes: includeTimeCodes
+      ? mapTimeCodes((timeCodesResult.data as TimeCodeRow[] | null) ?? [])
+      : [],
+    schedules: scheduleReference.schedules,
+    assignments: includeAssignments ? mapAssignments(filteredAssignmentRows) : [],
+    projectedAssignments:
+      includeProjectedAssignments && includeSubSchedules && includeSubScheduleAssignments
+        ? buildProjectedSubScheduleAssignments({
+            schedules: scheduleReference.schedules,
+            subSchedules: mappedSubSchedules,
+            subScheduleAssignments: mappedSubScheduleAssignments,
+          })
+        : [],
+    overtimeClaims: includeOvertimeClaims
+      ? mapOvertimeClaims((overtimeClaimsResult.data as OvertimeClaimRow[] | null) ?? [])
+      : [],
+    manualOvertimePostings: includeManualOvertimePostings
+      ? mapManualOvertimePostings((manualOvertimePostingsResult.data as ManualOvertimePostingRow[] | null) ?? [])
+      : [],
+    completedSets: includeCompletedSets
+      ? mapCompletedSets((completedSetsResult.data as CompletedSetRow[] | null) ?? [])
+      : [],
+    subSchedules: mappedSubSchedules,
+    subScheduleAssignments: mappedSubScheduleAssignments,
+  };
+}
+
+export async function getMetricsSnapshot(month: string, session?: AppSession | null) {
+  return getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: true,
+    includeCompetencies: true,
+    includeTimeCodes: true,
+    includeSubSchedules: false,
+  });
+}
+
+export async function getOvertimeBoardSnapshot(month: string, session?: AppSession | null) {
+  return getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: true,
+    includeCompetencies: true,
+    includeTimeCodes: true,
+    includeSubSchedules: true,
+    includeAssignments: true,
+    includeSubScheduleAssignments: true,
+    includeOvertimeClaims: true,
+    includeManualOvertimePostings: true,
+    includeCompletedSets: true,
+    assignmentWindow: "extended",
+    completedSetWindow: "extended",
+  });
+}
+
 export async function getPersonnelSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
 
