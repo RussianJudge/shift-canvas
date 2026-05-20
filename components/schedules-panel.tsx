@@ -328,18 +328,6 @@ export function SchedulesPanel({
                 </td>
                 <td>
                   <div className="table-actions-cell">
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() =>
-                        updateSchedule(schedule.id, (current) => ({
-                          ...current,
-                          isActive: !current.isActive,
-                        }))
-                      }
-                    >
-                      {schedule.isActive ? "Set inactive" : "Set active"}
-                    </button>
                     {invalidScheduleIds.has(schedule.id) ? (
                       <p className="row-issue">{getScheduleIssues(schedule).join(" · ")}</p>
                     ) : null}

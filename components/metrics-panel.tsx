@@ -562,6 +562,10 @@ function getTeamMetrics(
       const claimEmployee = employeeMap[claim.employeeId];
       return Boolean(claimEmployee);
     });
+    const teamPersonnelOvertimeEntries = overtimeEntries.filter((claim) => {
+      const claimEmployee = employeeMap[claim.employeeId];
+      return claimEmployee?.scheduleId === schedule.id;
+    });
     const fragilityOvertimeEntries = fragilityEntries.filter((claim) => {
       if (claim.scheduleId !== schedule.id) {
         return false;
@@ -599,7 +603,7 @@ function getTeamMetrics(
       )
       .slice(0, 3);
 
-    const overtimePeopleCounts = incurredOvertimeEntries.reduce<Record<string, number>>((counts, claim) => {
+    const overtimePeopleCounts = teamPersonnelOvertimeEntries.reduce<Record<string, number>>((counts, claim) => {
       counts[claim.employeeId] = (counts[claim.employeeId] ?? 0) + 1;
       return counts;
     }, {});
@@ -676,7 +680,7 @@ function getTeamMetrics(
       competencyMetrics,
       shiftFragilityMetrics,
       overtimeShifts: incurredOvertimeEntries.length,
-      overtimeWorkers: new Set(incurredOvertimeEntries.map((claim) => claim.employeeId)).size,
+      overtimeWorkers: new Set(teamPersonnelOvertimeEntries.map((claim) => claim.employeeId)).size,
       topCompetencyCode,
       topOvertimeCompetencies,
       topOvertimePeople,
