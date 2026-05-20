@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { setAdminViewingScope, signOut } from "@/app/auth-actions";
 import { BrandLockup } from "@/components/brand-lockup";
@@ -10,6 +10,52 @@ import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
+const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/sub-schedules"]);
+const YEAR_ROUTE_HREFS = new Set(["/mutuals"]);
+const prefetchedWorkspaceRoutes = new Set<string>();
+
+function getCurrentMonthKey(now = new Date()) {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${now.getFullYear()}-${month}`;
+}
+
+function getCurrentYearKey(now = new Date()) {
+  return String(now.getFullYear());
+}
+
+function isValidMonthParam(value: string | null) {
+  return Boolean(value && /^\d{4}-\d{2}$/.test(value));
+}
+
+function isValidYearParam(value: string | null) {
+  return Boolean(value && /^\d{4}$/.test(value));
+}
+
+function resolveWorkspacePrefetchHref({
+  href,
+  fallbackMonth,
+  fallbackYear,
+  selectedMonth,
+  selectedYear,
+}: {
+  href: string;
+  fallbackMonth: string;
+  fallbackYear: string;
+  selectedMonth: string | null;
+  selectedYear: string | null;
+}) {
+  if (MONTH_ROUTE_HREFS.has(href)) {
+    const month = isValidMonthParam(selectedMonth) ? selectedMonth : fallbackMonth;
+    return `${href}?month=${month}`;
+  }
+
+  if (YEAR_ROUTE_HREFS.has(href)) {
+    const year = isValidYearParam(selectedYear) ? selectedYear : fallbackYear;
+    return `${href}?year=${year}`;
+  }
+
+  return href;
+}
 
 type AdminScopePayload = {
   companyName: string;
@@ -149,10 +195,12 @@ function NavLink({
   href,
   label,
   icon,
+  onIntentPrefetch,
 }: {
   href: string;
   label: string;
   icon: React.ReactNode;
+  onIntentPrefetch: (href: string) => void;
 }) {
   const pathname = usePathname();
   const isActive = pathname === href;
@@ -160,9 +208,13 @@ function NavLink({
   return (
     <Link
       href={href}
+      prefetch={false}
       className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
       title={label}
       aria-current={isActive ? "page" : undefined}
+      onMouseEnter={() => onIntentPrefetch(href)}
+      onFocus={() => onIntentPrefetch(href)}
+      onTouchStart={() => onIntentPrefetch(href)}
     >
       <span className="workspace-nav-icon">{icon}</span>
       <strong>{label}</strong>
@@ -180,6 +232,7 @@ export function WorkspaceShell({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   /**
    * The sidebar remembers the user's last choice so a page navigation does not
    * feel like the app is fighting their layout preference.
@@ -309,6 +362,28 @@ export function WorkspaceShell({
     return adminScope.businessAreas.filter((entry) => entry.siteId === activeSiteId);
   }, [adminScope]);
 
+  const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
+  const currentYearKey = useMemo(() => getCurrentYearKey(), []);
+  const selectedMonth = searchParams.get("month");
+  const selectedYear = searchParams.get("year");
+
+  const handleIntentPrefetch = (href: string) => {
+    const targetHref = resolveWorkspacePrefetchHref({
+      href,
+      fallbackMonth: currentMonthKey,
+      fallbackYear: currentYearKey,
+      selectedMonth,
+      selectedYear,
+    });
+
+    if (prefetchedWorkspaceRoutes.has(targetHref)) {
+      return;
+    }
+
+    prefetchedWorkspaceRoutes.add(targetHref);
+    router.prefetch(targetHref);
+  };
+
   return (
     <main className="shell">
       <section
@@ -341,7 +416,13 @@ export function WorkspaceShell({
 
           <nav id="workspace-primary-navigation" className="workspace-nav" aria-label="Primary">
             {navItems.map((item) => (
-              <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} />
+              <NavLink
+                key={item.href}
+                href={item.href}
+                label={item.label}
+                icon={item.icon}
+                onIntentPrefetch={handleIntentPrefetch}
+              />
             ))}
           </nav>
 
