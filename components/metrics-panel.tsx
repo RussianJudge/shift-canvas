@@ -242,7 +242,16 @@ function getFatigueBand(consecutiveShifts: number): FatigueBand {
 }
 
 function formatFatigueBandLabel(band: FatigueBand) {
-  return band[0].toUpperCase() + band.slice(1);
+  switch (band) {
+    case "green":
+      return "Good";
+    case "amber":
+      return "Caution";
+    case "red":
+      return "Warning";
+    case "critical":
+      return "Critical";
+  }
 }
 
 function isNonWorkingTimeCode(timeCode: TimeCode | undefined) {
@@ -1159,13 +1168,13 @@ export function MetricsPanel({
 
                 <div className="metrics-fatigue-bands" aria-label={`Fatigue bands for shift ${team.scheduleName}`}>
                   <span className="metrics-fatigue-band metrics-fatigue-band--green">
-                    Green <strong>{team.greenCount}</strong>
+                    Good <strong>{team.greenCount}</strong>
                   </span>
                   <span className="metrics-fatigue-band metrics-fatigue-band--amber">
-                    Amber <strong>{team.amberCount}</strong>
+                    Caution <strong>{team.amberCount}</strong>
                   </span>
                   <span className="metrics-fatigue-band metrics-fatigue-band--red">
-                    Red <strong>{team.redCount}</strong>
+                    Warning <strong>{team.redCount}</strong>
                   </span>
                   <span className="metrics-fatigue-band metrics-fatigue-band--critical">
                     Critical <strong>{team.criticalCount}</strong>
