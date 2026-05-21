@@ -2,8 +2,8 @@
 
 import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { saveAssignments, saveSchedulePins, setScheduleSetCompletion } from "@/app/actions";
@@ -35,7 +35,7 @@ import type {
   Employee,
   SaveAssignmentsInput,
   Schedule,
-  SchedulerSnapshot,
+  SchedulePageSnapshot,
   ShiftKind,
   StoredAssignment,
   TimeCode,
@@ -105,6 +105,12 @@ type CopiedColumnTemplate = {
   selectionsByEmployeeId: Record<string, AssignmentSelection>;
 };
 
+const ScheduleAssignmentModal = dynamic(
+  () =>
+    import("@/components/schedule-assignment-modal").then((module) => module.ScheduleAssignmentModal),
+  { ssr: false },
+);
+
 /** Builds the visible roster, including borrowed overtime and mutual rows for the month. */
 function buildDisplayEmployeesForSchedule({
   schedule,
@@ -114,7 +120,7 @@ function buildDisplayEmployeesForSchedule({
   pinnedEmployeesBySchedule,
 }: {
   schedule: Schedule;
-  snapshot: SchedulerSnapshot;
+  snapshot: SchedulePageSnapshot;
   employeeMap: Record<string, Employee>;
   currentMonth: string;
   pinnedEmployeesBySchedule: Record<string, string[]>;
@@ -262,34 +268,8 @@ function buildDisplayEmployeesForSchedule({
     .map((entry) => entry.employee);
 }
 
-function isMonthKey(value: string) {
-  return /^\d{4}-\d{2}$/.test(value);
-}
-
 function addMonths(monthKey: string, delta: number) {
   return shiftMonthKey(monthKey, delta);
-}
-
-function stripMonthWindowEntries(assignments: Record<string, AssignmentSelection>, monthKey: string) {
-  const months = new Set([shiftMonthKey(monthKey, -1), monthKey, shiftMonthKey(monthKey, 1)]);
-
-  return Object.fromEntries(
-    Object.entries(assignments).filter((entry) => {
-      const parsed = parseAssignmentKey(entry[0]);
-      return parsed ? !months.has(parsed.date.slice(0, 7)) : true;
-    }),
-  );
-}
-
-function pickMonthWindowEntries(assignments: Record<string, AssignmentSelection>, monthKey: string) {
-  const months = new Set([shiftMonthKey(monthKey, -1), monthKey, shiftMonthKey(monthKey, 1)]);
-
-  return Object.fromEntries(
-    Object.entries(assignments).filter((entry) => {
-      const parsed = parseAssignmentKey(entry[0]);
-      return parsed ? months.has(parsed.date.slice(0, 7)) : false;
-    }),
-  );
 }
 
 function getShiftTone(shift: ShiftKind) {
@@ -432,6 +412,24 @@ function buildDraftDelta(
     delta[key] = draft ? { ...draft } : null;
     return delta;
   }, {});
+}
+
+function persistDraftAssignmentsToStorage(
+  baselineAssignments: Record<string, AssignmentSelection>,
+  draftAssignments: Record<string, AssignmentSelection>,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const delta = buildDraftDelta(baselineAssignments, draftAssignments);
+
+  if (Object.keys(delta).length === 0) {
+    window.localStorage.removeItem(STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(delta));
 }
 
 /** Applies a nullable assignment delta to a copy of an assignment map. */
@@ -763,143 +761,6 @@ function buildSetAutofillPlan({
   return bestPlan;
 }
 
-/** Window-centered assignment picker used for individual cell edits. */
-function AssignmentModal({
-  selectedEmployee,
-  selectedDate,
-  shiftKind,
-  selection,
-  competencies,
-  timeCodes,
-  onApply,
-  onClear,
-  onClose,
-  clearDisabledReason,
-}: {
-  selectedEmployee: DisplayEmployee | null;
-  selectedDate: string | null;
-  shiftKind: ShiftKind;
-  selection: AssignmentSelection;
-  competencies: Competency[];
-  timeCodes: TimeCode[];
-  onApply: (selection: AssignmentSelection) => void;
-  onClear: () => void;
-  onClose: () => void;
-  clearDisabledReason?: string | null;
-}) {
-  if (!selectedEmployee || !selectedDate) {
-    return null;
-  }
-
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section
-        className="assignment-modal"
-        aria-label="Assignment editor"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Assignment</h2>
-            <p className="assignment-modal__context">
-              {selectedEmployee.name} · {formatShortDate(selectedDate)} · {shiftKind.toLowerCase()}
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-
-        <div className="assignment-modal__group">
-          <span className="assignment-modal__label">Time Codes</span>
-          <div className="assignment-modal__options">
-            {timeCodes.map((timeCode) => (
-              <button
-                key={timeCode.id}
-                type="button"
-                className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
-                  selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
-                }`}
-                onClick={() => {
-                  onApply({
-                    ...selection,
-                    competencyId: null,
-                    timeCodeId: timeCode.id,
-                  });
-                  onClose();
-                }}
-              >
-                {timeCode.code}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="assignment-modal__group">
-          <span className="assignment-modal__label">Competencies</span>
-          <div className="assignment-modal__options">
-            {competencies.map((competency) => (
-              <button
-                key={competency.id}
-                type="button"
-                className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
-                  selection.competencyId === competency.id ? "legend-pill--selected" : ""
-                }`}
-                onClick={() => {
-                  onApply({
-                    ...selection,
-                    competencyId: competency.id,
-                    timeCodeId: null,
-                  });
-                  onClose();
-                }}
-              >
-                {getCompactCode(competency.code)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="assignment-modal__group">
-          <label className="assignment-modal__label" htmlFor="assignment-note">
-            Note
-          </label>
-          <textarea
-            id="assignment-note"
-            className="assignment-modal__note-input"
-            rows={3}
-            value={selection.notes ?? ""}
-            placeholder="Add a note for this cell"
-            onChange={(event) =>
-              onApply({
-                ...selection,
-                notes: event.target.value || null,
-              })
-            }
-          />
-        </div>
-
-        <div className="assignment-modal__footer">
-          {clearDisabledReason ? <p className="toolbar-status">{clearDisabledReason}</p> : null}
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={onClear}
-            disabled={Boolean(clearDisabledReason)}
-          >
-            Clear assignment
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
-  );
-}
-
 export function MonthlyScheduler({
   initialSnapshot,
   initialPinnedEmployeesBySchedule,
@@ -909,7 +770,7 @@ export function MonthlyScheduler({
   forcedScheduleId,
   initialSelectedScheduleId,
 }: {
-  initialSnapshot: SchedulerSnapshot;
+  initialSnapshot: SchedulePageSnapshot;
   initialPinnedEmployeesBySchedule: Record<string, string[]>;
   canEdit: boolean;
   canManageSetBuilder: boolean;
@@ -921,7 +782,6 @@ export function MonthlyScheduler({
   // layers in local edits and set actions until auto-save confirms them or the user reverts.
   const router = useRouter();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [currentMonth, setCurrentMonth] = useState(initialSnapshot.month);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
     forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
       ? forcedScheduleId
@@ -965,6 +825,7 @@ export function MonthlyScheduler({
   const scheduleBodyScrollRef = useRef<HTMLElement | null>(null);
   const scheduleGridRef = useRef<HTMLDivElement | null>(null);
   const [scheduleScrollProxyWidth, setScheduleScrollProxyWidth] = useState(0);
+  const currentMonth = snapshot.month;
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
   const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
@@ -1408,7 +1269,6 @@ export function MonthlyScheduler({
     const mergedBaselineAssignments = applyAssignmentDelta(nextAssignments, locallyConfirmedDelta);
 
     setSnapshot(initialSnapshot);
-    setCurrentMonth(initialSnapshot.month);
     setSelectedScheduleId((current) =>
       forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
         ? forcedScheduleId
@@ -1521,14 +1381,7 @@ export function MonthlyScheduler({
     }
 
     const timer = window.setTimeout(() => {
-      const delta = buildDraftDelta(baselineAssignments, draftAssignments);
-
-      if (Object.keys(delta).length === 0) {
-        window.localStorage.removeItem(STORAGE_KEY);
-        return;
-      }
-
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(delta));
+      persistDraftAssignmentsToStorage(baselineAssignments, draftAssignments);
     }, 160);
 
     return () => window.clearTimeout(timer);
@@ -1643,68 +1496,6 @@ export function MonthlyScheduler({
     return () => window.removeEventListener("keydown", handleEscape);
   }, []);
 
-  useEffect(() => {
-    if (currentMonth === snapshot.month || !isMonthKey(currentMonth)) {
-      return;
-    }
-
-    const controller = new AbortController();
-    let cancelled = false;
-
-    setStatusMessage(`Loading ${formatMonthLabel(currentMonth)}`);
-
-    fetch(`/api/scheduler?month=${currentMonth}`, {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Unable to load month data.");
-        }
-
-        const nextSnapshot = (await response.json()) as SchedulerSnapshot;
-
-        if (cancelled) {
-          return;
-        }
-
-        const incomingMonthAssignments = buildAssignmentIndex(nextSnapshot.assignments);
-
-        startTransition(() => {
-          setSnapshot(nextSnapshot);
-          setSelectedScheduleId((current) =>
-            forcedScheduleId && nextSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
-              ? forcedScheduleId
-              : nextSnapshot.schedules.some((schedule) => schedule.id === current)
-              ? current
-              : nextSnapshot.schedules[0]?.id ?? "",
-          );
-          setBaselineAssignments((current) => ({
-            ...stripMonthWindowEntries(current, currentMonth),
-            ...incomingMonthAssignments,
-          }));
-          setDraftAssignments((current) => ({
-            ...stripMonthWindowEntries(current, currentMonth),
-            ...incomingMonthAssignments,
-            ...pickMonthWindowEntries(current, currentMonth),
-          }));
-          setStatusMessage(`Loaded ${formatMonthLabel(currentMonth)}`);
-        });
-      })
-      .catch((error) => {
-        if (cancelled || error instanceof DOMException) {
-          return;
-        }
-
-        setStatusMessage("Could not load that month. Staying on your current draft.");
-      });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [currentMonth, snapshot.month]);
-
   function handleAssignmentChange(employeeId: string, date: string, selection: AssignmentSelection) {
     if (isScheduleLocked) {
       return;
@@ -1807,12 +1598,10 @@ export function MonthlyScheduler({
 
   function handleMonthChange(delta: number) {
     startMonthTransition(() => {
-      setCurrentMonth((current) => {
-        const nextMonth = addMonths(current, delta);
-        replaceScheduleUrlState(nextMonth, selectedScheduleId);
-        return nextMonth;
-      });
+      const nextMonth = addMonths(currentMonth, delta);
+      persistDraftAssignmentsToStorage(baselineAssignmentsRef.current, draftAssignmentsRef.current);
       setStatusMessage("Changing month");
+      router.push(`/schedule?month=${nextMonth}&schedule=${selectedScheduleId}`, { scroll: false });
     });
   }
 
@@ -2513,8 +2302,8 @@ export function MonthlyScheduler({
       </div>
 
       {canEdit && !isScheduleLocked ? (
-        <AssignmentModal
-          selectedEmployee={editorEmployee}
+        <ScheduleAssignmentModal
+          selectedEmployeeName={editorEmployee?.name ?? null}
           selectedDate={editorCell?.date ?? null}
           shiftKind={editorShiftKind}
           selection={editorSelection}

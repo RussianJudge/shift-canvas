@@ -4,7 +4,7 @@ import { MonthlyScheduler } from "@/components/monthly-scheduler";
 import { ScheduleRouteLoading } from "@/components/route-loading";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { canManageWorkspace, requireAppSession } from "@/lib/auth";
-import { getSchedulerSnapshot, getUserSchedulePins } from "@/lib/data";
+import { getSchedulePageSnapshot, getUserSchedulePins } from "@/lib/data";
 import { scopeScheduleSnapshot } from "@/lib/role-scopes";
 import { getCurrentMonthKey } from "@/lib/scheduling";
 
@@ -25,7 +25,7 @@ async function ScheduleBoard({
   initialSelectedScheduleId: string | null;
 }) {
   const [snapshot, initialPinnedEmployeesBySchedule] = await Promise.all([
-    getSchedulerSnapshot(month, session),
+    getSchedulePageSnapshot(month, session),
     getUserSchedulePins(session.email),
   ]);
 

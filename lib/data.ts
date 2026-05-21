@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 
 import {
   formatEmployeeDisplayName,
@@ -25,6 +26,7 @@ import type {
   OvertimeClaim,
   ProductionUnit,
   Schedule,
+  SchedulePageSnapshot,
   SchedulerSnapshot,
   StoredAssignment,
   SubSchedule,
@@ -1307,6 +1309,36 @@ export async function getMetricsSnapshot(month: string, session?: AppSession | n
     includeSubSchedules: false,
   });
 }
+
+export const getSchedulePageSnapshot = cache(async function getSchedulePageSnapshot(
+  month: string,
+  session?: AppSession | null,
+): Promise<SchedulePageSnapshot> {
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: true,
+    includeCompetencies: true,
+    includeTimeCodes: true,
+    includeSubSchedules: true,
+    includeAssignments: true,
+    includeSubScheduleAssignments: true,
+    includeProjectedAssignments: true,
+    includeOvertimeClaims: true,
+    includeCompletedSets: true,
+    assignmentWindow: "extended",
+    completedSetWindow: "extended",
+  });
+
+  return {
+    month: snapshot.month,
+    schedules: snapshot.schedules,
+    competencies: snapshot.competencies,
+    timeCodes: snapshot.timeCodes,
+    assignments: snapshot.assignments,
+    projectedAssignments: snapshot.projectedAssignments,
+    overtimeClaims: snapshot.overtimeClaims,
+    completedSets: snapshot.completedSets,
+  };
+});
 
 export async function getOvertimeBoardSnapshot(month: string, session?: AppSession | null) {
   return getScheduleReferenceSnapshot(month, session, {

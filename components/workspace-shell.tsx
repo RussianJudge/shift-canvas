@@ -185,12 +185,14 @@ function NavLink({
   icon,
   onIntentPrefetchStart,
   onIntentPrefetchCancel,
+  onNavigate,
 }: {
   href: string;
   label: string;
   icon: React.ReactNode;
   onIntentPrefetchStart: (href: string) => void;
   onIntentPrefetchCancel: (href: string) => void;
+  onNavigate: () => void;
 }) {
   const pathname = usePathname();
   const isActive = pathname === href;
@@ -206,6 +208,7 @@ function NavLink({
       onFocus={() => onIntentPrefetchStart(href)}
       onMouseLeave={() => onIntentPrefetchCancel(href)}
       onBlur={() => onIntentPrefetchCancel(href)}
+      onClick={onNavigate}
     >
       <span className="workspace-nav-icon">{icon}</span>
       <strong>{label}</strong>
@@ -383,6 +386,14 @@ export function WorkspaceShell({
     delete pendingTimers[href];
   };
 
+  const handleNavLinkNavigate = () => {
+    if (!isMobileSidebarMode) {
+      return;
+    }
+
+    setIsMobileSidebarOpen(false);
+  };
+
   return (
     <main className="shell">
       <section
@@ -422,6 +433,7 @@ export function WorkspaceShell({
                 icon={item.icon}
                 onIntentPrefetchStart={handleIntentPrefetchStart}
                 onIntentPrefetchCancel={handleIntentPrefetchCancel}
+                onNavigate={handleNavLinkNavigate}
               />
             ))}
           </nav>

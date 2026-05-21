@@ -194,6 +194,19 @@ export interface SchedulerSnapshot {
   subScheduleAssignments: SubScheduleAssignment[];
 }
 
+export interface SchedulePageSnapshot
+  extends Pick<
+    SchedulerSnapshot,
+    | "month"
+    | "schedules"
+    | "competencies"
+    | "timeCodes"
+    | "assignments"
+    | "projectedAssignments"
+    | "overtimeClaims"
+    | "completedSets"
+  > {}
+
 export interface MutualsSnapshot {
   month: string;
   schedules: Schedule[];

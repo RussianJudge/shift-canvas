@@ -358,7 +358,7 @@ export function parseAssignmentKey(key: string) {
 }
 
 /** Finds one schedule from the current snapshot, falling back to the first entry. */
-export function getScheduleById(snapshot: SchedulerSnapshot, scheduleId: string) {
+export function getScheduleById<T extends { schedules: Schedule[] }>(snapshot: T, scheduleId: string) {
   return snapshot.schedules.find((schedule) => schedule.id === scheduleId) ?? snapshot.schedules[0];
 }
 
