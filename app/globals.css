@@ -2558,7 +2558,7 @@ select {
 }
 
 .shift-cell--off {
-  background: linear-gradient(180deg, rgba(244, 240, 235, 0.9), rgba(236, 230, 222, 0.92));
+  background: linear-gradient(180deg, rgba(252, 241, 228, 0.94), rgba(245, 227, 203, 0.96));
 }
 
 .shift-cell--weekend {
@@ -2600,6 +2600,8 @@ select {
 .shift-cell-button {
   position: absolute;
   inset: 0;
+  appearance: none;
+  -webkit-appearance: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2636,7 +2638,8 @@ select {
 
 .shift-cell-button:disabled {
   cursor: default;
-  opacity: 0.9;
+  opacity: 1;
+  -webkit-text-fill-color: currentColor;
 }
 
 .table-input,
