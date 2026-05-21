@@ -2,7 +2,7 @@ import { Suspense } from "react";
 
 import { TimeCodesPanel } from "@/components/time-codes-panel";
 import { LoadingPanelFrame, LoadingTable, LoadingToolbarWithActions } from "@/components/workspace-loading";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getTimeCodesSnapshot } from "@/lib/data";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
@@ -43,10 +43,10 @@ export default async function TimeCodesPage() {
   const month = getCurrentMonthKey("America/Edmonton");
 
   return (
-    <WorkspaceShell viewer={session}>
+    <WorkspaceShellFrame viewer={session}>
       <Suspense key={month} fallback={<TimeCodesBoardFallback month={month} />}>
         <TimeCodesBoard session={session} month={month} />
       </Suspense>
-    </WorkspaceShell>
+    </WorkspaceShellFrame>
   );
 }

@@ -2,7 +2,7 @@ import { Suspense } from "react";
 
 import { SchedulesPanel } from "@/components/schedules-panel";
 import { LoadingPanelFrame, LoadingTable, LoadingToolbarWithActions } from "@/components/workspace-loading";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getSchedulesSnapshot } from "@/lib/data";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
@@ -43,10 +43,10 @@ export default async function SchedulesPage() {
   const month = getCurrentMonthKey("America/Edmonton");
 
   return (
-    <WorkspaceShell viewer={session}>
+    <WorkspaceShellFrame viewer={session}>
       <Suspense key={month} fallback={<SchedulesBoardFallback month={month} />}>
         <SchedulesBoard session={session} month={month} />
       </Suspense>
-    </WorkspaceShell>
+    </WorkspaceShellFrame>
   );
 }

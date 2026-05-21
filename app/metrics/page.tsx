@@ -1,11 +1,18 @@
 import { Suspense } from "react";
 
-import { MetricsPanel } from "@/components/metrics-panel";
-import { LoadingMetricsGrid, LoadingMonthNav, LoadingPanelFrame } from "@/components/workspace-loading";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import {
+  MetricsCompetenciesSection,
+  MetricsFatigueSection,
+  MetricsFragilitySection,
+  MetricsOvertimeSection,
+  MetricsPageFrame,
+  MetricsTimeCodeSection,
+} from "@/components/metrics-streamed-sections";
+import { LoadingMetricsSection } from "@/components/workspace-loading";
+import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getMetricsAssignmentHistory, getMetricsOvertimeHistory, getMetricsSnapshot } from "@/lib/data";
-import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
+import { getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
 
@@ -21,22 +28,32 @@ function getMonthEndDateKey(month: string) {
   return monthEnd.toISOString().slice(0, 10);
 }
 
-async function MetricsBoard({
-  session,
-  month,
+async function MetricsCompetenciesSectionContent({
+  snapshotPromise,
 }: {
-  session: Awaited<ReturnType<typeof requireAppSession>>;
-  month: string;
+  snapshotPromise: ReturnType<typeof getMetricsSnapshot>;
 }) {
-  const metricsHistoryEnd = getMonthEndDateKey(month);
+  const snapshot = await snapshotPromise;
+  return <MetricsCompetenciesSection snapshot={snapshot} />;
+}
+
+async function MetricsOvertimeSectionContent({
+  snapshotPromise,
+  overtimeHistoryPromise,
+  assignmentHistoryPromise,
+}: {
+  snapshotPromise: ReturnType<typeof getMetricsSnapshot>;
+  overtimeHistoryPromise: ReturnType<typeof getMetricsOvertimeHistory>;
+  assignmentHistoryPromise: ReturnType<typeof getMetricsAssignmentHistory>;
+}) {
   const [snapshot, overtimeHistory, assignmentHistory] = await Promise.all([
-    getMetricsSnapshot(month, session),
-    getMetricsOvertimeHistory(metricsHistoryEnd, session),
-    getMetricsAssignmentHistory(metricsHistoryEnd, session),
+    snapshotPromise,
+    overtimeHistoryPromise,
+    assignmentHistoryPromise,
   ]);
 
   return (
-    <MetricsPanel
+    <MetricsOvertimeSection
       snapshot={snapshot}
       overtimeHistory={overtimeHistory}
       assignmentHistory={assignmentHistory}
@@ -44,12 +61,64 @@ async function MetricsBoard({
   );
 }
 
-function MetricsBoardFallback({ month }: { month: string }) {
+async function MetricsFatigueSectionContent({
+  snapshotPromise,
+  overtimeHistoryPromise,
+  assignmentHistoryPromise,
+}: {
+  snapshotPromise: ReturnType<typeof getMetricsSnapshot>;
+  overtimeHistoryPromise: ReturnType<typeof getMetricsOvertimeHistory>;
+  assignmentHistoryPromise: ReturnType<typeof getMetricsAssignmentHistory>;
+}) {
+  const [snapshot, overtimeHistory, assignmentHistory] = await Promise.all([
+    snapshotPromise,
+    overtimeHistoryPromise,
+    assignmentHistoryPromise,
+  ]);
+
   return (
-    <LoadingPanelFrame title="Metrics" headingAside={<LoadingMonthNav monthLabel={formatMonthLabel(month)} />}>
-      <LoadingMetricsGrid />
-    </LoadingPanelFrame>
+    <MetricsFatigueSection
+      snapshot={snapshot}
+      overtimeHistory={overtimeHistory}
+      assignmentHistory={assignmentHistory}
+    />
   );
+}
+
+async function MetricsFragilitySectionContent({
+  snapshotPromise,
+  overtimeHistoryPromise,
+  assignmentHistoryPromise,
+}: {
+  snapshotPromise: ReturnType<typeof getMetricsSnapshot>;
+  overtimeHistoryPromise: ReturnType<typeof getMetricsOvertimeHistory>;
+  assignmentHistoryPromise: ReturnType<typeof getMetricsAssignmentHistory>;
+}) {
+  const [snapshot, overtimeHistory, assignmentHistory] = await Promise.all([
+    snapshotPromise,
+    overtimeHistoryPromise,
+    assignmentHistoryPromise,
+  ]);
+
+  return (
+    <MetricsFragilitySection
+      snapshot={snapshot}
+      overtimeHistory={overtimeHistory}
+      assignmentHistory={assignmentHistory}
+    />
+  );
+}
+
+async function MetricsTimeCodeSectionContent({
+  snapshotPromise,
+  assignmentHistoryPromise,
+}: {
+  snapshotPromise: ReturnType<typeof getMetricsSnapshot>;
+  assignmentHistoryPromise: ReturnType<typeof getMetricsAssignmentHistory>;
+}) {
+  const [snapshot, assignmentHistory] = await Promise.all([snapshotPromise, assignmentHistoryPromise]);
+
+  return <MetricsTimeCodeSection snapshot={snapshot} assignmentHistory={assignmentHistory} />;
 }
 
 export default async function MetricsPage({
@@ -61,12 +130,45 @@ export default async function MetricsPage({
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = resolveMetricsMonth(resolvedSearchParams?.month, currentMonth);
+  const metricsHistoryEnd = getMonthEndDateKey(month);
+  const snapshotPromise = getMetricsSnapshot(month, session);
+  const overtimeHistoryPromise = getMetricsOvertimeHistory(metricsHistoryEnd, session);
+  const assignmentHistoryPromise = getMetricsAssignmentHistory(metricsHistoryEnd, session);
 
   return (
-    <WorkspaceShell viewer={session}>
-      <Suspense key={month} fallback={<MetricsBoardFallback month={month} />}>
-        <MetricsBoard session={session} month={month} />
-      </Suspense>
-    </WorkspaceShell>
+    <WorkspaceShellFrame viewer={session}>
+      <MetricsPageFrame month={month}>
+        <Suspense fallback={<LoadingMetricsSection showWindowToggle={false} />}>
+          <MetricsCompetenciesSectionContent snapshotPromise={snapshotPromise} />
+        </Suspense>
+        <Suspense fallback={<LoadingMetricsSection />}>
+          <MetricsOvertimeSectionContent
+            snapshotPromise={snapshotPromise}
+            overtimeHistoryPromise={overtimeHistoryPromise}
+            assignmentHistoryPromise={assignmentHistoryPromise}
+          />
+        </Suspense>
+        <Suspense fallback={<LoadingMetricsSection showWindowToggle={false} />}>
+          <MetricsFatigueSectionContent
+            snapshotPromise={snapshotPromise}
+            overtimeHistoryPromise={overtimeHistoryPromise}
+            assignmentHistoryPromise={assignmentHistoryPromise}
+          />
+        </Suspense>
+        <Suspense fallback={<LoadingMetricsSection />}>
+          <MetricsFragilitySectionContent
+            snapshotPromise={snapshotPromise}
+            overtimeHistoryPromise={overtimeHistoryPromise}
+            assignmentHistoryPromise={assignmentHistoryPromise}
+          />
+        </Suspense>
+        <Suspense fallback={<LoadingMetricsSection showInlineField={true} />}>
+          <MetricsTimeCodeSectionContent
+            snapshotPromise={snapshotPromise}
+            assignmentHistoryPromise={assignmentHistoryPromise}
+          />
+        </Suspense>
+      </MetricsPageFrame>
+    </WorkspaceShellFrame>
   );
 }

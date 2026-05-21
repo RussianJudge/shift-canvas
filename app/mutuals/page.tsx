@@ -2,7 +2,7 @@ import { Suspense } from "react";
 
 import { MutualsPanel } from "@/components/mutuals-panel";
 import { LoadingCardList, LoadingMonthNav, LoadingPanelFrame, LoadingToolbarFields } from "@/components/workspace-loading";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getMutualsSnapshot } from "@/lib/data";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
@@ -84,10 +84,10 @@ export default async function MutualsPage({
       : currentMonth;
 
   return (
-    <WorkspaceShell viewer={session}>
+    <WorkspaceShellFrame viewer={session}>
       <Suspense key={month} fallback={<MutualsBoardFallback month={month} viewer={session} />}>
         <MutualsBoard session={session} month={month} />
       </Suspense>
-    </WorkspaceShell>
+    </WorkspaceShellFrame>
   );
 }

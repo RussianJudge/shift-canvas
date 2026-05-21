@@ -2,7 +2,7 @@ import { Suspense } from "react";
 
 import { ProfilePanel } from "@/components/profile-panel";
 import { LoadingPanelFrame, LoadingProfileCards } from "@/components/workspace-loading";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getProfileSnapshot } from "@/lib/data";
 
@@ -25,10 +25,10 @@ export default async function ProfilePage() {
   const session = await requireAppSession(["worker"]);
 
   return (
-    <WorkspaceShell viewer={session}>
+    <WorkspaceShellFrame viewer={session}>
       <Suspense fallback={<ProfileBoardFallback />}>
         <ProfileBoard session={session} />
       </Suspense>
-    </WorkspaceShell>
+    </WorkspaceShellFrame>
   );
 }

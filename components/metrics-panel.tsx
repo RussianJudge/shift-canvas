@@ -102,10 +102,10 @@ type OvertimeMetricEntry = {
   date: string;
 };
 
-type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
-type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
-type FragilityWindow = OvertimeWindow;
-const NORMAL_FATIGUE_CYCLE = 6;
+export type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
+export type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
+export type FragilityWindow = OvertimeWindow;
+export const NORMAL_FATIGUE_CYCLE = 6;
 const FATIGUE_LOOKBACK_DAYS = 30;
 
 type TransferProjection = {
@@ -120,7 +120,7 @@ type TransferProjection = {
   improvesTarget: boolean;
 };
 
-type TransferSuggestion = {
+export type TransferSuggestion = {
   employeeId: string;
   employeeName: string;
   employeeRole: string;
@@ -132,12 +132,12 @@ type TransferSuggestion = {
 };
 
 /** Pads "top 3" lists with blanks so metric cards keep a stable height. */
-function padMetricPeopleRows<T extends { employeeId: string; employeeName: string }>(rows: T[], size = 3) {
+export function padMetricPeopleRows<T extends { employeeId: string; employeeName: string }>(rows: T[], size = 3) {
   return Array.from({ length: size }, (_, index) => rows[index] ?? null);
 }
 
 /** Generic version used for non-person metric rows that still need stable height. */
-function padMetricRows<T>(rows: T[], size = 3) {
+export function padMetricRows<T>(rows: T[], size = 3) {
   return Array.from({ length: size }, (_, index) => rows[index] ?? null);
 }
 
@@ -166,7 +166,7 @@ function daysBetweenDateKeys(startDate: string, endDate: string) {
 }
 
 /** Returns the first day included in the selected overtime time window. */
-function getWindowStart(today: string, window: OvertimeWindow) {
+export function getWindowStart(today: string, window: OvertimeWindow) {
   switch (window) {
     case "30d":
       return shiftDateKey(today, -29);
@@ -180,7 +180,7 @@ function getWindowStart(today: string, window: OvertimeWindow) {
 }
 
 /** Returns the first day included in the selected time-code analytics window. */
-function getTimeCodeWindowStart(today: string, window: TimeCodeWindow) {
+export function getTimeCodeWindowStart(today: string, window: TimeCodeWindow) {
   switch (window) {
     case "30d":
       return shiftDateKey(today, -29);
@@ -207,12 +207,12 @@ function getMonthEndDateKey(month: string) {
  * like as of the end of the chosen month?" instead of blending that question
  * with today's real date.
  */
-function getMetricsAnchorDate(month: string) {
+export function getMetricsAnchorDate(month: string) {
   return getMonthEndDateKey(month);
 }
 
 /** Compact label used to show which day the rolling windows are anchored to. */
-function formatAnchorDateLabel(isoDate: string) {
+export function formatAnchorDateLabel(isoDate: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -221,7 +221,7 @@ function formatAnchorDateLabel(isoDate: string) {
   }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
-function formatFragilityScore(score: number) {
+export function formatFragilityScore(score: number) {
   return score.toFixed(1);
 }
 
@@ -241,7 +241,7 @@ function getFatigueBand(consecutiveShifts: number): FatigueBand {
   return "critical";
 }
 
-function formatFatigueBandLabel(band: FatigueBand) {
+export function formatFatigueBandLabel(band: FatigueBand) {
   switch (band) {
     case "green":
       return "Good";
@@ -347,7 +347,7 @@ function getManualOffDayOvertimeEntries(
 }
 
 /** Builds the overtime events used by metrics cards from claims plus manual schedule work. */
-function getOvertimeMetricEntries(
+export function getOvertimeMetricEntries(
   snapshot: SchedulerSnapshot,
   overtimeClaims: OvertimeClaim[],
   assignmentHistory: StoredAssignment[],
@@ -377,7 +377,7 @@ function getOvertimeMetricEntries(
 }
 
 /** Summarizes one chosen time code across teams for the selected history window. */
-function getTeamTimeCodeMetrics(
+export function getTeamTimeCodeMetrics(
   snapshot: SchedulerSnapshot,
   assignmentHistory: StoredAssignment[],
   timeCodeId: string,
@@ -420,7 +420,7 @@ function getTeamTimeCodeMetrics(
   });
 }
 
-function getTeamFatigueMetrics({
+export function getTeamFatigueMetrics({
   snapshot,
   assignmentHistory,
   overtimeHistory,
@@ -540,7 +540,7 @@ function getTeamFatigueMetrics({
 }
 
 /** Builds the main dashboard summaries shown on the metrics screen. */
-function getTeamMetrics(
+export function getTeamMetrics(
   snapshot: SchedulerSnapshot,
   overtimeEntries: OvertimeMetricEntry[],
   fragilityEntries: OvertimeMetricEntry[],
@@ -717,7 +717,7 @@ function buildQualifiedCountMap(snapshot: SchedulerSnapshot) {
  * set of competencies. Higher scores favor teams that gain scarce coverage
  * without overly hollowing out the source shift.
  */
-function getTransferSuggestions({
+export function getTransferSuggestions({
   snapshot,
   sourceScheduleId,
   targetScheduleId,

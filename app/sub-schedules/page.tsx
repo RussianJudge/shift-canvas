@@ -2,7 +2,7 @@ import { Suspense } from "react";
 
 import { SubSchedulesPanel } from "@/components/sub-schedules-panel";
 import { LoadingCardList, LoadingMonthNav, LoadingPanelFrame, LoadingTable, LoadingToolbarWithActions } from "@/components/workspace-loading";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getSubSchedulesSnapshot } from "@/lib/data";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
@@ -68,10 +68,10 @@ export default async function SubSchedulesPage({
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
 
   return (
-    <WorkspaceShell viewer={session}>
+    <WorkspaceShellFrame viewer={session}>
       <Suspense key={month} fallback={<SubSchedulesBoardFallback month={month} />}>
         <SubSchedulesBoard session={session} month={month} />
       </Suspense>
-    </WorkspaceShell>
+    </WorkspaceShellFrame>
   );
 }

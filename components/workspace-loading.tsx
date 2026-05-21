@@ -164,22 +164,39 @@ export function LoadingMetricsGrid({ sections = 4 }: { sections?: number }) {
   return (
     <div className="metrics-grid" aria-hidden="true">
       {Array.from({ length: sections }, (_, index) => (
-        <section key={index} className="metrics-section">
-          <div className="metrics-section__header">
-            <div className="metrics-section__title-group">
-              <span className="loading-block loading-block--lg" />
-              <span className="loading-block loading-block--sm" />
-            </div>
-            <div className="metrics-window-toggle">
-              <span className="loading-block loading-block--pill" />
-              <span className="loading-block loading-block--pill" />
-              <span className="loading-block loading-block--pill" />
-            </div>
-          </div>
-          <LoadingCardList cards={2} />
-        </section>
+        <LoadingMetricsSection key={index} />
       ))}
     </div>
+  );
+}
+
+export function LoadingMetricsSection({
+  cards = 2,
+  showWindowToggle = true,
+  showInlineField = false,
+}: {
+  cards?: number;
+  showWindowToggle?: boolean;
+  showInlineField?: boolean;
+}) {
+  return (
+    <section className="metrics-section" aria-hidden="true">
+      <div className="metrics-section__header">
+        <div className="metrics-section__title-group">
+          <span className="loading-block loading-block--lg" />
+          <span className="loading-block loading-block--sm" />
+          {showInlineField ? <span className="loading-block loading-block--button" /> : null}
+        </div>
+        {showWindowToggle ? (
+          <div className="metrics-window-toggle">
+            <span className="loading-block loading-block--pill" />
+            <span className="loading-block loading-block--pill" />
+            <span className="loading-block loading-block--pill" />
+          </div>
+        ) : null}
+      </div>
+      <LoadingCardList cards={cards} />
+    </section>
   );
 }
 

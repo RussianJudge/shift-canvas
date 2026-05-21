@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -10,8 +10,9 @@ import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
-const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/sub-schedules"]);
-const YEAR_ROUTE_HREFS = new Set(["/mutuals"]);
+const PREFETCH_DELAY_MS = 200;
+const PREFETCHABLE_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics"]);
+const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics"]);
 const prefetchedWorkspaceRoutes = new Set<string>();
 
 function getCurrentMonthKey(now = new Date()) {
@@ -19,45 +20,32 @@ function getCurrentMonthKey(now = new Date()) {
   return `${now.getFullYear()}-${month}`;
 }
 
-function getCurrentYearKey(now = new Date()) {
-  return String(now.getFullYear());
-}
-
 function isValidMonthParam(value: string | null) {
   return Boolean(value && /^\d{4}-\d{2}$/.test(value));
-}
-
-function isValidYearParam(value: string | null) {
-  return Boolean(value && /^\d{4}$/.test(value));
 }
 
 function resolveWorkspacePrefetchHref({
   href,
   fallbackMonth,
-  fallbackYear,
   selectedMonth,
-  selectedYear,
 }: {
   href: string;
   fallbackMonth: string;
-  fallbackYear: string;
   selectedMonth: string | null;
-  selectedYear: string | null;
 }) {
+  if (!PREFETCHABLE_ROUTE_HREFS.has(href)) {
+    return null;
+  }
+
   if (MONTH_ROUTE_HREFS.has(href)) {
     const month = isValidMonthParam(selectedMonth) ? selectedMonth : fallbackMonth;
     return `${href}?month=${month}`;
   }
 
-  if (YEAR_ROUTE_HREFS.has(href)) {
-    const year = isValidYearParam(selectedYear) ? selectedYear : fallbackYear;
-    return `${href}?year=${year}`;
-  }
-
   return href;
 }
 
-type AdminScopePayload = {
+export type AdminScopePayload = {
   companyName: string;
   activeSiteId: string | null;
   activeBusinessAreaId: string | null;
@@ -195,12 +183,14 @@ function NavLink({
   href,
   label,
   icon,
-  onIntentPrefetch,
+  onIntentPrefetchStart,
+  onIntentPrefetchCancel,
 }: {
   href: string;
   label: string;
   icon: React.ReactNode;
-  onIntentPrefetch: (href: string) => void;
+  onIntentPrefetchStart: (href: string) => void;
+  onIntentPrefetchCancel: (href: string) => void;
 }) {
   const pathname = usePathname();
   const isActive = pathname === href;
@@ -212,9 +202,10 @@ function NavLink({
       className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
       title={label}
       aria-current={isActive ? "page" : undefined}
-      onMouseEnter={() => onIntentPrefetch(href)}
-      onFocus={() => onIntentPrefetch(href)}
-      onTouchStart={() => onIntentPrefetch(href)}
+      onMouseEnter={() => onIntentPrefetchStart(href)}
+      onFocus={() => onIntentPrefetchStart(href)}
+      onMouseLeave={() => onIntentPrefetchCancel(href)}
+      onBlur={() => onIntentPrefetchCancel(href)}
     >
       <span className="workspace-nav-icon">{icon}</span>
       <strong>{label}</strong>
@@ -226,9 +217,11 @@ function NavLink({
 export function WorkspaceShell({
   children,
   viewer,
+  initialAdminScope = null,
 }: {
   children: React.ReactNode;
   viewer: AppSession;
+  initialAdminScope?: AdminScopePayload | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -240,8 +233,9 @@ export function WorkspaceShell({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(null);
+  const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(initialAdminScope);
   const [isUpdatingScope, startScopeTransition] = useTransition();
+  const pendingPrefetchTimersRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -286,35 +280,8 @@ export function WorkspaceShell({
   }, [pathname, isMobileSidebarMode]);
 
   useEffect(() => {
-    if (viewer.role !== "admin") {
-      return;
-    }
-
-    let cancelled = false;
-
-    fetch("/api/admin-scope", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Unable to load admin scope.");
-        }
-
-        return (await response.json()) as AdminScopePayload;
-      })
-      .then((payload) => {
-        if (!cancelled) {
-          setAdminScope(payload);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAdminScope(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [viewer.role]);
+    setAdminScope(initialAdminScope);
+  }, [initialAdminScope]);
   /**
    * Navigation is derived directly from the resolved app role so page
    * visibility stays centralized here instead of being scattered through the UI.
@@ -363,25 +330,57 @@ export function WorkspaceShell({
   }, [adminScope]);
 
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
-  const currentYearKey = useMemo(() => getCurrentYearKey(), []);
   const selectedMonth = searchParams.get("month");
-  const selectedYear = searchParams.get("year");
 
-  const handleIntentPrefetch = (href: string) => {
+  useEffect(() => {
+    const pendingTimers = pendingPrefetchTimersRef.current;
+
+    return () => {
+      for (const timerId of Object.values(pendingTimers)) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, []);
+
+  const handleIntentPrefetchStart = (href: string) => {
     const targetHref = resolveWorkspacePrefetchHref({
       href,
       fallbackMonth: currentMonthKey,
-      fallbackYear: currentYearKey,
       selectedMonth,
-      selectedYear,
     });
 
-    if (prefetchedWorkspaceRoutes.has(targetHref)) {
+    if (!targetHref || prefetchedWorkspaceRoutes.has(targetHref)) {
       return;
     }
 
-    prefetchedWorkspaceRoutes.add(targetHref);
-    router.prefetch(targetHref);
+    const pendingTimers = pendingPrefetchTimersRef.current;
+
+    if (pendingTimers[href]) {
+      return;
+    }
+
+    pendingTimers[href] = window.setTimeout(() => {
+      delete pendingTimers[href];
+
+      if (prefetchedWorkspaceRoutes.has(targetHref)) {
+        return;
+      }
+
+      prefetchedWorkspaceRoutes.add(targetHref);
+      router.prefetch(targetHref);
+    }, PREFETCH_DELAY_MS);
+  };
+
+  const handleIntentPrefetchCancel = (href: string) => {
+    const pendingTimers = pendingPrefetchTimersRef.current;
+    const timerId = pendingTimers[href];
+
+    if (!timerId) {
+      return;
+    }
+
+    window.clearTimeout(timerId);
+    delete pendingTimers[href];
   };
 
   return (
@@ -421,7 +420,8 @@ export function WorkspaceShell({
                 href={item.href}
                 label={item.label}
                 icon={item.icon}
-                onIntentPrefetch={handleIntentPrefetch}
+                onIntentPrefetchStart={handleIntentPrefetchStart}
+                onIntentPrefetchCancel={handleIntentPrefetchCancel}
               />
             ))}
           </nav>

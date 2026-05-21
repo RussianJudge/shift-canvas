@@ -2,7 +2,7 @@ import { Suspense } from "react";
 
 import { PersonnelPanel } from "@/components/personnel-panel";
 import { LoadingPanelFrame, LoadingTable, LoadingToolbarFields } from "@/components/workspace-loading";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getPersonnelSnapshot } from "@/lib/data";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
@@ -45,10 +45,10 @@ export default async function PersonnelPage() {
   const month = getCurrentMonthKey("America/Edmonton");
 
   return (
-    <WorkspaceShell viewer={session}>
+    <WorkspaceShellFrame viewer={session}>
       <Suspense key={month} fallback={<PersonnelBoardFallback month={month} />}>
         <PersonnelBoard session={session} month={month} />
       </Suspense>
-    </WorkspaceShell>
+    </WorkspaceShellFrame>
   );
 }
