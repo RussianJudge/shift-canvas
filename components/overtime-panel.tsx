@@ -924,7 +924,7 @@ export function OvertimePanel({
                   dates: [...currentRun],
                   staffedPeople,
                   requiredStaff: competency.requiredStaff,
-                  openShifts: currentRun.length,
+                  openShifts: 0,
                   manualPostingId: null,
                   claimedEmployeeId: employeeId,
                   claimedByName: claimEmployee?.name ?? "Unknown worker",
@@ -1245,6 +1245,12 @@ export function OvertimePanel({
           groups[key].postings.push(posting);
           return groups;
         }, {}),
+      ).sort(
+        (left, right) =>
+          left.dates[0].localeCompare(right.dates[0]) ||
+          left.dates[left.dates.length - 1].localeCompare(right.dates[right.dates.length - 1]) ||
+          left.scheduleName.localeCompare(right.scheduleName) ||
+          left.shiftKind.localeCompare(right.shiftKind),
       ),
     [filteredPostings],
   );
@@ -1522,8 +1528,26 @@ export function OvertimePanel({
       <div className="overtime-list">
         {groupedPostings.map((group) => (
           (() => {
+            const selectedPostingId = selectedPostingByGroup[group.key];
+            const selectedPostingCandidate = selectedPostingId
+              ? group.postings.find((posting) => posting.id === selectedPostingId) ?? null
+              : null;
+            const preferredClaimablePosting =
+              group.postings.find((posting) => {
+                if (posting.claimedEmployeeIds.includes(claimingEmployeeId)) {
+                  return true;
+                }
+
+                return getClaimStatus(claimingEmployee, posting, snapshot, assignmentIndex).canClaim;
+              }) ?? null;
             const selectedPosting =
-              group.postings.find((posting) => posting.id === selectedPostingByGroup[group.key]) ??
+              (selectedPostingCandidate &&
+              (selectedPostingCandidate.claimedEmployeeIds.includes(claimingEmployeeId) ||
+                getClaimStatus(claimingEmployee, selectedPostingCandidate, snapshot, assignmentIndex).canClaim)
+                ? selectedPostingCandidate
+                : null) ??
+              preferredClaimablePosting ??
+              selectedPostingCandidate ??
               group.postings[0];
             const claimStatus = selectedPosting
               ? getClaimStatus(claimingEmployee, selectedPosting, snapshot, assignmentIndex)
