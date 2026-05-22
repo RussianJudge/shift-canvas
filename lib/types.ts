@@ -1,6 +1,13 @@
 export type ShiftKind = "DAY" | "NIGHT" | "OFF";
 export type AppRole = "admin" | "leader" | "worker";
-export type MutualStatus = "open" | "accepted" | "withdrawn" | "cancelled" | "rejected";
+export type MutualStatus =
+  | "open"
+  | "pending_leader_approval"
+  | "accepted"
+  | "withdrawn"
+  | "cancelled"
+  | "rejected";
+export type TimeCodeUsageMode = "manual" | "projected_only" | "both";
 
 export type ScheduleCode = "601" | "602" | "603" | "604";
 
@@ -42,10 +49,14 @@ export interface TimeCode extends OrganizationScope {
   code: string;
   label: string;
   colorToken: string;
+  usageMode: TimeCodeUsageMode;
 }
 
 export interface Employee extends OrganizationScope {
   id: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
   name: string;
   role: string;
   scheduleId: string;
@@ -59,32 +70,61 @@ export interface Schedule extends OrganizationScope {
   dayShiftDays: number;
   nightShiftDays: number;
   offDays: number;
+  isActive: boolean;
   employees: Employee[];
+  competencyIds: string[];
 }
 
 export interface StoredAssignment extends OrganizationScope {
   employeeId: string;
-  scheduleId?: string | null;
+  scheduleId: string;
   date: string;
   competencyId: string | null;
   timeCodeId: string | null;
   notes?: string | null;
   shiftKind: ShiftKind;
+  sourceType?: "schedule" | "sub-schedule";
+  subScheduleId?: string | null;
+  subScheduleName?: string | null;
+  projectedCompetencyId?: string | null;
+}
+
+export interface SubSchedule extends OrganizationScope {
+  id: string;
+  name: string;
+  summaryTimeCodeId: string;
+  isArchived: boolean;
+  competencyIds: string[];
+}
+
+export interface SubScheduleAssignment extends OrganizationScope {
+  id: string;
+  subScheduleId: string;
+  employeeId: string;
+  date: string;
+  competencyId: string | null;
+  timeCodeId: string | null;
+  notes?: string | null;
 }
 
 export interface OvertimeClaim extends OrganizationScope {
   id: string;
-  scheduleId: string;
+  scheduleId: string | null;
+  subScheduleId?: string | null;
   employeeId: string;
-  competencyId: string;
+  competencyId: string | null;
+  timeCodeId?: string | null;
   date: string;
   manualPostingId?: string | null;
 }
 
 export interface ManualOvertimePosting extends OrganizationScope {
   id: string;
-  scheduleId: string;
-  competencyId: string;
+  scheduleId: string | null;
+  subScheduleId?: string | null;
+  competencyId: string | null;
+  timeCodeId?: string | null;
+  slotCount: number;
   month: string;
   shiftKind: Exclude<ShiftKind, "OFF">;
   dates: string[];
@@ -116,6 +156,10 @@ export interface MutualShiftPosting extends OrganizationScope {
   month: string;
   createdAt: string;
   acceptedApplicationId: string | null;
+  ownerLeaderApprovedAt: string | null;
+  ownerLeaderApprovedByName: string | null;
+  applicantLeaderApprovedAt: string | null;
+  applicantLeaderApprovedByName: string | null;
   applications: MutualShiftApplication[];
 }
 
@@ -142,15 +186,37 @@ export interface SchedulerSnapshot {
   competencies: Competency[];
   timeCodes: TimeCode[];
   assignments: StoredAssignment[];
+  projectedAssignments: StoredAssignment[];
   overtimeClaims: OvertimeClaim[];
   manualOvertimePostings: ManualOvertimePosting[];
   completedSets: CompletedSet[];
+  subSchedules: SubSchedule[];
+  subScheduleAssignments: SubScheduleAssignment[];
 }
+
+export interface SchedulePageSnapshot
+  extends Pick<
+    SchedulerSnapshot,
+    | "month"
+    | "schedules"
+    | "competencies"
+    | "timeCodes"
+    | "assignments"
+    | "projectedAssignments"
+    | "overtimeClaims"
+    | "completedSets"
+  > {}
 
 export interface MutualsSnapshot {
   month: string;
   schedules: Schedule[];
   postings: MutualShiftPosting[];
+}
+
+export interface ProfileSnapshot {
+  employee: Employee | null;
+  schedule: Schedule | null;
+  competencies: Competency[];
 }
 
 export interface SaveAssignmentsInput {
@@ -159,9 +225,11 @@ export interface SaveAssignmentsInput {
 }
 
 export interface ClaimOvertimePostingInput {
-  scheduleId: string;
+  scheduleId?: string | null;
+  subScheduleId?: string | null;
   employeeId: string;
-  competencyId: string;
+  competencyId?: string | null;
+  timeCodeId?: string | null;
   coverageCompetencyId?: string | null;
   swapEmployeeId?: string | null;
   manualPostingId?: string | null;
@@ -169,15 +237,20 @@ export interface ClaimOvertimePostingInput {
 }
 
 export interface ReleaseOvertimePostingInput {
-  scheduleId: string;
+  scheduleId?: string | null;
+  subScheduleId?: string | null;
   employeeId: string;
-  competencyId: string;
+  competencyId?: string | null;
+  timeCodeId?: string | null;
   dates: string[];
 }
 
 export interface CreateManualOvertimePostingInput {
-  scheduleId: string;
-  competencyId: string;
+  scheduleId?: string | null;
+  subScheduleId?: string | null;
+  competencyId?: string | null;
+  timeCodeId?: string | null;
+  slotCount: number;
   dates: string[];
 }
 
@@ -199,6 +272,11 @@ export interface ApplyToMutualPostingInput {
 export interface AcceptMutualApplicationInput {
   postingId: string;
   applicationId: string;
+}
+
+export interface ApproveMutualPostingInput {
+  postingId: string;
+  side: "owner" | "applicant";
 }
 
 export interface WithdrawMutualPostingInput {
@@ -224,7 +302,9 @@ export interface SetScheduleCompletionInput {
 
 export interface PersonnelUpdate {
   employeeId: string;
-  name: string;
+  firstName: string;
+  lastName: string;
+  email: string;
   role: string;
   scheduleId: string;
   competencyIds: string[];
@@ -242,6 +322,7 @@ export interface ScheduleUpdate {
   dayShiftDays: number;
   nightShiftDays: number;
   offDays: number;
+  isActive: boolean;
 }
 
 export interface SaveSchedulesInput {
@@ -262,14 +343,50 @@ export interface SaveCompetenciesInput {
   deletedCompetencyIds: string[];
 }
 
+export interface SaveScheduleCompetenciesInput {
+  scheduleId: string;
+  competencyIds: string[];
+}
+
 export interface TimeCodeUpdate {
   timeCodeId: string;
   code: string;
   label: string;
   colorToken: string;
+  usageMode: TimeCodeUsageMode;
 }
 
 export interface SaveTimeCodesInput {
   updates: TimeCodeUpdate[];
   deletedTimeCodeIds: string[];
+}
+
+export interface SubScheduleUpdate {
+  subScheduleId: string;
+  name: string;
+  summaryTimeCodeId: string;
+  isArchived: boolean;
+}
+
+export interface SaveSubSchedulesInput {
+  updates: SubScheduleUpdate[];
+}
+
+export interface SaveSubScheduleCompetenciesInput {
+  subScheduleId: string;
+  competencyIds: string[];
+}
+
+export interface SubScheduleAssignmentUpdate {
+  subScheduleAssignmentId: string;
+  employeeId: string;
+  date: string;
+  competencyId: string | null;
+  timeCodeId: string | null;
+  notes?: string | null;
+}
+
+export interface SaveSubScheduleAssignmentsInput {
+  subScheduleId: string;
+  updates: SubScheduleAssignmentUpdate[];
 }

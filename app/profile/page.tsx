@@ -1,47 +1,34 @@
+import { Suspense } from "react";
+
 import { ProfilePanel } from "@/components/profile-panel";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { LoadingPanelFrame, LoadingProfileCards } from "@/components/workspace-loading";
+import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
-import { getPersonnelSnapshot } from "@/lib/data";
-import { getCurrentMonthKey } from "@/lib/scheduling";
-import { getSupabaseAdminClient } from "@/lib/supabase";
+import { getProfileSnapshot } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
+async function ProfileBoard({ session }: { session: Awaited<ReturnType<typeof requireAppSession>> }) {
+  const snapshot = await getProfileSnapshot(session);
+  return <ProfilePanel snapshot={snapshot} />;
+}
+
+function ProfileBoardFallback() {
+  return (
+    <LoadingPanelFrame title="My Profile">
+      <LoadingProfileCards />
+    </LoadingPanelFrame>
+  );
+}
+
 export default async function ProfilePage() {
   const session = await requireAppSession(["worker"]);
-  const month = getCurrentMonthKey("America/Edmonton");
-  const snapshot = await getPersonnelSnapshot(month, session);
-  const allEmployees = snapshot.schedules.flatMap((schedule) => schedule.employees);
-  const supabase = getSupabaseAdminClient();
-  const displayName = session.displayName.trim().toLowerCase();
-  const emailLocalPart = session.email.split("@")[0]?.trim().toLowerCase() ?? "";
-  const profileEmployeeId =
-    supabase
-      ? (
-          await supabase
-            .from("profiles")
-            .select("employee_id")
-            .eq("email", session.email)
-            .maybeSingle()
-        ).data?.employee_id ?? null
-      : null;
-  const resolvedEmployeeId =
-    profileEmployeeId ??
-    session.employeeId ??
-    allEmployees.find((employee) => {
-      const employeeName = employee.name.trim().toLowerCase();
-      return (
-        employeeName === displayName ||
-        employeeName === emailLocalPart ||
-        employeeName.includes(displayName) ||
-        displayName.includes(employeeName)
-      );
-    })?.id ??
-    null;
 
   return (
-    <WorkspaceShell viewer={session}>
-      <ProfilePanel snapshot={snapshot} employeeId={resolvedEmployeeId} />
-    </WorkspaceShell>
+    <WorkspaceShellFrame viewer={session}>
+      <Suspense fallback={<ProfileBoardFallback />}>
+        <ProfileBoard session={session} />
+      </Suspense>
+    </WorkspaceShellFrame>
   );
 }

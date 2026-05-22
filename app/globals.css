@@ -611,10 +611,45 @@ select {
   gap: 0.95rem;
 }
 
+.auth-name-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
 .auth-error {
   margin: 0;
   color: #b91c1c;
   font-size: 0.9rem;
+}
+
+.auth-notice {
+  margin: 0;
+  color: #166534;
+  font-size: 0.9rem;
+}
+
+.auth-mode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.auth-mode-switch--single {
+  display: block;
+}
+
+.auth-mode-switch__full-button {
+  width: 100%;
+}
+
+.auth-mode-actions {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .auth-selection-note {
@@ -800,7 +835,6 @@ select {
 .primary-button {
   background: var(--team-accent);
   color: white;
-  box-shadow: 0 12px 24px rgba(23, 20, 17, 0.16);
 }
 
 .primary-button:disabled,
@@ -930,13 +964,66 @@ select {
   align-items: center;
 }
 
+.workspace-toolbar--actions .planner-actions {
+  align-items: flex-end;
+}
+
 .workspace-toolbar--personnel-page {
   grid-template-columns: repeat(2, minmax(12rem, 16rem)) auto minmax(0, 1fr);
   align-items: end;
 }
 
+.personnel-toolbar-actions {
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.personnel-actions-menu {
+  position: relative;
+}
+
+.personnel-actions-menu__panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 0.35rem;
+  min-width: 13rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 252, 247, 0.98);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
+}
+
+.personnel-actions-menu__item {
+  justify-content: flex-start;
+  width: 100%;
+}
+
 .workspace-toolbar--overtime {
-  grid-template-columns: repeat(5, minmax(10rem, 14rem)) minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.5rem), 1fr));
+  align-items: end;
+}
+
+.workspace-toolbar--overtime .planner-actions,
+.workspace-toolbar--overtime .toolbar-status-wrap {
+  grid-column: 1 / -1;
+}
+
+.workspace-toolbar--overtime .field,
+.workspace-toolbar--overtime .field--static,
+.workspace-toolbar--overtime .toolbar-actions {
+  min-width: 0;
+}
+
+.workspace-toolbar--overtime .toolbar-actions {
+  justify-content: flex-start;
+}
+
+.workspace-toolbar--overtime .toolbar-status-wrap {
+  justify-content: flex-start;
 }
 
 .workspace-toolbar--metrics {
@@ -1154,6 +1241,7 @@ select {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.85rem;
+  padding-top: 0.35rem;
 }
 
 .metrics-section__controls {
@@ -1302,6 +1390,75 @@ select {
   background: linear-gradient(90deg, rgba(190, 24, 93, 0.9), rgba(251, 113, 133, 0.42));
 }
 
+.metrics-bar-fill--fragility {
+  background: linear-gradient(90deg, rgba(194, 65, 12, 0.92), rgba(251, 146, 60, 0.42));
+}
+
+.metrics-fatigue-bands {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.75rem, 1fr));
+  gap: 0.45rem;
+}
+
+.metrics-fatigue-band {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metrics-fatigue-band strong {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.metrics-fatigue-band--green {
+  background: rgba(22, 163, 74, 0.12);
+  color: #166534;
+}
+
+.metrics-fatigue-band--amber {
+  background: rgba(217, 119, 6, 0.14);
+  color: #92400e;
+}
+
+.metrics-fatigue-band--red {
+  background: rgba(220, 38, 38, 0.13);
+  color: #991b1b;
+}
+
+.metrics-fatigue-band--critical {
+  background: rgba(88, 28, 135, 0.14);
+  color: #581c87;
+}
+
+.metrics-fatigue-dot {
+  width: 0.72rem;
+  height: 0.72rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.metrics-fatigue-dot--green {
+  background: #16a34a;
+}
+
+.metrics-fatigue-dot--amber {
+  background: #d97706;
+}
+
+.metrics-fatigue-dot--red {
+  background: #dc2626;
+}
+
+.metrics-fatigue-dot--critical {
+  background: #7e22ce;
+}
+
 .metrics-top-list {
   display: grid;
   gap: 0.45rem;
@@ -1328,6 +1485,18 @@ select {
 
 .metrics-top-list__row strong {
   color: var(--ink);
+}
+
+.metrics-top-list__row--stacked > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.metrics-top-list__row--stacked small {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .metrics-top-list__row--empty {
@@ -1364,12 +1533,80 @@ select {
   gap: 0.85rem;
 }
 
+.overtime-eligibility-modal {
+  width: min(42rem, 100%);
+}
+
+.overtime-eligibility-modal__summary {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.overtime-eligibility-modal__summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+}
+
+.overtime-eligibility-modal__summary-row strong {
+  text-align: right;
+}
+
+.overtime-eligibility-modal__list {
+  display: grid;
+  gap: 0.7rem;
+  max-height: min(22rem, 52vh);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.overtime-eligibility-modal__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.45rem 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.overtime-eligibility-modal__row span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.mutuals-create-action {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0.7rem 0 1rem;
+}
+
 .mutual-card {
   gap: 1rem;
 }
 
 .mutuals-page {
   padding-bottom: 1.5rem;
+}
+
+.mutuals-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 1rem;
+}
+
+.mutuals-topbar__year {
+  justify-self: end;
+  text-align: right;
 }
 
 .mutuals-section {
@@ -1624,6 +1861,11 @@ select {
   opacity: 0.58;
 }
 
+.schedule-scroll-shell {
+  display: grid;
+  gap: 0;
+}
+
 .schedule-wrap {
   position: relative;
   padding: 0 0 0.5rem;
@@ -1631,6 +1873,26 @@ select {
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--line);
+}
+
+.schedule-wrap--top-scroll {
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.schedule-wrap__scroll-proxy {
+  height: 1px;
+}
+
+.schedule-wrap--locked {
+  cursor: wait;
+}
+
+.schedule-wrap--locked .shift-cell-button {
+  pointer-events: none;
 }
 
 .print-schedule-stack {
@@ -1810,7 +2072,7 @@ select {
 
 .personnel-table th,
 .personnel-table td {
-  padding: 1rem 1.1rem;
+  padding: 0.78rem 0.72rem;
   text-align: left;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
@@ -1828,21 +2090,84 @@ select {
   letter-spacing: 0.08em;
 }
 
+.personnel-table th.column-name,
+.personnel-table td.column-name {
+  min-width: 9rem;
+  width: 9rem;
+}
+
 .personnel-table th.column-shift,
 .personnel-table td.column-shift {
-  min-width: 8.5rem;
-  padding-left: 1.5rem;
-  padding-right: 1.5rem;
+  min-width: 7.1rem;
+  width: 7.1rem;
+  padding-left: 0.82rem;
+  padding-right: 0.82rem;
+}
+
+.personnel-table th.column-email,
+.personnel-table td.column-email {
+  min-width: 15.5rem;
+}
+
+.personnel-table th.column-competencies,
+.personnel-table td.column-competencies {
+  min-width: 16rem;
+}
+
+.personnel-table th.column-actions,
+.personnel-table td.column-actions {
+  width: 1%;
+  white-space: nowrap;
 }
 
 .table-group-row td {
-  padding: 0.55rem 1.1rem;
+  padding: 0.5rem 0.72rem;
   background: rgba(245, 236, 223, 0.88);
   color: var(--muted);
   font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.invite-builder {
+  display: grid;
+  gap: 1rem;
+  margin-block: 1rem 1.25rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 1.1rem;
+  background: rgba(255, 250, 244, 0.82);
+}
+
+.invite-builder__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.invite-builder__header p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.invite-builder__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem 1rem;
+}
+
+.invite-builder__email,
+.invite-builder__link {
+  grid-column: 1 / -1;
+}
+
+.invite-builder__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .table-row--dirty td {
@@ -1855,6 +2180,67 @@ select {
 
 .table-row--invalid td {
   background: rgba(255, 240, 240, 0.92);
+}
+
+.table-row--selected td {
+  background: rgba(247, 242, 230, 0.96);
+}
+
+.subschedule-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.88rem;
+}
+
+.subschedule-builder-section {
+  margin-top: 1.5rem;
+  padding-top: 0.65rem;
+}
+
+.subschedule-builder-toolbar {
+  grid-template-columns: minmax(0, 20rem) auto minmax(0, 1fr);
+  row-gap: 0.9rem;
+}
+
+.subschedule-builder-toolbar .field {
+  min-width: min(100%, 17rem);
+}
+
+.subschedule-add-employee {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.subschedule-add-employee select {
+  min-width: min(100%, 14rem);
+  flex: 1 1 14rem;
+}
+
+.subschedule-builder-toolbar .toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.subschedule-grid-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: rgba(255, 252, 247, 0.72);
+}
+
+.subschedule-grid {
+  display: grid;
+  align-items: stretch;
+  width: max-content;
+  min-width: 100%;
+}
+
+.shift-cell--projected {
+  box-shadow: inset 0 0 0 1px rgba(23, 20, 17, 0.14);
 }
 
 .table-pills {
@@ -1876,11 +2262,22 @@ select {
 }
 
 .schedule-grid {
-  --schedule-name-column-width: 10.5rem;
+  --schedule-name-column-width: 7.75rem;
+  --schedule-day-column-width: clamp(1.72rem, calc((100vw - 18rem) / 31), 2.35rem);
   display: grid;
   align-items: stretch;
   width: max-content;
   min-width: 100%;
+}
+
+.schedule-grid__header,
+.schedule-grid-row {
+  display: grid;
+  align-items: stretch;
+}
+
+.schedule-grid__rows {
+  position: relative;
 }
 
 .employee-header,
@@ -2015,8 +2412,8 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 0.45rem;
-  min-height: 3.6rem;
-  padding: 0.45rem 0.55rem 0.45rem 0.8rem;
+  min-height: 3.15rem;
+  padding: 0.4rem 0.45rem 0.4rem 0.65rem;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 242, 230, 0.9));
 }
@@ -2030,7 +2427,7 @@ select {
 }
 
 .employee-cell strong {
-  font-size: 0.86rem;
+  font-size: 1rem;
   line-height: 1.1;
 }
 
@@ -2046,7 +2443,7 @@ select {
 .employee-cell span,
 .employee-cell small {
   color: var(--muted);
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   line-height: 1.1;
 }
 
@@ -2093,7 +2490,7 @@ select {
   justify-items: center;
   align-content: center;
   gap: 0;
-  min-height: 3.6rem;
+  min-height: 3.15rem;
   padding: 0;
   content-visibility: auto;
   contain-intrinsic-size: 58px;
@@ -2116,9 +2513,7 @@ select {
 }
 
 .shift-cell--has-note {
-  box-shadow:
-    inset 0 0 0 1px rgba(23, 20, 17, 0.05),
-    inset 0.22rem 0 0 rgba(249, 115, 22, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(23, 20, 17, 0.05);
 }
 
 .shift-cell--locked {
@@ -2163,7 +2558,7 @@ select {
 }
 
 .shift-cell--off {
-  background: linear-gradient(180deg, rgba(244, 240, 235, 0.9), rgba(236, 230, 222, 0.92));
+  background: linear-gradient(180deg, rgba(243, 239, 234, 0.94), rgba(236, 231, 225, 0.96));
 }
 
 .shift-cell--weekend {
@@ -2205,17 +2600,19 @@ select {
 .shift-cell-button {
   position: absolute;
   inset: 0;
+  appearance: none;
+  -webkit-appearance: none;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   min-height: 100%;
-  padding: 0.28rem 0.14rem;
+  padding: 0.22rem 0.08rem;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   font-weight: 700;
   line-height: 1;
   text-align: center;
@@ -2241,14 +2638,15 @@ select {
 
 .shift-cell-button:disabled {
   cursor: default;
-  opacity: 0.9;
+  opacity: 1;
+  -webkit-text-fill-color: currentColor;
 }
 
 .table-input,
 .table-select {
   width: 100%;
   min-height: 2.35rem;
-  padding: 0.5rem 0.65rem;
+  padding: 0.42rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: 0.85rem;
   background: rgba(255, 255, 255, 0.85);
@@ -2260,6 +2658,12 @@ select {
   outline: none;
   border-color: color-mix(in srgb, var(--team-accent) 65%, white);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--team-accent) 18%, transparent);
+}
+
+.table-input-stack {
+  display: grid;
+  gap: 0.32rem;
+  align-items: start;
 }
 
 .table-code {
@@ -2322,7 +2726,7 @@ select {
   color: #b91c1c;
   font-size: 0.74rem;
   white-space: normal;
-  text-align: right;
+  text-align: left;
 }
 
 .import-preview {
@@ -2439,6 +2843,23 @@ select {
 .overtime-card-hint {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.overtime-card-actions {
+  align-items: flex-start;
+}
+
+.overtime-card-actions__buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.55rem;
+  margin-left: auto;
+}
+
+.overtime-card-actions__buttons .primary-button,
+.overtime-card-actions__buttons .ghost-button {
+  width: auto;
 }
 
 .loading-stack {
@@ -2727,6 +3148,14 @@ select {
     padding: 1rem 1rem 0.8rem;
   }
 
+  .invite-builder__header {
+    flex-direction: column;
+  }
+
+  .invite-builder__grid {
+    grid-template-columns: 1fr;
+  }
+
   .workspace-toolbar,
   .workspace-toolbar--personnel,
   .workspace-toolbar--actions,
@@ -2743,6 +3172,15 @@ select {
   .toolbar-status-wrap {
     justify-content: flex-start;
     padding-inline: 0;
+  }
+
+  .personnel-toolbar-actions {
+    justify-content: flex-start;
+  }
+
+  .personnel-actions-menu__panel {
+    right: auto;
+    left: 0;
   }
 
   .metrics-grid,
@@ -2790,6 +3228,15 @@ select {
   .mutual-applications,
   .mutual-accepted-grid {
     min-width: 0;
+  }
+
+  .mutuals-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .mutuals-topbar__year {
+    justify-self: stretch;
+    text-align: left;
   }
 
   .mutual-date-summary,
@@ -2841,7 +3288,14 @@ select {
     flex-direction: column;
   }
 
-  .overtime-card-actions .primary-button {
+  .overtime-card-actions__buttons {
+    width: 100%;
+    align-items: stretch;
+    margin-left: 0;
+  }
+
+  .overtime-card-actions__buttons .primary-button,
+  .overtime-card-actions__buttons .ghost-button {
     width: 100%;
   }
 
@@ -2873,6 +3327,10 @@ select {
     flex-wrap: wrap;
   }
 
+  .mutuals-create-action {
+    width: 100%;
+  }
+
   .mutual-application-row {
     align-items: flex-start;
   }
@@ -2886,6 +3344,10 @@ select {
   .personnel-table-wrap,
   .schedule-wrap {
     -webkit-overflow-scrolling: touch;
+  }
+
+  .schedule-wrap--top-scroll {
+    display: none;
   }
 
   .landing-hero,
@@ -2925,6 +3387,10 @@ select {
     padding: 1.2rem;
   }
 
+  .auth-name-grid {
+    grid-template-columns: 1fr;
+  }
+
   .planner-actions {
     width: 100%;
     flex-direction: column;
@@ -2943,15 +3409,17 @@ select {
   }
 
   .schedule-grid {
-    --schedule-name-column-width: 6.7rem;
+    --schedule-name-column-width: 6.15rem;
+    --schedule-day-column-width: 1.92rem;
   }
 
   .employee-header {
-    padding-inline: 0.65rem;
+    padding-inline: 0.55rem;
   }
 
   .employee-cell {
-    padding: 0.4rem 0.35rem 0.4rem 0.55rem;
+    min-height: 2.95rem;
+    padding: 0.34rem 0.28rem 0.34rem 0.45rem;
   }
 
   .employee-cell {
@@ -2964,7 +3432,7 @@ select {
 
   .employee-cell span,
   .employee-cell small {
-    font-size: 0.58rem;
+    font-size: 0.54rem;
   }
 
   .employee-name-full {
@@ -2979,6 +3447,14 @@ select {
     min-width: 2.1rem;
     padding-inline: 0.35rem;
     font-size: 0.52rem;
+  }
+
+  .shift-cell {
+    min-height: 2.95rem;
+  }
+
+  .shift-cell-button {
+    font-size: 0.68rem;
   }
 
   .profile-grid {
@@ -3268,7 +3744,7 @@ select {
   }
 
   .print-schedule-sheet {
-    padding: 0.35in 0.25in;
+    padding: 0.35in 0.18in 0.35in 0.12in;
     break-after: page;
     page-break-after: always;
   }
@@ -3286,6 +3762,7 @@ select {
     left: auto !important;
     top: auto !important;
     min-height: 0;
+    border: 1px solid rgba(71, 85, 105, 0.62);
     box-shadow: none !important;
     background: white !important;
   }
@@ -3300,6 +3777,13 @@ select {
 
   .print-schedule-grid .employee-cell {
     padding: 0.35rem 0.45rem;
+    background: #d1d5db !important;
+    font-size: 0.72rem;
+  }
+
+  .print-schedule-grid .employee-cell__main strong {
+    font-size: 0.72rem;
+    line-height: 1.05;
   }
 
   .print-schedule-grid .employee-pin-button {
@@ -3320,7 +3804,7 @@ select {
     color: #1f2937;
     font-weight: 700;
     font-size: 0.62rem;
-    border: 1px solid rgba(148, 163, 184, 0.3);
+    border: 1px solid rgba(51, 65, 85, 0.72);
   }
 
   .print-schedule-grid .shift-cell--day {
@@ -3333,6 +3817,10 @@ select {
 
   .print-schedule-grid .shift-cell--off {
     background: #f2f1ef !important;
+  }
+
+  .print-schedule-grid .shift-cell--blank {
+    background: #f7f7f6 !important;
   }
 
   .print-schedule-grid .shift-cell--weekend {

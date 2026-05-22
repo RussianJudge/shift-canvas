@@ -91,6 +91,50 @@ export function shiftForDate(schedule: Pick<Schedule, "startDate" | "dayShiftDay
   return pattern[index];
 }
 
+/** Returns the previous calendar date in `YYYY-MM-DD` format. */
+export function getPreviousDate(isoDate: string) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Checks whether a worker already worked a night shift on the previous calendar
+ * day, which blocks next-day DAY overtime claims.
+ */
+export function hasWorkedNightBeforeDate(
+  employee: Employee,
+  employeeSchedule: Pick<Schedule, "startDate" | "dayShiftDays" | "nightShiftDays" | "offDays">,
+  snapshot: Pick<SchedulerSnapshot, "assignments" | "subScheduleAssignments">,
+  isoDate: string,
+) {
+  const previousDate = getPreviousDate(isoDate);
+  const homeShiftKind = shiftForDate(employeeSchedule, previousDate);
+
+  const hasNightMainAssignment = snapshot.assignments.some(
+    (assignment) =>
+      assignment.employeeId === employee.id &&
+      assignment.date === previousDate &&
+      assignment.shiftKind === "NIGHT" &&
+      Boolean(assignment.competencyId || assignment.timeCodeId),
+  );
+
+  if (hasNightMainAssignment) {
+    return true;
+  }
+
+  const hasNightSubScheduleAssignment =
+    snapshot.subScheduleAssignments.some(
+      (assignment) =>
+        assignment.employeeId === employee.id &&
+        assignment.date === previousDate &&
+        Boolean(assignment.competencyId || assignment.timeCodeId),
+    ) && homeShiftKind === "NIGHT";
+
+  return hasNightSubScheduleAssignment || homeShiftKind === "NIGHT";
+}
+
 /** Returns the visible calendar grid for a single month. */
 export function getMonthDays(monthKey: string): MonthDay[] {
   const [year, month] = monthKey.split("-").map(Number);
@@ -278,7 +322,11 @@ export function getSuggestedCompetencyId(employee: Pick<Employee, "id" | "compet
 export function buildAssignmentIndex(assignments: StoredAssignment[]) {
   return assignments.reduce<Record<string, { competencyId: string | null; timeCodeId: string | null; notes: string | null }>>(
     (index, assignment) => {
-      index[createAssignmentKey(assignment.employeeId, assignment.date)] = {
+      if (!assignment.scheduleId) {
+        return index;
+      }
+
+      index[createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date)] = {
         competencyId: assignment.competencyId,
         timeCodeId: assignment.timeCodeId,
         notes: assignment.notes ?? null,
@@ -290,12 +338,27 @@ export function buildAssignmentIndex(assignments: StoredAssignment[]) {
 }
 
 /** Stable key shared by server and client for assignment lookups. */
-export function createAssignmentKey(employeeId: string, date: string) {
-  return `${employeeId}:${date}`;
+export function createAssignmentKey(scheduleId: string, employeeId: string, date: string) {
+  return `${scheduleId}:${employeeId}:${date}`;
+}
+
+/** Parses the shared assignment lookup key back into schedule/employee/date parts. */
+export function parseAssignmentKey(key: string) {
+  const [scheduleId, employeeId, date] = key.split(":");
+
+  if (!scheduleId || !employeeId || !date) {
+    return null;
+  }
+
+  return {
+    scheduleId,
+    employeeId,
+    date,
+  };
 }
 
 /** Finds one schedule from the current snapshot, falling back to the first entry. */
-export function getScheduleById(snapshot: SchedulerSnapshot, scheduleId: string) {
+export function getScheduleById<T extends { schedules: Schedule[] }>(snapshot: T, scheduleId: string) {
   return snapshot.schedules.find((schedule) => schedule.id === scheduleId) ?? snapshot.schedules[0];
 }
 

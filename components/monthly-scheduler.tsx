@@ -2,11 +2,16 @@
 
 import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { createPortal } from "react-dom";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { saveAssignments, saveSchedulePins, setScheduleSetCompletion } from "@/app/actions";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
+import {
+  buildProjectedAssignmentIndex,
+  getManualEntryTimeCodes,
+} from "@/lib/sub-schedules";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -20,11 +25,21 @@ import {
   getTimeCodeMap,
   getWorkedSetDays,
   isCompletedSetRange,
+  parseAssignmentKey,
   shiftMonthKey,
   shiftForDate,
   toggleCompletedSetEntries,
 } from "@/lib/scheduling";
-import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, TimeCode } from "@/lib/types";
+import type {
+  Competency,
+  Employee,
+  SaveAssignmentsInput,
+  Schedule,
+  SchedulePageSnapshot,
+  ShiftKind,
+  StoredAssignment,
+  TimeCode,
+} from "@/lib/types";
 
 /**
  * The scheduler is the most interaction-heavy screen in the app.
@@ -44,6 +59,8 @@ import type { Competency, Employee, Schedule, SchedulerSnapshot, ShiftKind, Time
  */
 const STORAGE_KEY = "shift-canvas-drafts-v2";
 const AUTO_SAVE_DEBOUNCE_MS = 2500;
+const STALE_SNAPSHOT_PROTECTION_MS = 12000;
+const SCHEDULE_ROW_HEIGHT_PX = 51;
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes: string | null };
 type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
 type SelectedCell = { employeeId: string; date: string };
@@ -61,7 +78,7 @@ type DisplayEmployee = {
   role: string;
   competencyIds: string[];
   overtimeDates?: string[];
-  overtimeCompetencyByDate?: Record<string, string>;
+  overtimeCompetencyByDate?: Record<string, string | null>;
   mutualDates?: string[];
 };
 
@@ -88,6 +105,12 @@ type CopiedColumnTemplate = {
   selectionsByEmployeeId: Record<string, AssignmentSelection>;
 };
 
+const ScheduleAssignmentModal = dynamic(
+  () =>
+    import("@/components/schedule-assignment-modal").then((module) => module.ScheduleAssignmentModal),
+  { ssr: false },
+);
+
 /** Builds the visible roster, including borrowed overtime and mutual rows for the month. */
 function buildDisplayEmployeesForSchedule({
   schedule,
@@ -97,7 +120,7 @@ function buildDisplayEmployeesForSchedule({
   pinnedEmployeesBySchedule,
 }: {
   schedule: Schedule;
-  snapshot: SchedulerSnapshot;
+  snapshot: SchedulePageSnapshot;
   employeeMap: Record<string, Employee>;
   currentMonth: string;
   pinnedEmployeesBySchedule: Record<string, string[]>;
@@ -110,38 +133,77 @@ function buildDisplayEmployeesForSchedule({
     competencyIds: employee.competencyIds,
   }));
 
-  const overtimeRows = Object.values(
-    snapshot.overtimeClaims
-      .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
-      .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
-        const employee = employeeMap[claim.employeeId];
+  const borrowedRowsByEmployee = snapshot.overtimeClaims
+    .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
+    .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
+      const employee = employeeMap[claim.employeeId];
 
-        if (!employee || employee.scheduleId === schedule.id) {
-          return rows;
-        }
-
-        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
-        const existingDates = rows[employee.id]?.overtimeDates ?? [];
-        const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
-
-        rows[employee.id] = {
-          rowId: `ot:${schedule.id}:${employee.id}`,
-          sourceEmployeeId: employee.id,
-          name: employee.name,
-          role: `${employee.role} · OT from ${homeSchedule.name}`,
-          competencyIds: employee.competencyIds,
-          overtimeDates: existingDates.includes(claim.date)
-            ? existingDates
-            : [...existingDates, claim.date].sort(),
-          overtimeCompetencyByDate: {
-            ...existingCompetencies,
-            [claim.date]: claim.competencyId,
-          },
-        };
-
+      if (!employee || employee.scheduleId === schedule.id) {
         return rows;
-      }, {}),
-  ).sort((left, right) => left.name.localeCompare(right.name));
+      }
+
+      const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+      const existingDates = rows[employee.id]?.overtimeDates ?? [];
+      const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
+
+      rows[employee.id] = {
+        rowId: `ot:${schedule.id}:${employee.id}`,
+        sourceEmployeeId: employee.id,
+        name: employee.name,
+        role: `${employee.role} · OT from ${homeSchedule.name}`,
+        competencyIds: employee.competencyIds,
+        overtimeDates: existingDates.includes(claim.date)
+          ? existingDates
+          : [...existingDates, claim.date].sort(),
+        overtimeCompetencyByDate: {
+          ...existingCompetencies,
+          [claim.date]: claim.competencyId,
+        },
+      };
+
+      return rows;
+    }, {});
+
+  /**
+   * Manual borrowed assignments are saved directly in `schedule_assignments`
+   * without an `overtime_claims` row. They still need a temporary visible row on
+   * the target shift, or the cell exists in Supabase but has nowhere to render
+   * after a refresh.
+   */
+  for (const assignment of snapshot.assignments) {
+    if (assignment.scheduleId !== schedule.id || assignment.date.slice(0, 7) !== currentMonth) {
+      continue;
+    }
+
+    const employee = employeeMap[assignment.employeeId];
+
+    if (!employee || employee.scheduleId === schedule.id) {
+      continue;
+    }
+
+    const parsed = parseMutualAssignmentNote(assignment.notes);
+
+    if (parsed.targetScheduleId === schedule.id) {
+      continue;
+    }
+
+    const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+    const existingDates = borrowedRowsByEmployee[employee.id]?.overtimeDates ?? [];
+
+    borrowedRowsByEmployee[employee.id] = {
+      rowId: borrowedRowsByEmployee[employee.id]?.rowId ?? `manual:${schedule.id}:${employee.id}`,
+      sourceEmployeeId: employee.id,
+      name: employee.name,
+      role: borrowedRowsByEmployee[employee.id]?.role ?? `${employee.role} · Manual from ${homeSchedule.name}`,
+      competencyIds: employee.competencyIds,
+      overtimeDates: existingDates.includes(assignment.date)
+        ? existingDates
+        : [...existingDates, assignment.date].sort(),
+      overtimeCompetencyByDate: borrowedRowsByEmployee[employee.id]?.overtimeCompetencyByDate,
+    };
+  }
+
+  const borrowedRows = Object.values(borrowedRowsByEmployee).sort((left, right) => left.name.localeCompare(right.name));
 
   const mutualRows = Object.values(
     snapshot.assignments
@@ -177,7 +239,7 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  const rows = [...baseRows, ...overtimeRows, ...mutualRows];
+  const rows = [...baseRows, ...borrowedRows, ...mutualRows];
   const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
   const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
 
@@ -206,28 +268,8 @@ function buildDisplayEmployeesForSchedule({
     .map((entry) => entry.employee);
 }
 
-function isMonthKey(value: string) {
-  return /^\d{4}-\d{2}$/.test(value);
-}
-
 function addMonths(monthKey: string, delta: number) {
   return shiftMonthKey(monthKey, delta);
-}
-
-function stripMonthWindowEntries(assignments: Record<string, AssignmentSelection>, monthKey: string) {
-  const months = new Set([shiftMonthKey(monthKey, -1), monthKey, shiftMonthKey(monthKey, 1)]);
-
-  return Object.fromEntries(
-    Object.entries(assignments).filter((entry) => !months.has(entry[0].slice(-10, -3))),
-  );
-}
-
-function pickMonthWindowEntries(assignments: Record<string, AssignmentSelection>, monthKey: string) {
-  const months = new Set([shiftMonthKey(monthKey, -1), monthKey, shiftMonthKey(monthKey, 1)]);
-
-  return Object.fromEntries(
-    Object.entries(assignments).filter((entry) => months.has(entry[0].slice(-10, -3))),
-  );
 }
 
 function getShiftTone(shift: ShiftKind) {
@@ -306,12 +348,12 @@ function cloneAssignments(assignments: Record<string, AssignmentSelection>) {
 function applySavedUpdatesToBaseline(
   baselineAssignments: Record<string, AssignmentSelection>,
   savedAssignments: Record<string, AssignmentSelection>,
-  savedUpdates: Array<{ employeeId: string; date: string }>,
+  savedUpdates: Array<{ scheduleId: string; employeeId: string; date: string }>,
 ) {
   const nextAssignments = { ...baselineAssignments };
 
   for (const update of savedUpdates) {
-    const key = createAssignmentKey(update.employeeId, update.date);
+    const key = createAssignmentKey(update.scheduleId, update.employeeId, update.date);
     const savedSelection = savedAssignments[key];
 
     if (savedSelection) {
@@ -320,6 +362,30 @@ function applySavedUpdatesToBaseline(
     }
 
     delete nextAssignments[key];
+  }
+
+  return nextAssignments;
+}
+
+function applyStoredUpdatesToAssignments(
+  assignments: Record<string, AssignmentSelection>,
+  updates: StoredAssignment[],
+) {
+  const nextAssignments = { ...assignments };
+
+  for (const update of updates) {
+    const key = createAssignmentKey(update.scheduleId, update.employeeId, update.date);
+
+    if (!update.competencyId && !update.timeCodeId && !update.notes) {
+      delete nextAssignments[key];
+      continue;
+    }
+
+    nextAssignments[key] = {
+      competencyId: update.competencyId,
+      timeCodeId: update.timeCodeId,
+      notes: update.notes ?? null,
+    };
   }
 
   return nextAssignments;
@@ -346,6 +412,42 @@ function buildDraftDelta(
     delta[key] = draft ? { ...draft } : null;
     return delta;
   }, {});
+}
+
+function persistDraftAssignmentsToStorage(
+  baselineAssignments: Record<string, AssignmentSelection>,
+  draftAssignments: Record<string, AssignmentSelection>,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const delta = buildDraftDelta(baselineAssignments, draftAssignments);
+
+  if (Object.keys(delta).length === 0) {
+    window.localStorage.removeItem(STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(delta));
+}
+
+/** Applies a nullable assignment delta to a copy of an assignment map. */
+function applyAssignmentDelta(
+  assignments: Record<string, AssignmentSelection>,
+  delta: PersistedDraftAssignments,
+) {
+  const nextAssignments = { ...assignments };
+
+  for (const [key, selection] of Object.entries(delta)) {
+    if (selection) {
+      nextAssignments[key] = { ...selection };
+    } else {
+      delete nextAssignments[key];
+    }
+  }
+
+  return nextAssignments;
 }
 
 /** Small display helper for schedule header and set messages. */
@@ -385,13 +487,14 @@ function getDefaultSelection(_shiftKind: ShiftKind, _timeCodes: TimeCode[]): Ass
 }
 
 function getSelectionForCell(
+  scheduleId: string,
   employeeId: string,
   date: string,
   shiftKind: ShiftKind,
   assignments: Record<string, AssignmentSelection>,
   timeCodes: TimeCode[],
 ) {
-  const key = createAssignmentKey(employeeId, date);
+  const key = createAssignmentKey(scheduleId, employeeId, date);
 
   if (key in assignments) {
     return assignments[key];
@@ -404,13 +507,52 @@ function isCompetency(competency: Competency | undefined): competency is Compete
   return Boolean(competency);
 }
 
+/**
+ * `T` cells often carry a numeric training/reference note. Showing the first
+ * three digits directly in the cell keeps the schedule readable without
+ * forcing leaders to open the note every time.
+ */
+function getTimeCodeDisplayCode(timeCode: TimeCode | undefined, notes: string | null) {
+  const baseCode = timeCode?.code ?? "";
+
+  if (baseCode.trim().toUpperCase() !== "T") {
+    return baseCode;
+  }
+
+  const noteDigits = notes?.match(/\d/g)?.slice(0, 3).join("") ?? "";
+  return noteDigits ? `${baseCode}${noteDigits}` : baseCode;
+}
+
+function isOvertimeManagedSelection(selection: AssignmentSelection) {
+  return Boolean(selection.notes?.startsWith("OT|"));
+}
+
+function getScheduleCellComment({
+  notes,
+  employeeName,
+  employeeMap,
+}: {
+  notes: string | null;
+  employeeName: string;
+  employeeMap: Record<string, Employee>;
+}) {
+  const parsedMutual = parseMutualAssignmentNote(notes);
+
+  if (parsedMutual.partnerEmployeeId) {
+    const partnerName = employeeMap[parsedMutual.partnerEmployeeId]?.name ?? "their mutual partner";
+    return `${employeeName} working for ${partnerName}`;
+  }
+
+  return notes ?? undefined;
+}
+
 function getSelectionCode(
   selection: AssignmentSelection,
   competencyMap: Record<string, Competency>,
   timeCodeMap: Record<string, TimeCode>,
 ) {
   if (selection.timeCodeId) {
-    return timeCodeMap[selection.timeCodeId]?.code ?? "";
+    return getTimeCodeDisplayCode(timeCodeMap[selection.timeCodeId], selection.notes);
   }
 
   if (selection.competencyId) {
@@ -420,22 +562,37 @@ function getSelectionCode(
   return "";
 }
 
+/** Fisher-Yates shuffle used only for internal auto-fill worker ordering. */
+function shuffleArray<T>(items: T[]) {
+  const nextItems = [...items];
+
+  for (let index = nextItems.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [nextItems[index], nextItems[swapIndex]] = [nextItems[swapIndex], nextItems[index]];
+  }
+
+  return nextItems;
+}
+
 function buildSingleSetAutofillPlan({
   schedule,
   setDays,
   assignments,
+  occupiedAssignments,
   competencies,
   timeCodes,
 }: {
   schedule: Schedule;
   setDays: Array<{ date: string }>;
   assignments: Record<string, AssignmentSelection>;
+  occupiedAssignments: Record<string, AssignmentSelection>;
   competencies: Competency[];
   timeCodes: TimeCode[];
 }) {
   // The auto-fill helper only touches fully blank workers so it never rewrites
   // a planner's partially curated set.
   const nextAssignments = { ...assignments };
+  const nextOccupiedAssignments = { ...occupiedAssignments };
   const setLength = setDays.length;
 
   if (setLength === 0) {
@@ -455,13 +612,14 @@ function buildSingleSetAutofillPlan({
     for (const day of setDays) {
       for (const employee of schedule.employees) {
         const shiftKind = shiftForDate(schedule, day.date);
-        const selection = getSelectionForCell(
-          employee.id,
-          day.date,
-          shiftKind,
-          nextAssignments,
-          timeCodes,
-        );
+          const selection = getSelectionForCell(
+            schedule.id,
+            employee.id,
+            day.date,
+            shiftKind,
+            nextOccupiedAssignments,
+            timeCodes,
+          );
 
         if (selection.competencyId === competency.id) {
           filledCells += 1;
@@ -478,15 +636,23 @@ function buildSingleSetAutofillPlan({
   const fullyBlankWorkers = schedule.employees.filter((employee) =>
     setDays.every((day) => {
       const shiftKind = shiftForDate(schedule, day.date);
-      const selection = getSelectionForCell(employee.id, day.date, shiftKind, nextAssignments, timeCodes);
+      const selection = getSelectionForCell(
+        schedule.id,
+        employee.id,
+        day.date,
+        shiftKind,
+        nextOccupiedAssignments,
+        timeCodes,
+      );
       return !selection.competencyId && !selection.timeCodeId;
     }),
   );
+  const shuffledBlankWorkers = shuffleArray(fullyBlankWorkers);
 
   let assignedWorkers = 0;
   let assignedCells = 0;
 
-  for (const employee of fullyBlankWorkers) {
+  for (const employee of shuffledBlankWorkers) {
     const availableCompetencyIds = employee.competencyIds
       .map((competencyId) => ({
         competencyId,
@@ -503,11 +669,14 @@ function buildSingleSetAutofillPlan({
       availableCompetencyIds[Math.floor(Math.random() * availableCompetencyIds.length)];
 
     for (const day of setDays) {
-      nextAssignments[createAssignmentKey(employee.id, day.date)] = {
+      const key = createAssignmentKey(schedule.id, employee.id, day.date);
+      const nextSelection = {
         competencyId: bestCompetencyId,
         timeCodeId: null,
         notes: null,
       };
+      nextAssignments[key] = nextSelection;
+      nextOccupiedAssignments[key] = nextSelection;
       assignedCells += 1;
     }
 
@@ -532,12 +701,14 @@ function buildSetAutofillPlan({
   schedule,
   setDays,
   assignments,
+  occupiedAssignments,
   competencies,
   timeCodes,
 }: {
   schedule: Schedule;
   setDays: Array<{ date: string }>;
   assignments: Record<string, AssignmentSelection>;
+  occupiedAssignments: Record<string, AssignmentSelection>;
   competencies: Competency[];
   timeCodes: TimeCode[];
 }) {
@@ -547,14 +718,15 @@ function buildSetAutofillPlan({
    * land on a suboptimal combination even when another valid fill exists.
    *
    * To make the tool more robust without touching any manually entered cells,
-   * we retry from the exact same untouched baseline up to five times and keep
+   * we retry from the exact same untouched baseline up to ten times and keep
    * the best result we found.
    */
-  const maxAttempts = 5;
+  const maxAttempts = 10;
   let bestPlan = buildSingleSetAutofillPlan({
     schedule,
     setDays,
     assignments,
+    occupiedAssignments,
     competencies,
     timeCodes,
   });
@@ -568,6 +740,7 @@ function buildSetAutofillPlan({
       schedule,
       setDays,
       assignments,
+      occupiedAssignments,
       competencies,
       timeCodes,
     });
@@ -588,139 +761,6 @@ function buildSetAutofillPlan({
   return bestPlan;
 }
 
-/** Window-centered assignment picker used for individual cell edits. */
-function AssignmentModal({
-  selectedEmployee,
-  selectedDate,
-  shiftKind,
-  selection,
-  competencies,
-  timeCodes,
-  onApply,
-  onClear,
-  onClose,
-}: {
-  selectedEmployee: DisplayEmployee | null;
-  selectedDate: string | null;
-  shiftKind: ShiftKind;
-  selection: AssignmentSelection;
-  competencies: Competency[];
-  timeCodes: TimeCode[];
-  onApply: (selection: AssignmentSelection) => void;
-  onClear: () => void;
-  onClose: () => void;
-}) {
-  if (!selectedEmployee || !selectedDate) {
-    return null;
-  }
-
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section
-        className="assignment-modal"
-        aria-label="Assignment editor"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Assignment</h2>
-            <p className="assignment-modal__context">
-              {selectedEmployee.name} · {formatShortDate(selectedDate)} · {shiftKind.toLowerCase()}
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-
-        <div className="assignment-modal__group">
-          <span className="assignment-modal__label">Time Codes</span>
-          <div className="assignment-modal__options">
-            {timeCodes.map((timeCode) => (
-              <button
-                key={timeCode.id}
-                type="button"
-                className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
-                  selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
-                }`}
-                onClick={() => {
-                  onApply({
-                    ...selection,
-                    competencyId: null,
-                    timeCodeId: timeCode.id,
-                  });
-                  onClose();
-                }}
-              >
-                {timeCode.code}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="assignment-modal__group">
-          <span className="assignment-modal__label">Competencies</span>
-          <div className="assignment-modal__options">
-            {competencies.map((competency) => (
-              <button
-                key={competency.id}
-                type="button"
-                className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
-                  selection.competencyId === competency.id ? "legend-pill--selected" : ""
-                }`}
-                onClick={() => {
-                  onApply({
-                    ...selection,
-                    competencyId: competency.id,
-                    timeCodeId: null,
-                  });
-                  onClose();
-                }}
-              >
-                {getCompactCode(competency.code)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="assignment-modal__group">
-          <label className="assignment-modal__label" htmlFor="assignment-note">
-            Note
-          </label>
-          <textarea
-            id="assignment-note"
-            className="assignment-modal__note-input"
-            rows={3}
-            value={selection.notes ?? ""}
-            placeholder="Add a note for this cell"
-            onChange={(event) =>
-              onApply({
-                ...selection,
-                notes: event.target.value || null,
-              })
-            }
-          />
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={onClear}
-          >
-            Clear assignment
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
-  );
-}
-
 export function MonthlyScheduler({
   initialSnapshot,
   initialPinnedEmployeesBySchedule,
@@ -728,21 +768,26 @@ export function MonthlyScheduler({
   canManageSetBuilder,
   canSwitchSchedule,
   forcedScheduleId,
+  initialSelectedScheduleId,
 }: {
-  initialSnapshot: SchedulerSnapshot;
+  initialSnapshot: SchedulePageSnapshot;
   initialPinnedEmployeesBySchedule: Record<string, string[]>;
   canEdit: boolean;
   canManageSetBuilder: boolean;
   canSwitchSchedule: boolean;
   forcedScheduleId: string | null;
+  initialSelectedScheduleId?: string | null;
 }) {
   // `baselineAssignments` tracks the last server-confirmed state. `draftAssignments`
   // layers in local edits and set actions until auto-save confirms them or the user reverts.
   const router = useRouter();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [currentMonth, setCurrentMonth] = useState(initialSnapshot.month);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
-    forcedScheduleId ?? initialSnapshot.schedules[0]?.id ?? "",
+    forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
+      ? forcedScheduleId
+      : initialSnapshot.schedules.some((schedule) => schedule.id === initialSelectedScheduleId)
+      ? initialSelectedScheduleId ?? ""
+      : initialSnapshot.schedules[0]?.id ?? "",
   );
   const [search, setSearch] = useState("");
   const [baselineAssignments, setBaselineAssignments] = useState(() =>
@@ -764,19 +809,59 @@ export function MonthlyScheduler({
   );
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
-  const [isSaving, startSaveTransition] = useTransition();
+  const [isSavingTransition, startSaveTransition] = useTransition();
+  const [activeSaveCount, setActiveSaveCount] = useState(0);
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const [isSavingPins, startPinSaveTransition] = useTransition();
+  const isSaving = isSavingTransition || activeSaveCount > 0;
+  const isScheduleLocked = isSaving || isUpdatingSetCompletion;
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const latestAutoSaveTokenRef = useRef(0);
+  const baselineAssignmentsRef = useRef(baselineAssignments);
+  const draftAssignmentsRef = useRef(draftAssignments);
+  const activeSaveCountRef = useRef(0);
+  const preserveLocalBaselineUntilRef = useRef(0);
+  const scheduleTopScrollRef = useRef<HTMLDivElement | null>(null);
+  const scheduleBodyScrollRef = useRef<HTMLElement | null>(null);
+  const scheduleGridRef = useRef<HTMLDivElement | null>(null);
+  const [scheduleScrollProxyWidth, setScheduleScrollProxyWidth] = useState(0);
+  const currentMonth = snapshot.month;
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
   const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
+  const projectedAssignmentIndex = useMemo(
+    () => buildProjectedAssignmentIndex(snapshot.projectedAssignments),
+    [snapshot.projectedAssignments],
+  );
+  const effectiveAssignments = useMemo(() => {
+    const nextAssignments = { ...draftAssignments };
+
+    for (const assignment of snapshot.projectedAssignments) {
+      nextAssignments[createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date)] = {
+        competencyId: assignment.competencyId,
+        timeCodeId: assignment.timeCodeId,
+        notes: assignment.notes ?? null,
+      };
+    }
+
+    return nextAssignments;
+  }, [draftAssignments, snapshot.projectedAssignments]);
+  const manualEntryTimeCodes = useMemo(
+    () => getManualEntryTimeCodes(snapshot.timeCodes),
+    [snapshot.timeCodes],
+  );
   const monthDays = useMemo(() => getMonthDays(currentMonth), [currentMonth]);
   const extendedMonthDays = useMemo(() => getExtendedMonthDays(currentMonth), [currentMonth]);
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
   const activeScheduleId = activeSchedule?.id ?? "";
+  const activeScheduleCompetencies = useMemo(
+    () =>
+      activeSchedule
+        ? snapshot.competencies.filter((competency) => activeSchedule.competencyIds.includes(competency.id))
+        : [],
+    [activeSchedule, snapshot.competencies],
+  );
   const selectedSetDays = useMemo(
     () => (activeSchedule ? getWorkedSetDays(activeSchedule, extendedMonthDays, selectedSetAnchorDate) : []),
     [activeSchedule, extendedMonthDays, selectedSetAnchorDate],
@@ -816,7 +901,7 @@ export function MonthlyScheduler({
       return {};
     }
 
-    return snapshot.competencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
+    return activeScheduleCompetencies.reduce<Record<string, CoverageSummary>>((map, competency) => {
       let filledCells = 0;
       let hasOvertime = false;
       const missingDates: string[] = [];
@@ -827,10 +912,11 @@ export function MonthlyScheduler({
         for (const employee of activeSchedule.employees) {
           const shiftKind = shiftForDate(activeSchedule, day.date);
           const selection = getSelectionForCell(
+            activeSchedule.id,
             employee.id,
             day.date,
             shiftKind,
-            draftAssignments,
+            effectiveAssignments,
             snapshot.timeCodes,
           );
 
@@ -875,7 +961,7 @@ export function MonthlyScheduler({
 
       return map;
     }, {});
-  }, [activeSchedule, draftAssignments, employeeMap, selectedSetDays, snapshot.competencies, snapshot.overtimeClaims, snapshot.timeCodes]);
+  }, [activeSchedule, activeScheduleCompetencies, effectiveAssignments, employeeMap, selectedSetDays, snapshot.overtimeClaims, snapshot.timeCodes]);
   const unassignedSetCells = useMemo(() => {
     if (!activeSchedule || selectedSetDays.length === 0) {
       return [];
@@ -885,10 +971,11 @@ export function MonthlyScheduler({
       selectedSetDays.flatMap((day) => {
         const shiftKind = shiftForDate(activeSchedule, day.date);
         const selection = getSelectionForCell(
+          activeSchedule.id,
           employee.id,
           day.date,
           shiftKind,
-          draftAssignments,
+          effectiveAssignments,
           snapshot.timeCodes,
         );
 
@@ -904,7 +991,7 @@ export function MonthlyScheduler({
         ];
       }),
     );
-  }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.timeCodes]);
+  }, [activeSchedule, effectiveAssignments, selectedSetDays, snapshot.timeCodes]);
   const fullyBlankSetWorkers = useMemo(() => {
     if (!activeSchedule || selectedSetDays.length === 0) {
       return [];
@@ -914,17 +1001,18 @@ export function MonthlyScheduler({
       selectedSetDays.every((day) => {
         const shiftKind = shiftForDate(activeSchedule, day.date);
         const selection = getSelectionForCell(
+          activeSchedule.id,
           employee.id,
           day.date,
           shiftKind,
-          draftAssignments,
+          effectiveAssignments,
           snapshot.timeCodes,
         );
 
         return !selection.competencyId && !selection.timeCodeId;
       }),
     );
-  }, [activeSchedule, draftAssignments, selectedSetDays, snapshot.timeCodes]);
+  }, [activeSchedule, effectiveAssignments, selectedSetDays, snapshot.timeCodes]);
   const displayEmployees = useMemo<DisplayEmployee[]>(
     () =>
       activeSchedule
@@ -964,20 +1052,76 @@ export function MonthlyScheduler({
     [displayEmployees],
   );
 
+  useEffect(() => {
+    const topScroll = scheduleTopScrollRef.current;
+    const bodyScroll = scheduleBodyScrollRef.current;
+    const grid = scheduleGridRef.current;
+
+    if (!topScroll || !bodyScroll || !grid) {
+      return;
+    }
+
+    let isSyncing = false;
+
+    const syncWidths = () => {
+      setScheduleScrollProxyWidth(grid.scrollWidth);
+    };
+
+    const handleTopScroll = () => {
+      if (isSyncing) {
+        return;
+      }
+
+      isSyncing = true;
+      bodyScroll.scrollLeft = topScroll.scrollLeft;
+      isSyncing = false;
+    };
+
+    const handleBodyScroll = () => {
+      if (isSyncing) {
+        return;
+      }
+
+      isSyncing = true;
+      topScroll.scrollLeft = bodyScroll.scrollLeft;
+      isSyncing = false;
+    };
+
+    syncWidths();
+    topScroll.scrollLeft = bodyScroll.scrollLeft;
+
+    topScroll.addEventListener("scroll", handleTopScroll);
+    bodyScroll.addEventListener("scroll", handleBodyScroll);
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncWidths();
+      topScroll.scrollLeft = bodyScroll.scrollLeft;
+    });
+
+    resizeObserver.observe(grid);
+    resizeObserver.observe(bodyScroll);
+
+    return () => {
+      topScroll.removeEventListener("scroll", handleTopScroll);
+      bodyScroll.removeEventListener("scroll", handleBodyScroll);
+      resizeObserver.disconnect();
+    };
+  }, [currentMonth, visibleEmployees.length]);
+
   const dirtyUpdates = useMemo(
     () =>
       Array.from(
         new Set([...Object.keys(baselineAssignments), ...Object.keys(draftAssignments)]),
       ).flatMap((key) => {
-        const [employeeId, date] = key.split(":");
-        const employee = employeeMap[employeeId];
-        const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+        const parsed = parseAssignmentKey(key);
+        const employee = parsed ? employeeMap[parsed.employeeId] : null;
+        const targetSchedule = parsed ? getScheduleById(snapshot, parsed.scheduleId) : null;
 
-        if (!employee || !employeeSchedule) {
+        if (!parsed || !employee || !targetSchedule) {
           return [];
         }
 
-        const shiftKind = shiftForDate(employeeSchedule, date);
+        const shiftKind = shiftForDate(targetSchedule, parsed.date);
         const baseline = baselineAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
         const draft = draftAssignments[key] ?? { competencyId: null, timeCodeId: null, notes: null };
 
@@ -991,8 +1135,9 @@ export function MonthlyScheduler({
 
         return [
           {
-            employeeId,
-            date,
+            employeeId: parsed.employeeId,
+            scheduleId: parsed.scheduleId,
+            date: parsed.date,
             competencyId: draft.competencyId,
             timeCodeId: draft.timeCodeId,
             notes: draft.notes,
@@ -1011,21 +1156,69 @@ export function MonthlyScheduler({
   const editorSelection =
     editorCell && editorEmployee
       ? getSelectionForCell(
+          activeSchedule.id,
           editorEmployee.sourceEmployeeId,
           editorCell.date,
           editorShiftKind,
-          draftAssignments,
+          effectiveAssignments,
           snapshot.timeCodes,
         )
       : { competencyId: null, timeCodeId: null, notes: null };
+  const editorClearDisabledReason = isOvertimeManagedSelection(editorSelection)
+    ? "This cell came from an overtime posting. Release it from the Overtime page instead of clearing it here."
+    : null;
   const editorEmployeeCompetencies = editorEmployee
-    ? editorEmployee.competencyIds.map((competencyId) => competencyMap[competencyId]).filter(isCompetency)
+    ? editorEmployee.competencyIds
+        .filter((competencyId) => activeSchedule?.competencyIds.includes(competencyId))
+        .map((competencyId) => competencyMap[competencyId])
+        .filter(isCompetency)
     : [];
   const highlightedMissingDates = selectedCoverageCompetencyId
     ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
     : new Set<string>();
+  const activeDirtyUpdates = useMemo(
+    () =>
+      dirtyUpdates.filter(
+        (update) =>
+          update.scheduleId === activeSchedule.id &&
+          displayEmployeeMap[update.employeeId] &&
+          monthDays.some((day) => day.date === update.date),
+      ),
+    [dirtyUpdates, displayEmployeeMap, monthDays],
+  );
+  const hasActiveChanges = activeDirtyUpdates.length > 0;
 
-  const gridColumns = `var(--schedule-name-column-width, 10.5rem) repeat(${monthDays.length}, minmax(3rem, 1fr))`;
+  function getProjectedAssignmentForCell(employeeId: string, date: string) {
+    return projectedAssignmentIndex[createAssignmentKey(activeSchedule.id, employeeId, date)] ?? null;
+  }
+
+  const gridColumns = `var(--schedule-name-column-width, 7.75rem) repeat(${monthDays.length}, minmax(var(--schedule-day-column-width, 1.72rem), 1fr))`;
+  const rowVirtualizer = useVirtualizer({
+    count: visibleEmployees.length,
+    getScrollElement: () => scheduleBodyScrollRef.current,
+    estimateSize: () => SCHEDULE_ROW_HEIGHT_PX,
+    overscan: 8,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+
+  function replaceScheduleUrlState(month: string, scheduleId: string) {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    params.set("month", month);
+
+    if (scheduleId) {
+      params.set("schedule", scheduleId);
+    } else {
+      params.delete("schedule");
+    }
+
+    const queryString = params.toString();
+    const nextUrl = queryString ? `/schedule?${queryString}` : "/schedule";
+    window.history.replaceState(null, "", nextUrl);
+  }
 
   useEffect(() => {
     if (!forcedScheduleId || selectedScheduleId === forcedScheduleId) {
@@ -1036,10 +1229,46 @@ export function MonthlyScheduler({
   }, [forcedScheduleId, selectedScheduleId]);
 
   useEffect(() => {
+    baselineAssignmentsRef.current = baselineAssignments;
+  }, [baselineAssignments]);
+
+  useEffect(() => {
+    draftAssignmentsRef.current = draftAssignments;
+  }, [draftAssignments]);
+
+  useEffect(() => {
+    activeSaveCountRef.current = activeSaveCount;
+  }, [activeSaveCount]);
+
+  function protectLocalBaselineFromStaleSnapshots() {
+    preserveLocalBaselineUntilRef.current = Date.now() + STALE_SNAPSHOT_PROTECTION_MS;
+  }
+
+  async function runTrackedAssignmentSave(input: SaveAssignmentsInput) {
+    activeSaveCountRef.current += 1;
+    setActiveSaveCount((current) => current + 1);
+
+    try {
+      return await saveAssignments(input);
+    } finally {
+      activeSaveCountRef.current = Math.max(0, activeSaveCountRef.current - 1);
+      setActiveSaveCount((current) => Math.max(0, current - 1));
+    }
+  }
+
+  useEffect(() => {
     const nextAssignments = buildAssignmentIndex(initialSnapshot.assignments);
+    const currentBaselineAssignments = baselineAssignmentsRef.current;
+    const currentDraftAssignments = draftAssignmentsRef.current;
+    const unsavedDraftDelta = buildDraftDelta(currentBaselineAssignments, currentDraftAssignments);
+    const shouldProtectLocalBaseline =
+      activeSaveCountRef.current > 0 || Date.now() < preserveLocalBaselineUntilRef.current;
+    const locallyConfirmedDelta = shouldProtectLocalBaseline
+      ? buildDraftDelta(nextAssignments, currentBaselineAssignments)
+      : {};
+    const mergedBaselineAssignments = applyAssignmentDelta(nextAssignments, locallyConfirmedDelta);
 
     setSnapshot(initialSnapshot);
-    setCurrentMonth(initialSnapshot.month);
     setSelectedScheduleId((current) =>
       forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
         ? forcedScheduleId
@@ -1047,8 +1276,10 @@ export function MonthlyScheduler({
         ? current
         : initialSnapshot.schedules[0]?.id ?? "",
     );
-    setBaselineAssignments(nextAssignments);
-    setDraftAssignments(nextAssignments);
+    setBaselineAssignments(mergedBaselineAssignments);
+    setDraftAssignments(() =>
+      applyAssignmentDelta(mergedBaselineAssignments, unsavedDraftDelta),
+    );
     setStatusMessage("");
     setDragRange(null);
 
@@ -1064,7 +1295,6 @@ export function MonthlyScheduler({
      * visibility/completion effects below decide whether that cell is still
      * valid in the refreshed month data.
      */
-    window.localStorage.removeItem(STORAGE_KEY);
   }, [forcedScheduleId, initialSnapshot]);
 
   useEffect(() => {
@@ -1151,14 +1381,7 @@ export function MonthlyScheduler({
     }
 
     const timer = window.setTimeout(() => {
-      const delta = buildDraftDelta(baselineAssignments, draftAssignments);
-
-      if (Object.keys(delta).length === 0) {
-        window.localStorage.removeItem(STORAGE_KEY);
-        return;
-      }
-
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(delta));
+      persistDraftAssignmentsToStorage(baselineAssignments, draftAssignments);
     }, 160);
 
     return () => window.clearTimeout(timer);
@@ -1167,11 +1390,11 @@ export function MonthlyScheduler({
   useEffect(() => {
     // Treat an open cell editor like an in-progress edit session: keep the
     // draft local, then autosave once the modal closes.
-    if (!canEdit || !isDraftHydrated || !hasChanges || editorCell) {
+    if (!canEdit || isSaving || !isDraftHydrated || !hasActiveChanges || editorCell) {
       return;
     }
 
-    const scheduledUpdates = dirtyUpdates.map((update) => ({ ...update }));
+    const scheduledUpdates = activeDirtyUpdates.map((update) => ({ ...update }));
     const scheduledDraftAssignments = cloneAssignments(draftAssignments);
     const autoSaveToken = latestAutoSaveTokenRef.current + 1;
 
@@ -1185,12 +1408,13 @@ export function MonthlyScheduler({
           );
         }
 
-        const result = await saveAssignments({
+        const result = await runTrackedAssignmentSave({
           scheduleId: activeSchedule.id,
           updates: scheduledUpdates,
         });
 
         if (result.ok) {
+          protectLocalBaselineFromStaleSnapshots();
           setBaselineAssignments((current) =>
             applySavedUpdatesToBaseline(current, scheduledDraftAssignments, scheduledUpdates),
           );
@@ -1203,7 +1427,7 @@ export function MonthlyScheduler({
     }, AUTO_SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [activeSchedule.id, canEdit, dirtyUpdates, draftAssignments, editorCell, hasChanges, isDraftHydrated]);
+  }, [activeDirtyUpdates, activeSchedule.id, canEdit, draftAssignments, editorCell, hasActiveChanges, isDraftHydrated, isSaving]);
 
   useEffect(() => {
     function handlePointerUp() {
@@ -1231,7 +1455,7 @@ export function MonthlyScheduler({
 
               const shiftKind = shiftForDate(employeeSchedule, date);
               const defaultSelection = getDefaultSelection(shiftKind, snapshot.timeCodes);
-              const key = createAssignmentKey(dragRange.employeeId, date);
+              const key = createAssignmentKey(activeSchedule.id, dragRange.employeeId, date);
 
               if (
                 defaultSelection.competencyId === dragRange.selection.competencyId &&
@@ -1272,69 +1496,20 @@ export function MonthlyScheduler({
     return () => window.removeEventListener("keydown", handleEscape);
   }, []);
 
-  useEffect(() => {
-    if (currentMonth === snapshot.month || !isMonthKey(currentMonth)) {
+  function handleAssignmentChange(employeeId: string, date: string, selection: AssignmentSelection) {
+    if (isScheduleLocked) {
       return;
     }
 
-    const controller = new AbortController();
-    let cancelled = false;
+    const projectedAssignment = getProjectedAssignmentForCell(employeeId, date);
 
-    setStatusMessage(`Loading ${formatMonthLabel(currentMonth)}`);
+    if (projectedAssignment) {
+      setStatusMessage(
+        `This cell is managed by ${projectedAssignment.subScheduleName ?? "a sub-schedule"} and cannot be edited here.`,
+      );
+      return;
+    }
 
-    fetch(`/api/scheduler?month=${currentMonth}`, {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Unable to load month data.");
-        }
-
-        const nextSnapshot = (await response.json()) as SchedulerSnapshot;
-
-        if (cancelled) {
-          return;
-        }
-
-        const incomingMonthAssignments = buildAssignmentIndex(nextSnapshot.assignments);
-
-        startTransition(() => {
-          setSnapshot(nextSnapshot);
-          setSelectedScheduleId((current) =>
-            forcedScheduleId && nextSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
-              ? forcedScheduleId
-              : nextSnapshot.schedules.some((schedule) => schedule.id === current)
-              ? current
-              : nextSnapshot.schedules[0]?.id ?? "",
-          );
-          setBaselineAssignments((current) => ({
-            ...stripMonthWindowEntries(current, currentMonth),
-            ...incomingMonthAssignments,
-          }));
-          setDraftAssignments((current) => ({
-            ...stripMonthWindowEntries(current, currentMonth),
-            ...incomingMonthAssignments,
-            ...pickMonthWindowEntries(current, currentMonth),
-          }));
-          setStatusMessage(`Loaded ${formatMonthLabel(currentMonth)}`);
-        });
-      })
-      .catch((error) => {
-        if (cancelled || error instanceof DOMException) {
-          return;
-        }
-
-        setStatusMessage("Could not load that month. Staying on your current draft.");
-      });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [currentMonth, snapshot.month]);
-
-  function handleAssignmentChange(employeeId: string, date: string, selection: AssignmentSelection) {
     const employee = employeeMap[employeeId];
     const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
 
@@ -1344,11 +1519,26 @@ export function MonthlyScheduler({
 
     const shiftKind = shiftForDate(employeeSchedule, date);
     const defaultSelection = getDefaultSelection(shiftKind, snapshot.timeCodes);
-    const key = createAssignmentKey(employeeId, date);
+    const currentSelection = getSelectionForCell(
+      activeSchedule.id,
+      employeeId,
+      date,
+      shiftKind,
+      draftAssignments,
+      snapshot.timeCodes,
+    );
+    const key = createAssignmentKey(activeSchedule.id, employeeId, date);
     const shouldResetToDefault =
       defaultSelection.competencyId === selection.competencyId &&
       defaultSelection.timeCodeId === selection.timeCodeId &&
       defaultSelection.notes === selection.notes;
+
+    if (shouldResetToDefault && isOvertimeManagedSelection(currentSelection)) {
+      setStatusMessage(
+        "Overtime-filled cells must be released from the Overtime page before they can be cleared here.",
+      );
+      return;
+    }
 
     startTransition(() => {
       setDraftAssignments((current) => {
@@ -1372,6 +1562,14 @@ export function MonthlyScheduler({
     dayIndex: number,
     selection: AssignmentSelection,
   ) {
+    if (isScheduleLocked) {
+      return;
+    }
+
+    if (getProjectedAssignmentForCell(employeeId, date)) {
+      return;
+    }
+
     setSelectedCell({ employeeId, date });
     setDragRange({
       employeeId,
@@ -1382,6 +1580,10 @@ export function MonthlyScheduler({
   }
 
   function handleDragHover(employeeId: string, dayIndex: number) {
+    if (isScheduleLocked) {
+      return;
+    }
+
     setDragRange((current) => {
       if (!current || current.employeeId !== employeeId || current.currentIndex === dayIndex) {
         return current;
@@ -1396,12 +1598,43 @@ export function MonthlyScheduler({
 
   function handleMonthChange(delta: number) {
     startMonthTransition(() => {
-      setCurrentMonth((current) => {
-        const nextMonth = addMonths(current, delta);
-        router.push(`/schedule?month=${nextMonth}`, { scroll: false });
-        return nextMonth;
-      });
+      const nextMonth = addMonths(currentMonth, delta);
+      persistDraftAssignmentsToStorage(baselineAssignmentsRef.current, draftAssignmentsRef.current);
       setStatusMessage("Changing month");
+      router.push(`/schedule?month=${nextMonth}&schedule=${selectedScheduleId}`, { scroll: false });
+    });
+  }
+
+  function saveBulkAssignmentUpdates(updates: StoredAssignment[], successMessage: string) {
+    if (!canEdit || isScheduleLocked || updates.length === 0) {
+      return;
+    }
+
+    const scheduledUpdates = updates.map((update) => ({ ...update }));
+    const autoSaveToken = latestAutoSaveTokenRef.current + 1;
+
+    latestAutoSaveTokenRef.current = autoSaveToken;
+
+    startSaveTransition(async () => {
+      if (latestAutoSaveTokenRef.current === autoSaveToken) {
+        setStatusMessage(
+          `Saving ${scheduledUpdates.length} pasted cell${scheduledUpdates.length === 1 ? "" : "s"}...`,
+        );
+      }
+
+      const result = await runTrackedAssignmentSave({
+        scheduleId: activeSchedule.id,
+        updates: scheduledUpdates,
+      });
+
+      if (result.ok) {
+        protectLocalBaselineFromStaleSnapshots();
+        setBaselineAssignments((current) => applyStoredUpdatesToAssignments(current, scheduledUpdates));
+      }
+
+      if (latestAutoSaveTokenRef.current === autoSaveToken) {
+        setStatusMessage(result.ok ? successMessage : result.message);
+      }
     });
   }
 
@@ -1446,7 +1679,7 @@ export function MonthlyScheduler({
   }
 
   function handleSetCompletion() {
-    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
       return;
     }
 
@@ -1479,10 +1712,10 @@ export function MonthlyScheduler({
        * appear to "turn into OFF". Saving first keeps time codes and
        * competencies in sync with the completion toggle.
        */
-      if (dirtyUpdates.length > 0) {
-        const saveResult = await saveAssignments({
+      if (activeDirtyUpdates.length > 0) {
+        const saveResult = await runTrackedAssignmentSave({
           scheduleId: activeSchedule.id,
-          updates: dirtyUpdates,
+          updates: activeDirtyUpdates,
         });
 
         setStatusMessage(saveResult.message);
@@ -1491,6 +1724,7 @@ export function MonthlyScheduler({
           return;
         }
 
+        protectLocalBaselineFromStaleSnapshots();
         setBaselineAssignments(cloneAssignments(draftAssignments));
       }
 
@@ -1509,13 +1743,13 @@ export function MonthlyScheduler({
       }
 
       const removedClaims = snapshot.overtimeClaims.filter(
-        (claim) =>
+        (claim): claim is (typeof snapshot.overtimeClaims)[number] & { scheduleId: string } =>
           claim.scheduleId === activeSchedule.id &&
           claim.date >= startDate &&
           claim.date <= endDate,
       );
       const removedClaimKeys = new Set(
-        removedClaims.map((claim) => createAssignmentKey(claim.employeeId, claim.date)),
+        removedClaims.map((claim) => createAssignmentKey(claim.scheduleId, claim.employeeId, claim.date)),
       );
 
       startTransition(() => {
@@ -1555,7 +1789,7 @@ export function MonthlyScheduler({
   }
 
   function handleAutofillSet() {
-    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
     }
 
@@ -1563,7 +1797,8 @@ export function MonthlyScheduler({
       schedule: activeSchedule,
       setDays: selectedSetDays,
       assignments: draftAssignments,
-      competencies: snapshot.competencies,
+      occupiedAssignments: effectiveAssignments,
+      competencies: activeScheduleCompetencies,
       timeCodes: snapshot.timeCodes,
     });
 
@@ -1587,7 +1822,7 @@ export function MonthlyScheduler({
   }
 
   function handleCopySet() {
-    if (!canManageSetBuilder || selectedSetDays.length === 0 || !isSelectedSetComplete) {
+    if (isScheduleLocked || !canManageSetBuilder || selectedSetDays.length === 0 || !isSelectedSetComplete) {
       return;
     }
 
@@ -1596,6 +1831,7 @@ export function MonthlyScheduler({
         employee.id,
         selectedSetDays.map((day) =>
           getSelectionForCell(
+            activeSchedule.id,
             employee.id,
             day.date,
             shiftForDate(activeSchedule, day.date),
@@ -1616,47 +1852,50 @@ export function MonthlyScheduler({
   }
 
   function handlePasteSet() {
-    if (!canEdit || !canManageSetBuilder || !copiedSetTemplate || !canPasteSet) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || !copiedSetTemplate || !canPasteSet) {
       return;
     }
 
-    startTransition(() => {
-      setDraftAssignments((current) => {
-        const nextAssignments = { ...current };
+    const pasteUpdates = activeSchedule.employees.flatMap<StoredAssignment>((employee) => {
+      const copiedSelections = copiedSetTemplate.selectionsByEmployeeId[employee.id];
 
-        for (const employee of activeSchedule.employees) {
-          const copiedSelections = copiedSetTemplate.selectionsByEmployeeId[employee.id];
+      if (!copiedSelections) {
+        return [];
+      }
 
-          if (!copiedSelections) {
-            continue;
-          }
-
-          selectedSetDays.forEach((day, index) => {
-            const copiedSelection = copiedSelections[index] ?? getDefaultSelection(shiftForDate(activeSchedule, day.date), snapshot.timeCodes);
-            const key = createAssignmentKey(employee.id, day.date);
-
-            if (!copiedSelection.competencyId && !copiedSelection.timeCodeId) {
-              delete nextAssignments[key];
-              return;
-            }
-
-            nextAssignments[key] = { ...copiedSelection };
-          });
+      return selectedSetDays.map((day, index) => {
+        if (getProjectedAssignmentForCell(employee.id, day.date)) {
+          return null;
         }
 
-        return nextAssignments;
-      });
+        const copiedSelection =
+          copiedSelections[index] ?? getDefaultSelection(shiftForDate(activeSchedule, day.date), snapshot.timeCodes);
 
-      setStatusMessage(
-        `Pasted set onto ${formatShortDate(selectedSetDays[0].date)}-${formatShortDate(
-          selectedSetDays[selectedSetDays.length - 1].date,
-        )}.`,
-      );
+        return {
+          employeeId: employee.id,
+          scheduleId: activeSchedule.id,
+          date: day.date,
+          competencyId: copiedSelection.competencyId,
+          timeCodeId: copiedSelection.timeCodeId,
+          notes: copiedSelection.notes ?? null,
+          shiftKind: shiftForDate(activeSchedule, day.date),
+        };
+      }).filter(Boolean) as StoredAssignment[];
     });
+    const successMessage = `Pasted set onto ${formatShortDate(selectedSetDays[0].date)}-${formatShortDate(
+      selectedSetDays[selectedSetDays.length - 1].date,
+    )} and saved.`;
+
+    startTransition(() => {
+      setDraftAssignments((current) => applyStoredUpdatesToAssignments(current, pasteUpdates));
+      setStatusMessage(successMessage.replace(" and saved.", "."));
+    });
+
+    saveBulkAssignmentUpdates(pasteUpdates, successMessage);
   }
 
   function handleCopyColumn() {
-    if (!canManageSetBuilder || !selectedColumnDate) {
+    if (isScheduleLocked || !canManageSetBuilder || !selectedColumnDate) {
       return;
     }
 
@@ -1664,6 +1903,7 @@ export function MonthlyScheduler({
       activeSchedule.employees.map((employee) => [
         employee.id,
         getSelectionForCell(
+          activeSchedule.id,
           employee.id,
           selectedColumnDate,
           shiftForDate(activeSchedule, selectedColumnDate),
@@ -1682,40 +1922,42 @@ export function MonthlyScheduler({
   }
 
   function handlePasteColumn() {
-    if (!canEdit || !canManageSetBuilder || !copiedColumnTemplate || !selectedColumnDate || !canPasteColumn) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || !copiedColumnTemplate || !selectedColumnDate || !canPasteColumn) {
       return;
     }
 
-    startTransition(() => {
-      setDraftAssignments((current) => {
-        const nextAssignments = { ...current };
+    const pasteUpdates = activeSchedule.employees.flatMap<StoredAssignment>((employee) => {
+      if (getProjectedAssignmentForCell(employee.id, selectedColumnDate)) {
+        return [];
+      }
 
-        for (const employee of activeSchedule.employees) {
-          const copiedSelection = copiedColumnTemplate.selectionsByEmployeeId[employee.id];
-          const nextSelection =
-            copiedSelection ??
-            getDefaultSelection(shiftForDate(activeSchedule, selectedColumnDate), snapshot.timeCodes);
-          const key = createAssignmentKey(employee.id, selectedColumnDate);
+      const copiedSelection = copiedColumnTemplate.selectionsByEmployeeId[employee.id];
+      const nextSelection =
+        copiedSelection ??
+        getDefaultSelection(shiftForDate(activeSchedule, selectedColumnDate), snapshot.timeCodes);
 
-          if (!nextSelection.competencyId && !nextSelection.timeCodeId && !nextSelection.notes) {
-            delete nextAssignments[key];
-            continue;
-          }
-
-          nextAssignments[key] = { ...nextSelection };
-        }
-
-        return nextAssignments;
-      });
-
-      setStatusMessage(
-        `Pasted column onto ${formatShortDate(selectedColumnDate)}.`,
-      );
+      return [{
+        employeeId: employee.id,
+        scheduleId: activeSchedule.id,
+        date: selectedColumnDate,
+        competencyId: nextSelection.competencyId,
+        timeCodeId: nextSelection.timeCodeId,
+        notes: nextSelection.notes ?? null,
+        shiftKind: shiftForDate(activeSchedule, selectedColumnDate),
+      }];
     });
+    const successMessage = `Pasted column onto ${formatShortDate(selectedColumnDate)} and saved.`;
+
+    startTransition(() => {
+      setDraftAssignments((current) => applyStoredUpdatesToAssignments(current, pasteUpdates));
+      setStatusMessage(successMessage.replace(" and saved.", "."));
+    });
+
+    saveBulkAssignmentUpdates(pasteUpdates, successMessage);
   }
 
   function handleClearSet() {
-    if (!canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
     }
 
@@ -1725,7 +1967,7 @@ export function MonthlyScheduler({
 
         for (const employee of activeSchedule.employees) {
           for (const day of selectedSetDays) {
-            delete nextAssignments[createAssignmentKey(employee.id, day.date)];
+            delete nextAssignments[createAssignmentKey(activeSchedule.id, employee.id, day.date)];
           }
         }
 
@@ -1779,7 +2021,9 @@ export function MonthlyScheduler({
             <select
               value={selectedScheduleId}
               onChange={(event) => {
-                setSelectedScheduleId(event.target.value);
+                const nextScheduleId = event.target.value;
+                setSelectedScheduleId(nextScheduleId);
+                replaceScheduleUrlState(currentMonth, nextScheduleId);
                 setSelectedCoverageCompetencyId(null);
               }}
             >
@@ -1821,7 +2065,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleCopyColumn}
-                  disabled={!selectedColumnDate}
+                  disabled={isScheduleLocked || !selectedColumnDate}
                 >
                   Copy column
                 </button>
@@ -1829,7 +2073,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handlePasteColumn}
-                  disabled={!canPasteColumn}
+                  disabled={isScheduleLocked || !canPasteColumn}
                 >
                   Paste column
                 </button>
@@ -1837,7 +2081,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleCopySet}
-                  disabled={selectedSetDays.length === 0 || !isSelectedSetComplete}
+                  disabled={isScheduleLocked || selectedSetDays.length === 0 || !isSelectedSetComplete}
                 >
                   Copy set
                 </button>
@@ -1845,7 +2089,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handlePasteSet}
-                  disabled={!canPasteSet}
+                  disabled={isScheduleLocked || !canPasteSet}
                 >
                   Paste set
                 </button>
@@ -1853,7 +2097,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleClearSet}
-                  disabled={selectedSetDays.length === 0 || isSelectedSetComplete}
+                  disabled={isScheduleLocked || selectedSetDays.length === 0 || isSelectedSetComplete}
                 >
                   Clear set
                 </button>
@@ -1862,7 +2106,10 @@ export function MonthlyScheduler({
                   className="ghost-button"
                   onClick={handleAutofillSet}
                   disabled={
-                    selectedSetDays.length === 0 || isSelectedSetComplete || fullyBlankSetWorkers.length === 0
+                    isScheduleLocked ||
+                    selectedSetDays.length === 0 ||
+                    isSelectedSetComplete ||
+                    fullyBlankSetWorkers.length === 0
                   }
                 >
                   Auto-fill set
@@ -1871,7 +2118,7 @@ export function MonthlyScheduler({
                   type="button"
                   className={`ghost-button ${isSelectedSetComplete ? "ghost-button--active" : ""}`}
                   onClick={handleSetCompletion}
-                  disabled={selectedSetDays.length === 0 || isUpdatingSetCompletion}
+                  disabled={isScheduleLocked || selectedSetDays.length === 0}
                 >
                   {isUpdatingSetCompletion
                     ? isSelectedSetComplete
@@ -1890,7 +2137,7 @@ export function MonthlyScheduler({
             </div>
 
             <div className="set-builder-pills">
-              {snapshot.competencies.map((competency) => {
+              {activeScheduleCompetencies.map((competency) => {
                 const coverage = competencyCoverage[competency.id];
 
                 return (
@@ -1910,7 +2157,7 @@ export function MonthlyScheduler({
                       selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
                     } ${selectedCoverageCompetencyId === competency.id ? "set-builder-pill--active" : ""}`}
                     title={`${competency.label} · ${coverage?.filledCells ?? 0}/${coverage?.requiredCells ?? 0} cells filled in this set`}
-                    disabled={selectedSetDays.length === 0}
+                    disabled={isScheduleLocked || selectedSetDays.length === 0}
                   >
                     <strong>{getCompactCode(competency.code)}</strong>
                     <span>{formatStaffCount(coverage?.assignedPeople ?? 0)}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
@@ -1922,94 +2169,147 @@ export function MonthlyScheduler({
         </section>
       ) : null}
 
-      <section className="schedule-wrap" aria-label="Monthly schedule grid">
-        <div className="schedule-grid" style={{ gridTemplateColumns: gridColumns }}>
-          <div className="employee-header sticky-column">
-            <span>{formatMonthLabel(currentMonth)}</span>
-            <strong>Employees</strong>
-          </div>
-
-          {monthDays.map((day) => {
-            const isSetDay = selectedSetDays.some((setDay) => setDay.date === day.date);
-            const isMissingDay = highlightedMissingDates.has(day.date);
-            const isCompletedDay = completedSetDates.has(day.date);
-
-            return (
-              <div
-                key={day.date}
-                className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
-                  isCompletedDay ? "day-header--completed" : ""
-                } ${
-                  selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
-                } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
-                title={`${day.dayName} ${day.date}`}
-                onClick={
-                  canManageSetBuilder
-                    ? () => {
-                        setSelectedSetAnchorDate(day.date);
-                        setSelectedCoverageCompetencyId(null);
-                      }
-                    : undefined
-                }
-              >
-                <span>{day.dayName.slice(0, 1)}</span>
-                <strong>{day.dayNumber}</strong>
-              </div>
-            );
-          })}
-
-          {visibleEmployees.map((employee) => (
-            <EmployeeRow
-              key={employee.rowId}
-              employee={employee}
-              isPinned={(pinnedEmployeesBySchedule[activeSchedule.id] ?? []).includes(employee.sourceEmployeeId)}
-              schedule={activeSchedule}
-              monthDays={monthDays}
-              assignments={draftAssignments}
-              competencyMap={competencyMap}
-              timeCodeMap={timeCodeMap}
-              timeCodes={snapshot.timeCodes}
-              completedSetDates={completedSetDates}
-              selectedCell={selectedCell}
-              dragRange={dragRange}
-              highlightedMissingDates={highlightedMissingDates}
-              selectedCoverageCompetencyId={selectedCoverageCompetencyId}
-              selectedSetDays={selectedSetDays}
-              canEdit={canEdit}
-              onPinToggle={handlePinToggle}
-              onCellPointerDown={handleCellPointerDown}
-              onDragHover={handleDragHover}
-              onCellClick={(cell) => {
-                if (!canEdit) {
-                  return;
-                }
-
-                setSelectedCell(cell);
-                setEditorCell(cell);
-              }}
-            />
-          ))}
-
-          {visibleEmployees.length === 0 ? (
-            <div
-              className="empty-state sticky-column"
-              style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
-            >
-              <strong>No employees matched that search.</strong>
-              <span>Try a different name, role, or clear the filter.</span>
-            </div>
-          ) : null}
+      <div className="schedule-scroll-shell">
+        <div
+          ref={scheduleTopScrollRef}
+          className="schedule-wrap schedule-wrap--top-scroll"
+          aria-hidden="true"
+        >
+          <div className="schedule-wrap__scroll-proxy" style={{ width: scheduleScrollProxyWidth }} />
         </div>
-      </section>
 
-      {canEdit ? (
-        <AssignmentModal
-          selectedEmployee={editorEmployee}
+        <section
+          ref={scheduleBodyScrollRef}
+          className={`schedule-wrap ${isScheduleLocked ? "schedule-wrap--locked" : ""}`}
+          aria-label="Monthly schedule grid"
+          aria-busy={isScheduleLocked}
+        >
+          <div ref={scheduleGridRef} className="schedule-grid">
+            <div className="schedule-grid__header" style={{ gridTemplateColumns: gridColumns }}>
+              <div className="employee-header sticky-column">
+                <span>{formatMonthLabel(currentMonth)}</span>
+                <strong>Employees</strong>
+              </div>
+
+              {monthDays.map((day) => {
+                const isSetDay = selectedSetDays.some((setDay) => setDay.date === day.date);
+                const isMissingDay = highlightedMissingDates.has(day.date);
+                const isCompletedDay = completedSetDates.has(day.date);
+
+                return (
+                  <div
+                    key={day.date}
+                    className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
+                      isCompletedDay ? "day-header--completed" : ""
+                    } ${
+                      selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
+                    } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
+                    title={`${day.dayName} ${day.date}`}
+                    onClick={
+                      canManageSetBuilder && !isScheduleLocked
+                        ? () => {
+                            setSelectedSetAnchorDate(day.date);
+                            setSelectedCoverageCompetencyId(null);
+                          }
+                        : undefined
+                    }
+                  >
+                    <span>{day.dayName.slice(0, 1)}</span>
+                    <strong>{day.dayNumber}</strong>
+                  </div>
+                );
+              })}
+            </div>
+
+            {visibleEmployees.length > 0 ? (
+              <div
+                className="schedule-grid__rows"
+                style={{
+                  height: rowVirtualizer.getTotalSize(),
+                }}
+              >
+                {virtualRows.map((virtualRow) => {
+                  const employee = visibleEmployees[virtualRow.index];
+
+                  if (!employee) {
+                    return null;
+                  }
+
+                  return (
+                    <EmployeeRow
+                      key={employee.rowId}
+                      employee={employee}
+                      isPinned={(pinnedEmployeesBySchedule[activeSchedule.id] ?? []).includes(employee.sourceEmployeeId)}
+                      schedule={activeSchedule}
+                      monthDays={monthDays}
+                      assignments={effectiveAssignments}
+                      projectedAssignmentIndex={projectedAssignmentIndex}
+                      competencyMap={competencyMap}
+                      timeCodeMap={timeCodeMap}
+                      timeCodes={snapshot.timeCodes}
+                      employeeMap={employeeMap}
+                      completedSetDates={completedSetDates}
+                      selectedCell={selectedCell}
+                      dragRange={dragRange}
+                      highlightedMissingDates={highlightedMissingDates}
+                      selectedCoverageCompetencyId={selectedCoverageCompetencyId}
+                      selectedSetDays={selectedSetDays}
+                      canEdit={canEdit && !isScheduleLocked}
+                      onPinToggle={handlePinToggle}
+                      onCellPointerDown={handleCellPointerDown}
+                      onDragHover={handleDragHover}
+                      onCellClick={(cell) => {
+                        if (!canEdit || isScheduleLocked) {
+                          return;
+                        }
+
+                        const projectedAssignment = getProjectedAssignmentForCell(cell.employeeId, cell.date);
+
+                        if (projectedAssignment) {
+                          setStatusMessage(
+                            `This cell is managed by ${projectedAssignment.subScheduleName ?? "a sub-schedule"} and must be changed from Sub-Schedules.`,
+                          );
+                          return;
+                        }
+
+                        setSelectedCell(cell);
+                        setEditorCell(cell);
+                      }}
+                      rowStyle={{
+                        gridTemplateColumns: gridColumns,
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start}px)`,
+                        height: `${virtualRow.size}px`,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                className="empty-state sticky-column"
+                style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
+              >
+                <strong>No employees matched that search.</strong>
+                <span>Try a different name, role, or clear the filter.</span>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {canEdit && !isScheduleLocked ? (
+        <ScheduleAssignmentModal
+          selectedEmployeeName={editorEmployee?.name ?? null}
           selectedDate={editorCell?.date ?? null}
           shiftKind={editorShiftKind}
           selection={editorSelection}
           competencies={editorEmployeeCompetencies}
-          timeCodes={snapshot.timeCodes}
+          timeCodes={manualEntryTimeCodes}
+          clearDisabledReason={editorClearDisabledReason}
           onApply={(selection) => {
             if (!editorCell) {
               return;
@@ -2042,9 +2342,11 @@ function EmployeeRow({
   schedule,
   monthDays,
   assignments,
+  projectedAssignmentIndex,
   competencyMap,
   timeCodeMap,
   timeCodes,
+  employeeMap,
   completedSetDates,
   selectedCell,
   dragRange,
@@ -2056,15 +2358,18 @@ function EmployeeRow({
   onCellPointerDown,
   onDragHover,
   onCellClick,
+  rowStyle,
 }: {
   employee: DisplayEmployee;
   isPinned: boolean;
   schedule: Schedule;
   monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
   assignments: Record<string, AssignmentSelection>;
+  projectedAssignmentIndex: Record<string, StoredAssignment>;
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
   timeCodes: TimeCode[];
+  employeeMap: Record<string, Employee>;
   completedSetDates: Set<string>;
   selectedCell: SelectedCell | null;
   dragRange: DragRange | null;
@@ -2081,20 +2386,20 @@ function EmployeeRow({
   ) => void;
   onDragHover: (employeeId: string, dayIndex: number) => void;
   onCellClick: (cell: SelectedCell) => void;
+  rowStyle?: CSSProperties;
 }) {
   const setDates = new Set(selectedSetDays.map((day) => day.date));
   const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
   const mutualDateSet = employee.mutualDates ? new Set(employee.mutualDates) : null;
 
   return (
-    <>
+    <div className="schedule-grid-row" style={rowStyle}>
       <div className="employee-cell sticky-column">
         <div className="employee-cell__main">
           <strong title={employee.name}>
             <span className="employee-name-full">{employee.name}</span>
             <span className="employee-name-compact">{getCompactEmployeeName(employee.name)}</span>
           </strong>
-          <span>{employee.role}</span>
         </div>
         <button
           type="button"
@@ -2114,9 +2419,13 @@ function EmployeeRow({
           (!overtimeDateSet || overtimeDateSet.has(day.date)) &&
           (!mutualDateSet || mutualDateSet.has(day.date));
         const isLockedCell = completedSetDates.has(day.date);
+        const projectedAssignment =
+          projectedAssignmentIndex[createAssignmentKey(schedule.id, employee.sourceEmployeeId, day.date)] ?? null;
+        const isProjectedCell = Boolean(projectedAssignment);
         const shiftKind = isBorrowedCellVisible ? shiftForDate(schedule, day.date) : "OFF";
         const selection = isBorrowedCellVisible
           ? getSelectionForCell(
+              schedule.id,
               employee.sourceEmployeeId,
               day.date,
               shiftKind,
@@ -2155,6 +2464,13 @@ function EmployeeRow({
           setDates.has(day.date) &&
           highlightedMissingDates.has(day.date) &&
           activeCompetency?.id === selectedCoverageCompetencyId;
+        const cellTitle = isProjectedCell
+          ? `${projectedAssignment?.subScheduleName ?? "Sub-schedule"} manages this cell`
+          : getScheduleCellComment({
+              notes: selection.notes,
+              employeeName: employee.name,
+              employeeMap,
+            });
 
         return (
           <div
@@ -2169,9 +2485,9 @@ function EmployeeRow({
               isInDragRange ? "shift-cell--range" : ""
             } ${highlightedMissingDates.has(day.date) && setDates.has(day.date) ? "shift-cell--missing-column" : ""} ${
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
-            } ${hasCellNote ? "shift-cell--has-note" : ""}`}
+            } ${hasCellNote ? "shift-cell--has-note" : ""} ${isProjectedCell ? "shift-cell--projected" : ""}`}
             onPointerDown={(event) => {
-              if (event.button !== 0 || !canEdit || !isBorrowedCellVisible || isLockedCell) {
+              if (event.button !== 0 || !canEdit || !isBorrowedCellVisible || isLockedCell || isProjectedCell) {
                 return;
               }
 
@@ -2197,7 +2513,7 @@ function EmployeeRow({
               }}
               disabled={!canEdit || !isBorrowedCellVisible || isLockedCell}
               aria-label={`${employee.name} ${day.date} assignment`}
-              title={selection.notes ?? undefined}
+              title={cellTitle}
             >
               {isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""}
               {hasCellNote ? <span className="shift-cell__note-indicator" aria-hidden="true" /> : null}
@@ -2205,6 +2521,6 @@ function EmployeeRow({
           </div>
         );
       })}
-    </>
+    </div>
   );
 }

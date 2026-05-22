@@ -1,15 +1,11 @@
-import type { SchedulerSnapshot } from "@/lib/types";
+import type { ProfileSnapshot } from "@/lib/types";
 
 export function ProfilePanel({
   snapshot,
-  employeeId,
 }: {
-  snapshot: SchedulerSnapshot;
-  employeeId: string | null;
+  snapshot: ProfileSnapshot;
 }) {
-  const employee = snapshot.schedules.flatMap((schedule) => schedule.employees).find((entry) => entry.id === employeeId);
-  const schedule = employee ? snapshot.schedules.find((entry) => entry.id === employee.scheduleId) : null;
-  const competencies = snapshot.competencies.filter((competency) => employee?.competencyIds.includes(competency.id));
+  const { employee, schedule, competencies } = snapshot;
 
   if (!employee || !schedule) {
     return (

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 
 import {
   acceptMutualApplication,
+  approveMutualPosting,
   applyToMutualPosting,
   cancelAcceptedMutual,
   createMutualPosting,
@@ -19,6 +20,29 @@ import {
   shiftForDate,
 } from "@/lib/scheduling";
 import type { AppSession, MutualShiftPosting, MutualsSnapshot, ShiftKind } from "@/lib/types";
+
+function getCurrentUtcMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function getCurrentUtcYearMonthOptions() {
+  const currentYear = Number.parseInt(new Date().toISOString().slice(0, 4), 10);
+
+  return Array.from({ length: 12 }, (_, index) => {
+    const month = `${index + 1}`.padStart(2, "0");
+    return `${currentYear}-${month}`;
+  });
+}
+
+function getCurrentUtcFutureYearMonthOptions() {
+  const currentMonth = getCurrentUtcMonthKey();
+
+  return getCurrentUtcYearMonthOptions().filter((month) => month >= currentMonth);
+}
+
+function formatYearLabel(monthKey: string) {
+  return monthKey.slice(0, 4);
+}
 
 /** Formats a mutual date chip using the short month/day style used throughout the app. */
 function formatShortDate(isoDate: string) {
@@ -37,15 +61,33 @@ function getShiftBadgeLabel(shiftKind: ShiftKind) {
 /** Human-friendly label used on mutual posting and application status pills. */
 function getStatusLabel(status: MutualShiftPosting["status"]) {
   switch (status) {
+    case "pending_leader_approval":
+      return "Pending approval";
     case "accepted":
-      return "Accepted";
+      return "Live";
     case "withdrawn":
       return "Withdrawn";
     case "cancelled":
       return "Cancelled";
+    case "rejected":
+      return "Rejected";
     default:
       return "Open";
   }
+}
+
+function getLeaderApprovalLabel({
+  scheduleName,
+  approvedAt,
+  approvedByName,
+}: {
+  scheduleName: string;
+  approvedAt: string | null;
+  approvedByName: string | null;
+}) {
+  return approvedAt
+    ? `Shift ${scheduleName} approved${approvedByName ? ` by ${approvedByName}` : ""}`
+    : `Shift ${scheduleName} pending`;
 }
 
 /** Reusable date grid used for both posting and applying to mutual swaps. */
@@ -125,16 +167,16 @@ function MutualApplyModal({
 
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[selectedEmployeeId];
-  const [offerMonth, setOfferMonth] = useState(snapshot.month);
+  const monthOptions = useMemo(
+    () => getCurrentUtcYearMonthOptions(),
+    [],
+  );
+  const [offerMonth, setOfferMonth] = useState(monthOptions[0] ?? getCurrentUtcMonthKey());
   const schedule = employee ? snapshot.schedules.find((entry) => entry.id === employee.scheduleId) ?? null : null;
   const postingOwner = employeeMap[posting.ownerEmployeeId];
   const postingOwnerSchedule = postingOwner
     ? snapshot.schedules.find((entry) => entry.id === postingOwner.scheduleId) ?? null
     : null;
-  const monthOptions = useMemo(
-    () => Array.from({ length: 6 }, (_, index) => shiftMonthKey(snapshot.month, index)),
-    [snapshot.month],
-  );
   const availableDates =
     employee && schedule && postingOwnerSchedule
       ? getMonthDays(offerMonth)
@@ -145,6 +187,10 @@ function MutualApplyModal({
           )
           .map((day) => ({ date: day.date, shiftKind: shiftForDate(schedule, day.date) }))
       : [];
+
+  useEffect(() => {
+    setOfferMonth((current) => (monthOptions.includes(current) ? current : monthOptions[0] ?? getCurrentUtcMonthKey()));
+  }, [monthOptions]);
 
   return createPortal(
     <div className="assignment-modal-backdrop" onClick={onClose}>
@@ -172,7 +218,7 @@ function MutualApplyModal({
             <select value={selectedEmployeeId} onChange={(event) => onEmployeeChange(event.target.value)}>
               {snapshot.schedules
                 .flatMap((schedule) => schedule.employees)
-                .filter((entry) => entry.id !== posting.ownerEmployeeId)
+                .filter((entry) => entry.id !== posting.ownerEmployeeId && entry.scheduleId !== posting.ownerScheduleId)
                 .sort((left, right) => left.name.localeCompare(right.name))
                 .map((entry) => (
                   <option key={entry.id} value={entry.id}>
@@ -213,6 +259,114 @@ function MutualApplyModal({
   );
 }
 
+function MutualPostModal({
+  viewer,
+  allEmployees,
+  selectedPostingEmployee,
+  selectedPostingEmployeeId,
+  postingMonth,
+  postingMonthOptions,
+  postingShiftDates,
+  postingDates,
+  canPostForOthers,
+  onEmployeeChange,
+  onMonthChange,
+  onToggleDate,
+  onClose,
+  onSubmit,
+  isSubmitting,
+}: {
+  viewer: AppSession;
+  allEmployees: Array<{ id: string; name: string }>;
+  selectedPostingEmployee: { name: string; scheduleId: string } | null;
+  selectedPostingEmployeeId: string;
+  postingMonth: string;
+  postingMonthOptions: string[];
+  postingShiftDates: Array<{ date: string; shiftKind: ShiftKind }>;
+  postingDates: string[];
+  canPostForOthers: boolean;
+  onEmployeeChange: (employeeId: string) => void;
+  onMonthChange: (month: string) => void;
+  onToggleDate: (date: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  isSubmitting: boolean;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Create Post Mutual</h2>
+            <p className="assignment-modal__context">
+              Choose the worker and shifts you want to place on the mutual board.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {viewer.role === "worker" ? (
+          <div className="field field--static">
+            <span>Post As</span>
+            <strong>{selectedPostingEmployee?.name ?? viewer.displayName}</strong>
+          </div>
+        ) : canPostForOthers ? (
+          <label className="field">
+            <span>Post As</span>
+            <select
+              value={selectedPostingEmployeeId}
+              onChange={(event) => onEmployeeChange(event.target.value)}
+            >
+              {allEmployees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="field field--static">
+            <span>Post As</span>
+            <strong>{selectedPostingEmployee?.name ?? viewer.displayName}</strong>
+          </div>
+        )}
+
+        <label className="field">
+          <span>Post Month</span>
+          <select value={postingMonth} onChange={(event) => onMonthChange(event.target.value)}>
+            {postingMonthOptions.map((month) => (
+              <option key={month} value={month}>
+                {formatMonthLabel(month)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <MutualDatePicker
+          title="Shifts to swap"
+          dates={postingShiftDates}
+          selectedDates={postingDates}
+          onToggle={onToggleDate}
+          helper={selectedPostingEmployee ? `${postingDates.length} selected` : undefined}
+        />
+
+        <div className="metrics-transfer-actions">
+          <button type="button" className="primary-button" onClick={onSubmit} disabled={isSubmitting}>
+            {isSubmitting ? "Posting..." : "Post mutual"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 /**
  * Main mutual-shift workspace.
  *
@@ -229,6 +383,7 @@ export function MutualsPanel({
   snapshot: MutualsSnapshot;
   viewer: AppSession;
 }) {
+  const canPostForOthers = viewer.role === "admin";
   /**
    * The server provides the initial month snapshot, then the panel owns later
    * month switches so the postings board can refresh without remounting the
@@ -237,6 +392,11 @@ export function MutualsPanel({
   const [viewSnapshot, setViewSnapshot] = useState(snapshot);
   const [viewMonth, setViewMonth] = useState(snapshot.month);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
+  const viewerEmployee = useMemo(
+    () => (viewer.employeeId ? employeeMap[viewer.employeeId] ?? null : null),
+    [employeeMap, viewer.employeeId],
+  );
+  const effectiveViewerScheduleId = viewerEmployee?.scheduleId ?? viewer.scheduleId ?? null;
   const allEmployees = useMemo(
     () =>
       snapshot.schedules
@@ -246,10 +406,15 @@ export function MutualsPanel({
   );
   const [statusMessage, setStatusMessage] = useState("");
   const [selectedPostingEmployeeId, setSelectedPostingEmployeeId] = useState(
-    viewer.role === "worker" ? viewer.employeeId ?? "" : allEmployees[0]?.id ?? "",
+    canPostForOthers ? allEmployees[0]?.id ?? "" : viewer.employeeId ?? "",
   );
-  const [postingMonth, setPostingMonth] = useState(snapshot.month);
+  const postingMonthOptions = useMemo(
+    () => getCurrentUtcYearMonthOptions(),
+    [],
+  );
+  const [postingMonth, setPostingMonth] = useState(postingMonthOptions[0] ?? getCurrentUtcMonthKey());
   const [postingDates, setPostingDates] = useState<string[]>([]);
+  const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [applyPostingId, setApplyPostingId] = useState<string | null>(null);
   const [applicationEmployeeId, setApplicationEmployeeId] = useState(
     viewer.role === "worker" ? viewer.employeeId ?? "" : allEmployees[0]?.id ?? "",
@@ -262,10 +427,6 @@ export function MutualsPanel({
   const selectedPostingSchedule = selectedPostingEmployee
     ? snapshot.schedules.find((entry) => entry.id === selectedPostingEmployee.scheduleId) ?? null
     : null;
-  const postingMonthOptions = useMemo(
-    () => Array.from({ length: 6 }, (_, index) => shiftMonthKey(snapshot.month, index)),
-    [snapshot.month],
-  );
   const postingShiftDates =
     selectedPostingEmployee && selectedPostingSchedule
       ? getMonthDays(postingMonth)
@@ -275,17 +436,40 @@ export function MutualsPanel({
   const applyPosting = applyPostingId ? viewSnapshot.postings.find((posting) => posting.id === applyPostingId) ?? null : null;
 
   const openPostings = viewSnapshot.postings.filter((posting) => posting.status === "open");
+  const pendingApprovalPostings = viewSnapshot.postings.filter((posting) => posting.status === "pending_leader_approval");
   const acceptedPostings = viewSnapshot.postings.filter((posting) => posting.status === "accepted");
-  const closedPostings = viewSnapshot.postings.filter((posting) => posting.status !== "open" && posting.status !== "accepted");
+  const closedPostings = viewSnapshot.postings.filter(
+    (posting) => !["open", "pending_leader_approval", "accepted"].includes(posting.status),
+  );
 
   useEffect(() => {
     setViewSnapshot(snapshot);
     setViewMonth(snapshot.month);
   }, [snapshot]);
 
+  useEffect(() => {
+    setPostingMonth((current) =>
+      postingMonthOptions.includes(current) ? current : postingMonthOptions[0] ?? getCurrentUtcMonthKey(),
+    );
+  }, [postingMonthOptions]);
+
+  useEffect(() => {
+    setIsPostModalOpen(false);
+  }, [viewMonth]);
+
+  function syncMonthInUrl(nextMonth: string) {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("month", nextMonth);
+    window.history.replaceState(null, "", nextUrl.toString());
+  }
+
   function loadMutualsMonth(nextMonth: string) {
     startMonthTransition(async () => {
-      setStatusMessage(`Loading ${formatMonthLabel(nextMonth)}`);
+      setStatusMessage(`Loading ${formatYearLabel(nextMonth)} mutuals`);
 
       try {
         const response = await fetch(`/api/mutuals?month=${nextMonth}`, {
@@ -300,12 +484,13 @@ export function MutualsPanel({
 
         setViewSnapshot(nextSnapshot);
         setViewMonth(nextSnapshot.month);
+        syncMonthInUrl(nextSnapshot.month);
         setApplyPostingId((current) =>
           current && nextSnapshot.postings.some((posting) => posting.id === current) ? current : null,
         );
-        setStatusMessage(`Loaded ${formatMonthLabel(nextSnapshot.month)}`);
+        setStatusMessage(`Loaded ${formatYearLabel(nextSnapshot.month)} mutuals`);
       } catch {
-        setStatusMessage("Could not load that month. Staying on your current mutuals view.");
+        setStatusMessage("Could not load that year. Staying on your current mutuals view.");
       }
     });
   }
@@ -327,11 +512,15 @@ export function MutualsPanel({
     setApplicationDates([]);
 
     if (postingId) {
-      const posting = snapshot.postings.find((entry) => entry.id === postingId);
+      const posting = viewSnapshot.postings.find((entry) => entry.id === postingId);
       const defaultEmployee =
         viewer.role === "worker"
           ? viewer.employeeId ?? ""
-          : allEmployees.find((employee) => employee.id !== posting?.ownerEmployeeId)?.id ?? "";
+          : allEmployees.find(
+              (employee) =>
+                employee.id !== posting?.ownerEmployeeId &&
+                employee.scheduleId !== posting?.ownerScheduleId,
+            )?.id ?? "";
       setApplicationEmployeeId(defaultEmployee);
     }
   }
@@ -390,10 +579,42 @@ export function MutualsPanel({
     });
   }
 
+  function confirmAction(message: string, action: () => Promise<{ ok: boolean; message: string }>) {
+    if (typeof window !== "undefined" && !window.confirm(message)) {
+      return;
+    }
+
+    runAction(action);
+  }
+
   return (
     <section className="panel-frame mutuals-page">
-      <div className="panel-heading panel-heading--simple">
+      <div className="panel-heading panel-heading--simple mutuals-topbar">
         <h1 className="panel-title">Mutuals</h1>
+        <div className="field field--static mutuals-topbar__year">
+          <span>Year</span>
+          <div className="mutuals-month-nav">
+            <strong>{formatYearLabel(viewMonth)}</strong>
+            <div className="mutuals-month-nav__buttons">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, -12))}
+                disabled={isMonthLoading}
+              >
+                Prev year
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, 12))}
+                disabled={isMonthLoading}
+              >
+                Next year
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {statusMessage ? (
@@ -406,92 +627,18 @@ export function MutualsPanel({
 
       <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
-          <h2 className="metrics-section__title">Post Mutual Shifts</h2>
-        </div>
-
-        <div className="metrics-card">
-          {viewer.role === "worker" ? (
-            <div className="field field--static">
-              <span>Post As</span>
-              <strong>{selectedPostingEmployee?.name ?? viewer.displayName}</strong>
-            </div>
-          ) : (
-            <label className="field">
-              <span>Post As</span>
-              <select
-                value={selectedPostingEmployeeId}
-                onChange={(event) => {
-                  setSelectedPostingEmployeeId(event.target.value);
-                  setPostingDates([]);
-                }}
-              >
-                {allEmployees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          <label className="field">
-            <span>Post Month</span>
-            <select value={postingMonth} onChange={(event) => setPostingMonth(event.target.value)}>
-              {postingMonthOptions.map((month) => (
-                <option key={month} value={month}>
-                  {formatMonthLabel(month)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <MutualDatePicker
-            title="Shifts to swap"
-            dates={postingShiftDates}
-            selectedDates={postingDates}
-            onToggle={togglePostingDate}
-            helper={
-              selectedPostingSchedule
-                ? `${postingDates.length} selected across months · posting from Shift ${selectedPostingSchedule.name}`
-                : undefined
-            }
-          />
-
-          <div className="metrics-transfer-actions">
-            <button type="button" className="primary-button" onClick={handleCreatePosting} disabled={isSubmitting}>
-              {isSubmitting ? "Posting..." : "Post mutual"}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="metrics-section mutuals-section">
-        <div className="metrics-section__header">
           <h2 className="metrics-section__title">Open Mutuals</h2>
-          <div className="field field--static">
-            <span>Month</span>
-            <div className="mutuals-month-nav">
-              <strong>{formatMonthLabel(viewMonth)}</strong>
-              <div className="mutuals-month-nav__buttons">
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, -1))}
-                  disabled={isMonthLoading}
-                >
-                  Prev month
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, 1))}
-                  disabled={isMonthLoading}
-                >
-                  Next month
-                </button>
-              </div>
-            </div>
-          </div>
+        </div>
+
+        <div className="mutuals-create-action">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => setIsPostModalOpen(true)}
+            disabled={isSubmitting}
+          >
+            Create Mutual Posting
+          </button>
         </div>
 
         <div className="metrics-team-list">
@@ -499,7 +646,9 @@ export function MutualsPanel({
             openPostings.map((posting) => {
               const canCancelPosting =
                 viewer.role !== "worker" || viewer.employeeId === posting.ownerEmployeeId;
-              const canApplyToPosting = viewer.employeeId !== posting.ownerEmployeeId;
+              const canApplyToPosting =
+                viewer.employeeId !== posting.ownerEmployeeId &&
+                (viewer.role !== "worker" || viewerEmployee?.scheduleId !== posting.ownerScheduleId);
 
               return (
                 <article key={posting.id} className="metrics-card mutual-card">
@@ -524,7 +673,12 @@ export function MutualsPanel({
                       <button
                         type="button"
                         className="ghost-button"
-                        onClick={() => runAction(() => withdrawMutualPosting({ postingId: posting.id }))}
+                        onClick={() =>
+                          confirmAction(
+                            `Cancel this open mutual for ${posting.ownerEmployeeName}?`,
+                            () => withdrawMutualPosting({ postingId: posting.id }),
+                          )
+                        }
                         disabled={isSubmitting}
                       >
                         Cancel mutual
@@ -619,6 +773,133 @@ export function MutualsPanel({
 
       <section className="metrics-section mutuals-section">
         <div className="metrics-section__header">
+          <h2 className="metrics-section__title">Pending Leader Approval</h2>
+        </div>
+
+        <div className="metrics-team-list">
+          {pendingApprovalPostings.length > 0 ? (
+            pendingApprovalPostings.map((posting) => {
+              const acceptedApplication = posting.applications.find((application) => application.id === posting.acceptedApplicationId);
+              const canApproveOwner =
+                Boolean(acceptedApplication) &&
+                !posting.ownerLeaderApprovedAt &&
+                (viewer.role === "admin" ||
+                  (viewer.role === "leader" && effectiveViewerScheduleId === posting.ownerScheduleId));
+              const canApproveApplicant =
+                Boolean(acceptedApplication) &&
+                !posting.applicantLeaderApprovedAt &&
+                (viewer.role === "admin" ||
+                  (viewer.role === "leader" && effectiveViewerScheduleId === acceptedApplication?.applicantScheduleId));
+
+              return (
+                <article key={posting.id} className="metrics-card mutual-card">
+                  <div className="metrics-card__header">
+                    <div>
+                      <p className="metrics-card__eyebrow">Shift {posting.ownerScheduleName}</p>
+                      <h3 className="metrics-card__title">
+                        {posting.ownerEmployeeName}
+                        {acceptedApplication ? ` ↔ ${acceptedApplication.applicantEmployeeName}` : ""}
+                      </h3>
+                    </div>
+                    <span className="legend-pill legend-pill--amber">Pending approval</span>
+                  </div>
+
+                  <div className="mutual-accepted-grid">
+                    <div>
+                      <strong>{posting.ownerEmployeeName}</strong>
+                      <div className="mutual-date-summary">
+                        {posting.dates.map((date, index) => (
+                          <span key={date} className="mutual-date-chip">
+                            {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {acceptedApplication ? (
+                      <div>
+                        <strong>{acceptedApplication.applicantEmployeeName}</strong>
+                        <div className="mutual-date-summary">
+                          {acceptedApplication.dates.map((date, index) => (
+                            <span key={date} className="mutual-date-chip">
+                              {formatShortDate(date)} · {getShiftBadgeLabel(acceptedApplication.shiftKinds[index] ?? "OFF")}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mutual-date-summary">
+                    <span className="legend-pill legend-pill--slate">
+                      {getLeaderApprovalLabel({
+                        scheduleName: posting.ownerScheduleName,
+                        approvedAt: posting.ownerLeaderApprovedAt,
+                        approvedByName: posting.ownerLeaderApprovedByName,
+                      })}
+                    </span>
+                    {acceptedApplication ? (
+                      <span className="legend-pill legend-pill--slate">
+                        {getLeaderApprovalLabel({
+                          scheduleName: acceptedApplication.applicantScheduleName,
+                          approvedAt: posting.applicantLeaderApprovedAt,
+                          approvedByName: posting.applicantLeaderApprovedByName,
+                        })}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {canApproveOwner || canApproveApplicant ? (
+                    <div className="mutual-card__actions">
+                      {canApproveOwner ? (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() =>
+                            runAction(() =>
+                              approveMutualPosting({
+                                postingId: posting.id,
+                                side: "owner",
+                              }),
+                            )
+                          }
+                          disabled={isSubmitting}
+                        >
+                          Approve {posting.ownerScheduleName}
+                        </button>
+                      ) : null}
+                      {canApproveApplicant && acceptedApplication ? (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() =>
+                            runAction(() =>
+                              approveMutualPosting({
+                                postingId: posting.id,
+                                side: "applicant",
+                              }),
+                            )
+                          }
+                          disabled={isSubmitting}
+                        >
+                          Approve {acceptedApplication.applicantScheduleName}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })
+          ) : (
+            <div className="empty-state">
+              <strong>No mutuals waiting on leaders.</strong>
+              <span>Employee-accepted swaps will appear here until both shift leaders approve them.</span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="metrics-section mutuals-section">
+        <div className="metrics-section__header">
           <h2 className="metrics-section__title">Accepted Mutuals</h2>
         </div>
 
@@ -637,7 +918,7 @@ export function MutualsPanel({
                         {acceptedApplication ? ` ↔ ${acceptedApplication.applicantEmployeeName}` : ""}
                       </h3>
                     </div>
-                    <span className="legend-pill legend-pill--teal">Accepted</span>
+                    <span className="legend-pill legend-pill--teal">Live</span>
                   </div>
 
                   <div className="mutual-accepted-grid">
@@ -670,7 +951,12 @@ export function MutualsPanel({
                       <button
                         type="button"
                         className="ghost-button"
-                        onClick={() => runAction(() => cancelAcceptedMutual({ postingId: posting.id }))}
+                        onClick={() =>
+                          confirmAction(
+                            `Cancel this accepted mutual for ${posting.ownerEmployeeName}? This will restore the original schedule cells.`,
+                            () => cancelAcceptedMutual({ postingId: posting.id }),
+                          )
+                        }
                         disabled={isSubmitting}
                       >
                         Cancel mutual
@@ -683,7 +969,7 @@ export function MutualsPanel({
           ) : (
             <div className="empty-state">
               <strong>No accepted mutuals.</strong>
-              <span>Accepted swaps will appear here once the original worker approves an offer.</span>
+              <span>Live swaps will appear here after both shift leaders approve them.</span>
             </div>
           )}
         </div>
@@ -738,6 +1024,29 @@ export function MutualsPanel({
           onToggleDate={toggleApplicationDate}
           onClose={() => resetApplication(null)}
           onSubmit={handleApply}
+          isSubmitting={isSubmitting}
+        />
+      ) : null}
+
+      {isPostModalOpen ? (
+        <MutualPostModal
+          viewer={viewer}
+          allEmployees={allEmployees}
+          selectedPostingEmployee={selectedPostingEmployee}
+          selectedPostingEmployeeId={selectedPostingEmployeeId}
+          postingMonth={postingMonth}
+          postingMonthOptions={postingMonthOptions}
+          postingShiftDates={postingShiftDates}
+          postingDates={postingDates}
+          canPostForOthers={canPostForOthers}
+          onEmployeeChange={(employeeId) => {
+            setSelectedPostingEmployeeId(employeeId);
+            setPostingDates([]);
+          }}
+          onMonthChange={setPostingMonth}
+          onToggleDate={togglePostingDate}
+          onClose={() => setIsPostModalOpen(false)}
+          onSubmit={handleCreatePosting}
           isSubmitting={isSubmitting}
         />
       ) : null}

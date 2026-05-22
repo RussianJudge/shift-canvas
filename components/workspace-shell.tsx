@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { setAdminViewingScope, signOut } from "@/app/auth-actions";
 import { BrandLockup } from "@/components/brand-lockup";
@@ -10,8 +10,93 @@ import type { AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
+const PREFETCH_DELAY_MS = 200;
+const PREFETCHABLE_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics"]);
+const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
+const prefetchedWorkspaceRoutes = new Set<string>();
 
-type AdminScopePayload = {
+function getCurrentMonthKey(now = new Date()) {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${now.getFullYear()}-${month}`;
+}
+
+function isValidMonthParam(value: string | null) {
+  return Boolean(value && /^\d{4}-\d{2}$/.test(value));
+}
+
+function resolveWorkspaceRouteTargets({
+  href,
+  fallbackMonth,
+  selectedMonth,
+}: {
+  href: string;
+  fallbackMonth: string;
+  selectedMonth: string | null;
+}) {
+  const month = isValidMonthParam(selectedMonth) ? selectedMonth : fallbackMonth;
+  const navigationHref = MONTH_ROUTE_HREFS.has(href) ? `${href}?month=${month}` : href;
+  const prefetchHref = PREFETCHABLE_ROUTE_HREFS.has(href) ? navigationHref : null;
+
+  return {
+    navigationHref,
+    prefetchHref,
+  };
+}
+
+function getWorkspaceRoutePath(href: string) {
+  const [pathname] = href.split("?");
+  return pathname ?? href;
+}
+
+function isWorkspaceRouteActive(pathname: string, href: string) {
+  return pathname === getWorkspaceRoutePath(href);
+}
+
+type NavLinkProps = {
+  href: string;
+  activeHref: string;
+  label: string;
+  icon: React.ReactNode;
+  onIntentPrefetchStart: (href: string | null) => void;
+  onIntentPrefetchCancel: (href: string | null) => void;
+  onNavigate: () => void;
+  prefetchHref: string | null;
+};
+
+/** Small presentational wrapper so nav link semantics stay consistent everywhere. */
+function NavLink({
+  href,
+  activeHref,
+  label,
+  icon,
+  onIntentPrefetchStart,
+  onIntentPrefetchCancel,
+  onNavigate,
+  prefetchHref,
+}: NavLinkProps) {
+  const pathname = usePathname();
+  const isActive = isWorkspaceRouteActive(pathname, activeHref);
+
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
+      title={label}
+      aria-current={isActive ? "page" : undefined}
+      onMouseEnter={() => onIntentPrefetchStart(prefetchHref)}
+      onFocus={() => onIntentPrefetchStart(prefetchHref)}
+      onMouseLeave={() => onIntentPrefetchCancel(prefetchHref)}
+      onBlur={() => onIntentPrefetchCancel(prefetchHref)}
+      onClick={onNavigate}
+    >
+      <span className="workspace-nav-icon">{icon}</span>
+      <strong>{label}</strong>
+    </Link>
+  );
+}
+
+export type AdminScopePayload = {
   companyName: string;
   activeSiteId: string | null;
   activeBusinessAreaId: string | null;
@@ -113,6 +198,16 @@ function MutualsIcon() {
   );
 }
 
+/** Navigation icon for event/outage overlay schedules. */
+function SubSchedulesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h9M4 12h16M4 17h11" />
+      <path d="M17 5l3 2.5L17 10" />
+    </svg>
+  );
+}
+
 /** Toggle icon that visually flips when the sidebar is collapsed. */
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
@@ -134,42 +229,19 @@ function MobileMenuIcon() {
   );
 }
 
-/** Small presentational wrapper so nav link semantics stay consistent everywhere. */
-function NavLink({
-  href,
-  label,
-  icon,
-}: {
-  href: string;
-  label: string;
-  icon: React.ReactNode;
-}) {
-  const pathname = usePathname();
-  const isActive = pathname === href;
-
-  return (
-    <Link
-      href={href}
-      className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
-      title={label}
-      aria-current={isActive ? "page" : undefined}
-    >
-      <span className="workspace-nav-icon">{icon}</span>
-      <strong>{label}</strong>
-    </Link>
-  );
-}
-
 /** Responsive shell with a collapsible toolbar and role-scoped nav. */
 export function WorkspaceShell({
   children,
   viewer,
+  initialAdminScope = null,
 }: {
   children: React.ReactNode;
   viewer: AppSession;
+  initialAdminScope?: AdminScopePayload | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   /**
    * The sidebar remembers the user's last choice so a page navigation does not
    * feel like the app is fighting their layout preference.
@@ -177,8 +249,9 @@ export function WorkspaceShell({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(null);
+  const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(initialAdminScope);
   const [isUpdatingScope, startScopeTransition] = useTransition();
+  const pendingPrefetchTimersRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -223,35 +296,8 @@ export function WorkspaceShell({
   }, [pathname, isMobileSidebarMode]);
 
   useEffect(() => {
-    if (viewer.role !== "admin") {
-      return;
-    }
-
-    let cancelled = false;
-
-    fetch("/api/admin-scope", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Unable to load admin scope.");
-        }
-
-        return (await response.json()) as AdminScopePayload;
-      })
-      .then((payload) => {
-        if (!cancelled) {
-          setAdminScope(payload);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAdminScope(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [viewer.role]);
+    setAdminScope(initialAdminScope);
+  }, [initialAdminScope]);
   /**
    * Navigation is derived directly from the resolved app role so page
    * visibility stays centralized here instead of being scattered through the UI.
@@ -262,6 +308,7 @@ export function WorkspaceShell({
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
           { href: "/mutuals", label: "Mutuals", icon: <MutualsIcon /> },
+          { href: "/sub-schedules", label: "Sub-Schedules", icon: <SubSchedulesIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
           { href: "/schedules", label: "Shifts", icon: <PatternsIcon /> },
           { href: "/competencies", label: "Competencies", icon: <CompetenciesIcon /> },
@@ -273,6 +320,7 @@ export function WorkspaceShell({
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
           { href: "/overtime", label: "Overtime", icon: <OvertimeIcon /> },
           { href: "/mutuals", label: "Mutuals", icon: <MutualsIcon /> },
+          { href: "/sub-schedules", label: "Sub-Schedules", icon: <SubSchedulesIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
           { href: "/metrics", label: "Metrics", icon: <MetricsIcon /> },
         ]
@@ -296,6 +344,66 @@ export function WorkspaceShell({
 
     return adminScope.businessAreas.filter((entry) => entry.siteId === activeSiteId);
   }, [adminScope]);
+
+  const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
+  const selectedMonth = searchParams.get("month");
+
+  useEffect(() => {
+    const pendingTimers = pendingPrefetchTimersRef.current;
+
+    return () => {
+      for (const timerId of Object.values(pendingTimers)) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, []);
+
+  const handleIntentPrefetchStart = (href: string | null) => {
+    if (!href || prefetchedWorkspaceRoutes.has(href)) {
+      return;
+    }
+
+    const pendingTimers = pendingPrefetchTimersRef.current;
+
+    if (pendingTimers[href]) {
+      return;
+    }
+
+    pendingTimers[href] = window.setTimeout(() => {
+      delete pendingTimers[href];
+
+      if (prefetchedWorkspaceRoutes.has(href)) {
+        return;
+      }
+
+      prefetchedWorkspaceRoutes.add(href);
+      router.prefetch(href);
+    }, PREFETCH_DELAY_MS);
+  };
+
+  const handleIntentPrefetchCancel = (href: string | null) => {
+    if (!href) {
+      return;
+    }
+
+    const pendingTimers = pendingPrefetchTimersRef.current;
+    const timerId = pendingTimers[href];
+
+    if (!timerId) {
+      return;
+    }
+
+    window.clearTimeout(timerId);
+    delete pendingTimers[href];
+  };
+
+  const handleNavLinkNavigate = () => {
+    if (!isMobileSidebarMode) {
+      return;
+    }
+
+    setIsMobileSidebarOpen(false);
+  };
 
   return (
     <main className="shell">
@@ -328,9 +436,27 @@ export function WorkspaceShell({
           </div>
 
           <nav id="workspace-primary-navigation" className="workspace-nav" aria-label="Primary">
-            {navItems.map((item) => (
-              <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} />
-            ))}
+            {navItems.map((item) => {
+              const { navigationHref, prefetchHref } = resolveWorkspaceRouteTargets({
+                href: item.href,
+                fallbackMonth: currentMonthKey,
+                selectedMonth,
+              });
+
+              return (
+                <NavLink
+                  key={item.href}
+                  href={navigationHref}
+                  activeHref={item.href}
+                  prefetchHref={prefetchHref}
+                  label={item.label}
+                  icon={item.icon}
+                  onIntentPrefetchStart={handleIntentPrefetchStart}
+                  onIntentPrefetchCancel={handleIntentPrefetchCancel}
+                  onNavigate={handleNavLinkNavigate}
+                />
+              );
+            })}
           </nav>
 
           {viewer.role === "admin" && adminScope ? (

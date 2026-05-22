@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import type {
   AppRole,
   ApplyToMutualPostingInput,
+  ApproveMutualPostingInput,
   CancelAcceptedMutualInput,
   ClaimOvertimePostingInput,
   CreateManualOvertimePostingInput,
@@ -15,14 +16,18 @@ import type {
   SaveAssignmentsInput,
   SaveCompetenciesInput,
   SavePersonnelInput,
+  SaveScheduleCompetenciesInput,
   SaveSchedulesInput,
+    SaveSubScheduleAssignmentsInput,
+    SaveSubScheduleCompetenciesInput,
+    SaveSubSchedulesInput,
   SaveTimeCodesInput,
   SetScheduleCompletionInput,
   ShiftKind,
   WithdrawMutualApplicationInput,
   WithdrawMutualPostingInput,
 } from "@/lib/types";
-import { getSchedulerSnapshot } from "@/lib/data";
+import { getScheduleReferenceSnapshot } from "@/lib/data";
 import {
   buildOvertimeAssignmentNote,
   buildSwapOvertimeAssignmentRows,
@@ -36,9 +41,11 @@ import {
 } from "@/lib/mutuals";
 import {
   buildAssignmentIndex,
+  createAssignmentKey,
   createSetRangeKey,
   getEmployeeMap,
   getExtendedMonthDays,
+  hasWorkedNightBeforeDate,
   getMonthDays,
   getMonthKeysForDateRange,
   getScheduleById,
@@ -73,6 +80,38 @@ function isBlank(value: string) {
 function hasValidShiftPattern(dayShiftDays: number, nightShiftDays: number, offDays: number) {
   return [dayShiftDays, nightShiftDays, offDays].every((value) => Number.isInteger(value) && value >= 0) &&
     dayShiftDays + nightShiftDays + offDays > 0;
+}
+
+function getCurrentUtcDateKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getCurrentUtcYearKey() {
+  return new Date().toISOString().slice(0, 4);
+}
+
+function getCurrentUtcYearEndDateKey() {
+  return `${getCurrentUtcYearKey()}-12-31`;
+}
+
+function getMutualPostingDateWindowError(dates: string[]) {
+  const currentYear = getCurrentUtcYearKey();
+
+  if (dates.some((date) => date.slice(0, 4) !== currentYear)) {
+    return "Mutual postings must use dates from the current year.";
+  }
+
+  return null;
+}
+
+function getMutualApplicationDateWindowError(dates: string[]) {
+  const currentYear = getCurrentUtcYearKey();
+
+  if (dates.some((date) => date.slice(0, 4) !== currentYear)) {
+    return "Mutual applications must stay within the current year.";
+  }
+
+  return null;
 }
 
 /** Converts a scoped session into the database column payload used on inserts. */
@@ -141,16 +180,17 @@ function canAccessScope(
  */
 async function restoreSwappedAssignmentsForClaims(
   supabase: SupabaseAdminClient,
-  claims: Array<{ employeeId: string; competencyId: string; date: string }>,
+  claims: Array<{ scheduleId: string; employeeId: string; competencyId: string; date: string }>,
 ) {
   if (claims.length === 0) {
     return { ok: true as const };
   }
 
-  const groupedClaims = claims.reduce<Record<string, { employeeId: string; competencyId: string; dates: string[] }>>(
+  const groupedClaims = claims.reduce<Record<string, { scheduleId: string; employeeId: string; competencyId: string; dates: string[] }>>(
     (map, claim) => {
-      const key = `${claim.employeeId}:${claim.competencyId}`;
+      const key = `${claim.scheduleId}:${claim.employeeId}:${claim.competencyId}`;
       map[key] ??= {
+        scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
         dates: [],
@@ -166,6 +206,7 @@ async function restoreSwappedAssignmentsForClaims(
     const { data, error } = await supabase
       .from("schedule_assignments")
       .select("employee_id, schedule_id, assignment_date, notes, shift_kind, company_id, site_id, business_area_id")
+      .eq("schedule_id", group.scheduleId)
       .in("assignment_date", group.dates)
       .like("notes", `${notePrefix}%`);
 
@@ -196,20 +237,22 @@ async function restoreSwappedAssignmentsForClaims(
           return [];
         }
 
-        return [
-          {
-            employee_id: row.employee_id,
-            schedule_id: row.schedule_id ?? undefined,
-            assignment_date: row.assignment_date,
-            competency_id: parsed.originalCompetencyId,
-            time_code_id: null,
-            notes: null,
-            shift_kind: row.shift_kind,
-            company_id: row.company_id,
-            site_id: row.site_id,
-            business_area_id: row.business_area_id,
-          } satisfies OvertimeAssignmentRow,
-        ];
+        if (!row.schedule_id) {
+          return [];
+        }
+
+        return [{
+          employee_id: row.employee_id,
+          schedule_id: row.schedule_id,
+          assignment_date: row.assignment_date,
+          competency_id: parsed.originalCompetencyId,
+          time_code_id: null,
+          notes: null,
+          shift_kind: row.shift_kind,
+          company_id: row.company_id,
+          site_id: row.site_id,
+          business_area_id: row.business_area_id,
+        } satisfies OvertimeAssignmentRow];
       });
 
     if (restoreRows.length === 0) {
@@ -217,7 +260,7 @@ async function restoreSwappedAssignmentsForClaims(
     }
 
     const { error: restoreError } = await supabase.from("schedule_assignments").upsert(restoreRows, {
-      onConflict: "employee_id,assignment_date",
+      onConflict: "schedule_id,employee_id,assignment_date",
     });
 
     if (restoreError) {
@@ -238,16 +281,17 @@ async function restoreSwappedAssignmentsForClaims(
  */
 async function clearClaimantAssignmentsForClaims(
   supabase: SupabaseAdminClient,
-  claims: Array<{ employeeId: string; competencyId: string; date: string }>,
+  claims: Array<{ scheduleId: string; employeeId: string; competencyId: string; date: string }>,
 ) {
   if (claims.length === 0) {
     return { ok: true as const };
   }
 
-  const groupedClaims = claims.reduce<Record<string, { employeeId: string; competencyId: string; dates: string[] }>>(
+  const groupedClaims = claims.reduce<Record<string, { scheduleId: string; employeeId: string; competencyId: string; dates: string[] }>>(
     (map, claim) => {
-      const key = `${claim.employeeId}:${claim.competencyId}`;
+      const key = `${claim.scheduleId}:${claim.employeeId}:${claim.competencyId}`;
       map[key] ??= {
+        scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
         dates: [],
@@ -267,6 +311,7 @@ async function clearClaimantAssignmentsForClaims(
           .from("schedule_assignments")
           .delete()
           .eq("employee_id", group.employeeId)
+          .eq("schedule_id", group.scheduleId)
           .eq("assignment_date", date)
           .like("notes", `${notePrefix}%`),
       ),
@@ -281,14 +326,22 @@ async function clearClaimantAssignmentsForClaims(
     }
 
     const fallbackDeleteResults = await Promise.all(
-      group.dates.map((date) =>
+      group.dates.flatMap((date) => [
         supabase
           .from("schedule_assignments")
           .delete()
           .eq("employee_id", group.employeeId)
+          .eq("schedule_id", group.scheduleId)
           .eq("assignment_date", date)
           .eq("competency_id", group.competencyId),
-      ),
+        supabase
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", group.employeeId)
+          .eq("schedule_id", group.scheduleId)
+          .eq("assignment_date", date)
+          .eq("time_code_id", group.competencyId),
+      ]),
     );
     const fallbackDeleteError = fallbackDeleteResults.find((result) => result.error)?.error;
 
@@ -344,7 +397,18 @@ async function removeStaleOvertimeClaims(
   let removedClaims = 0;
 
   for (const month of uniqueMonths) {
-    const snapshot = await getSchedulerSnapshot(month, session);
+    const snapshot = await getScheduleReferenceSnapshot(month, session, {
+      includeEmployeeCompetencies: false,
+      includeCompetencies: true,
+      includeTimeCodes: false,
+      includeSubSchedules: false,
+      includeAssignments: true,
+      includeSubScheduleAssignments: true,
+      includeOvertimeClaims: true,
+      includeCompletedSets: true,
+      assignmentWindow: "month",
+      completedSetWindow: "extended",
+    });
     const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
     const monthDays = getMonthDays(month);
     const completedDateKeys = snapshot.completedSets.reduce<Set<string>>((set, completedSet) => {
@@ -393,7 +457,7 @@ async function removeStaleOvertimeClaims(
           }
 
           const regularFilled = schedule.employees.reduce((count, employee) => {
-            const selection = assignmentIndex[`${employee.id}:${day.date}`];
+            const selection = assignmentIndex[createAssignmentKey(schedule.id, employee.id, day.date)];
             return count + Number(selection?.competencyId === competency.id);
           }, 0);
           const allowedClaims = Math.max(0, competency.requiredStaff - regularFilled);
@@ -407,9 +471,18 @@ async function removeStaleOvertimeClaims(
       continue;
     }
 
+    const mainScheduleClaimsToRemove = claimsToRemove.filter(
+      (claim): claim is (typeof claimsToRemove)[number] & { scheduleId: string } => Boolean(claim.scheduleId),
+    );
+    const restorableMainScheduleClaims = mainScheduleClaimsToRemove.filter(
+      (claim): claim is (typeof mainScheduleClaimsToRemove)[number] & { competencyId: string } =>
+        Boolean(claim.competencyId),
+    );
+
     const restoreResult = await restoreSwappedAssignmentsForClaims(
       supabase,
-      claimsToRemove.map((claim) => ({
+      restorableMainScheduleClaims.map((claim) => ({
+        scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
         competencyId: claim.competencyId,
         date: claim.date,
@@ -437,9 +510,14 @@ async function removeStaleOvertimeClaims(
 
     const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
       supabase,
-      claimsToRemove.map((claim) => ({
+      mainScheduleClaimsToRemove
+        .filter((claim): claim is (typeof mainScheduleClaimsToRemove)[number] & { competencyId: string } =>
+          Boolean(claim.competencyId ?? claim.timeCodeId),
+        )
+        .map((claim) => ({
+        scheduleId: claim.scheduleId,
         employeeId: claim.employeeId,
-        competencyId: claim.competencyId,
+        competencyId: claim.competencyId ?? claim.timeCodeId ?? "",
         date: claim.date,
       })),
     );
@@ -488,6 +566,8 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     };
   }
 
+  const supabaseAdmin = supabase;
+
   const sessionScope = getSessionScope(session);
 
   if (!sessionScope) {
@@ -497,9 +577,33 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
     };
   }
 
-  const scopeMonth = input.updates[0]?.date.slice(0, 7);
-  const scopedSnapshot = scopeMonth ? await getSchedulerSnapshot(scopeMonth, session) : null;
-  const scopedEmployeeMap = scopedSnapshot ? getEmployeeMap(scopedSnapshot.schedules) : {};
+  const touchedMonths = Array.from(new Set(input.updates.map((update) => update.date.slice(0, 7))));
+  const scopedSnapshots = await Promise.all(
+    touchedMonths.map((month) =>
+      getScheduleReferenceSnapshot(month, session, {
+        includeEmployeeCompetencies: false,
+        includeCompetencies: false,
+        includeTimeCodes: false,
+        includeSubSchedules: false,
+        includeAssignments: true,
+      }),
+    ),
+  );
+  const scopedEmployeeMap = scopedSnapshots.reduce<Record<string, ReturnType<typeof getEmployeeMap>[string]>>(
+    (map, snapshot) => ({
+      ...map,
+      ...getEmployeeMap(snapshot.schedules),
+    }),
+    {},
+  );
+  const scopedAssignmentMap = new Map(
+    scopedSnapshots.flatMap((snapshot) =>
+      snapshot.assignments.map((assignment) => [
+        createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date),
+        assignment,
+      ] as const),
+    ),
+  );
 
   const rowsToUpsert = input.updates
     .filter((update) => update.competencyId || update.timeCodeId || (update.notes?.trim().length ?? 0) > 0)
@@ -515,7 +619,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
 
       return {
         employee_id: update.employeeId,
-        schedule_id: input.scheduleId,
+        schedule_id: update.scheduleId,
         assignment_date: update.date,
         competency_id: update.competencyId,
         time_code_id: update.timeCodeId,
@@ -528,14 +632,107 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   const rowsToDelete = input.updates
     .filter((update) => !update.competencyId && !update.timeCodeId && !(update.notes?.trim().length ?? 0))
     .map((update) => ({
+      schedule_id: update.scheduleId,
       employee_id: update.employeeId,
       assignment_date: update.date,
     }));
 
+  const overtimeDeleteTargets = rowsToDelete.filter((row) => {
+    const existingAssignment = scopedAssignmentMap.get(
+      createAssignmentKey(row.schedule_id, row.employee_id, row.assignment_date),
+    );
+
+    return Boolean(parseOvertimeAssignmentNote(existingAssignment?.notes).claimantEmployeeId);
+  });
+
+  if (overtimeDeleteTargets.length > 0) {
+    return {
+      ok: false,
+      message:
+        "Overtime-filled cells cannot be cleared from the schedule directly. Release the posting from the Overtime page instead.",
+    };
+  }
+
+  /**
+   * The home/original schedule is the source of truth for borrowed work. If a
+   * planner clears that source row, any same-day borrowed rows for the worker on
+   * other schedules should disappear as well so the person is not still shown as
+   * covering elsewhere.
+   */
+  async function propagateBorrowedDeletes() {
+    const propagationTargets = Array.from(
+      new Map(
+        rowsToDelete.flatMap((row) => {
+          const employee = scopedEmployeeMap[row.employee_id];
+
+          if (!employee || employee.scheduleId !== row.schedule_id) {
+            return [];
+          }
+
+          const propagationKey = `${row.employee_id}:${row.assignment_date}:${employee.scheduleId}`;
+          return [[propagationKey, {
+            employeeId: row.employee_id,
+            assignmentDate: row.assignment_date,
+            homeScheduleId: employee.scheduleId,
+          }]];
+        }),
+      ).values(),
+    );
+
+    if (propagationTargets.length === 0) {
+      return null;
+    }
+
+    const propagationResults = await Promise.all(
+      propagationTargets.map((target) =>
+        supabaseAdmin
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", target.employeeId)
+          .eq("assignment_date", target.assignmentDate)
+          .neq("schedule_id", target.homeScheduleId),
+      ),
+    );
+
+    return propagationResults.find((result) => result.error)?.error ?? null;
+  }
+
   if (rowsToUpsert.length > 0) {
-    const { error } = await supabase.from("schedule_assignments").upsert(rowsToUpsert, {
-      onConflict: "employee_id,assignment_date",
-    });
+    const saveResults = await Promise.all(
+      rowsToUpsert.map(async (row) => {
+        /**
+         * Use update-then-insert instead of `upsert(... onConflict)`.
+         *
+         * Why: older and live databases have moved through a few versions of
+         * `schedule_assignments` while schedule scoping was added. If the
+         * physical unique constraint does not exactly match the conflict target
+         * the client specifies, Postgres rejects the entire save. Updating by
+         * the business key first keeps schedule edits durable even when the
+         * supporting index/constraint shape is slightly different.
+         */
+        const updateResult = await supabaseAdmin
+          .from("schedule_assignments")
+          .update(row)
+          .eq("employee_id", row.employee_id)
+          .eq("schedule_id", row.schedule_id)
+          .eq("assignment_date", row.assignment_date)
+          .select("employee_id");
+
+        if (updateResult.error) {
+          return updateResult.error;
+        }
+
+        if ((updateResult.data ?? []).length > 0) {
+          return null;
+        }
+
+        const insertResult = await supabaseAdmin.from("schedule_assignments").insert(row);
+
+        return insertResult.error;
+      }),
+    );
+
+    const error = saveResults.find(Boolean);
 
     if (error) {
       return {
@@ -548,10 +745,11 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   if (rowsToDelete.length > 0) {
     const deleteResults = await Promise.all(
       rowsToDelete.map((row) =>
-        supabase
+        supabaseAdmin
           .from("schedule_assignments")
           .delete()
           .eq("employee_id", row.employee_id)
+          .eq("schedule_id", row.schedule_id)
           .eq("assignment_date", row.assignment_date),
       ),
     );
@@ -564,6 +762,15 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
         message: `Could not clear assignments: ${firstDeleteError.message}`,
       };
     }
+
+    const propagatedDeleteError = await propagateBorrowedDeletes();
+
+    if (propagatedDeleteError) {
+      return {
+        ok: false,
+        message: `Cleared the original assignment, but borrowed-row cleanup failed: ${propagatedDeleteError.message}`,
+      };
+    }
   }
 
   const cleanupResult = await removeStaleOvertimeClaims(
@@ -573,6 +780,7 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
   );
 
   revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
   revalidatePath("/overtime");
 
   return {
@@ -878,6 +1086,7 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   }
 
   const dates = uniqueSortedDates(input.dates);
+  const slotCount = Math.max(1, Math.trunc(input.slotCount || 1));
 
   if (dates.length === 0) {
     return {
@@ -896,20 +1105,74 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   }
 
   const month = monthKeys[0] ?? "";
-  const snapshot = await getSchedulerSnapshot(month, session);
-  const schedule = getScheduleById(snapshot, input.scheduleId);
-  const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: false,
+    includeCompetencies: true,
+    includeTimeCodes: true,
+    includeSubSchedules: true,
+    includeManualOvertimePostings: true,
+  });
+  const targetScheduleId = input.scheduleId ?? null;
+  const targetSubScheduleId = input.subScheduleId ?? null;
+  const targetCompetencyId = input.competencyId ?? null;
+  const targetTimeCodeId = input.timeCodeId ?? null;
+  const targetAssignmentId = targetCompetencyId ?? targetTimeCodeId;
+  const schedule = targetScheduleId ? getScheduleById(snapshot, targetScheduleId) : null;
+  const subSchedule = targetSubScheduleId
+    ? snapshot.subSchedules.find((entry) => entry.id === targetSubScheduleId) ?? null
+    : null;
+  const competency = targetCompetencyId
+    ? snapshot.competencies.find((entry) => entry.id === targetCompetencyId) ?? null
+    : null;
+  const timeCode = targetTimeCodeId
+    ? snapshot.timeCodes.find((entry) => entry.id === targetTimeCodeId) ?? null
+    : null;
 
-  if (!schedule || !competency) {
+  if ((targetScheduleId ? 1 : 0) + (targetSubScheduleId ? 1 : 0) !== 1) {
     return {
       ok: false,
-      message: "Could not find the selected team or competency.",
+      message: "Choose exactly one target: either a main schedule or a sub-schedule.",
     };
   }
 
-  const shiftKinds = dates.map((date) => shiftForDate(schedule, date));
+  if ((targetCompetencyId ? 1 : 0) + (targetTimeCodeId ? 1 : 0) !== 1) {
+    return {
+      ok: false,
+      message: "Choose exactly one overtime assignment: either a competency or a time code.",
+    };
+  }
 
-  if (shiftKinds.some((shiftKind) => shiftKind === "OFF")) {
+  if ((!schedule && !subSchedule) || (!competency && !timeCode)) {
+    return {
+      ok: false,
+      message: "Could not find the selected target or assignment.",
+    };
+  }
+
+  if (schedule && competency && !schedule.competencyIds.includes(competency.id)) {
+    return {
+      ok: false,
+      message: "That competency is not enabled for the selected main schedule.",
+    };
+  }
+
+  if (subSchedule && competency && !subSchedule.competencyIds.includes(competency.id)) {
+    return {
+      ok: false,
+      message: "That competency is not enabled for the selected sub-schedule.",
+    };
+  }
+
+  if (timeCode && timeCode.usageMode === "projected_only") {
+    return {
+      ok: false,
+      message: "Projected-only time codes cannot be used for overtime postings.",
+    };
+  }
+
+  const shiftKinds = schedule ? dates.map((date) => shiftForDate(schedule, date)) : dates.map(() => "DAY" as const);
+
+  if (schedule && shiftKinds.some((shiftKind) => shiftKind === "OFF")) {
     return {
       ok: false,
       message: "Manual overtime postings can only be created on worked schedule days.",
@@ -925,31 +1188,53 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     };
   }
 
-  const duplicatePosting = snapshot.manualOvertimePostings.some(
+  const duplicatePosting = snapshot.manualOvertimePostings.find(
     (posting) =>
-      posting.scheduleId === input.scheduleId &&
-      posting.competencyId === input.competencyId &&
+      posting.scheduleId === targetScheduleId &&
+      (posting.subScheduleId ?? null) === targetSubScheduleId &&
+      (posting.competencyId ?? null) === targetCompetencyId &&
+      (posting.timeCodeId ?? null) === targetTimeCodeId &&
       posting.dates.length === dates.length &&
       posting.dates.every((date, index) => date === dates[index]),
   );
 
   if (duplicatePosting) {
+    const { error: updateError } = await supabase
+      .from("manual_overtime_postings")
+      .update({
+        slot_count: duplicatePosting.slotCount + slotCount,
+      })
+      .eq("id", duplicatePosting.id);
+
+    if (updateError) {
+      return {
+        ok: false,
+        message: `Could not expand overtime posting capacity: ${updateError.message}`,
+      };
+    }
+
+    revalidatePath("/overtime");
+    revalidatePath("/sub-schedules");
+
     return {
-      ok: false,
-      message: "That manual overtime posting already exists.",
+      ok: true,
+      message: `Added ${slotCount} more ${(competency?.code ?? timeCode?.code) || "assignment"} slot${slotCount === 1 ? "" : "s"} to the existing posting${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
     };
   }
 
   const postingScope = {
-    companyId: schedule.companyId ?? sessionScope.companyId,
-    siteId: schedule.siteId ?? sessionScope.siteId,
-    businessAreaId: schedule.businessAreaId ?? sessionScope.businessAreaId,
+    companyId: schedule?.companyId ?? subSchedule?.companyId ?? sessionScope.companyId,
+    siteId: schedule?.siteId ?? subSchedule?.siteId ?? sessionScope.siteId,
+    businessAreaId: schedule?.businessAreaId ?? subSchedule?.businessAreaId ?? sessionScope.businessAreaId,
   };
 
   const { error } = await supabase.from("manual_overtime_postings").insert({
     id: `manual-ot-${crypto.randomUUID()}`,
-    schedule_id: schedule.id,
-    competency_id: competency.id,
+    schedule_id: schedule?.id ?? null,
+    sub_schedule_id: subSchedule?.id ?? null,
+    competency_id: competency?.id ?? null,
+    time_code_id: timeCode?.id ?? null,
+    slot_count: slotCount,
     month_key: month,
     shift_kind: uniqueShiftKinds[0],
     posting_dates: dates,
@@ -964,15 +1249,17 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
   }
 
   revalidatePath("/overtime");
+  revalidatePath("/sub-schedules");
 
   return {
     ok: true,
-    message: `Manual overtime posting created for ${competency.code}.`,
+    message: `Manual overtime posting created for ${slotCount} ${(competency?.code ?? timeCode?.code) || "assignment"} slot${slotCount === 1 ? "" : "s"}${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
   };
 }
 
 /**
- * Deletes a manual overtime posting as long as nobody has already claimed it.
+ * Deletes a manual overtime posting, automatically releasing any claims and
+ * clearing their derived assignments first.
  */
 export async function deleteManualOvertimePosting(input: DeleteManualOvertimePostingInput) {
   const session = await requireActionRole(["admin", "leader"]);
@@ -995,7 +1282,7 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
 
   const { data: posting, error: postingError } = await supabase
     .from("manual_overtime_postings")
-    .select("id, company_id, site_id, business_area_id")
+    .select("id, schedule_id, sub_schedule_id, competency_id, time_code_id, company_id, site_id, business_area_id")
     .eq("id", input.postingId)
     .maybeSingle();
 
@@ -1020,9 +1307,12 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
     };
   }
 
-  const { count, error: claimsError } = await supabase
+  const { data: claims, count, error: claimsError } = await supabase
     .from("overtime_claims")
-    .select("id", { count: "exact", head: true })
+    .select(
+      "id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date",
+      { count: "exact" },
+    )
     .eq("manual_posting_id", input.postingId);
 
   if (claimsError) {
@@ -1032,11 +1322,93 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
     };
   }
 
+  const claimRows = ((claims as Array<{
+    id: string;
+    schedule_id: string | null;
+    sub_schedule_id: string | null;
+    employee_id: string;
+    competency_id: string | null;
+    time_code_id: string | null;
+    assignment_date: string;
+  }> | null) ?? []);
+
+  const mainScheduleClaims = claimRows
+    .filter((claim): claim is typeof claim & { schedule_id: string } => Boolean(claim.schedule_id))
+    .map((claim) => ({
+      scheduleId: claim.schedule_id,
+      employeeId: claim.employee_id,
+      competencyId: claim.competency_id ?? claim.time_code_id ?? "",
+      date: claim.assignment_date,
+    }))
+    .filter((claim) => Boolean(claim.competencyId));
+
+  const subScheduleClaims = claimRows.filter(
+    (claim): claim is typeof claim & { sub_schedule_id: string } => Boolean(claim.sub_schedule_id),
+  );
+
+  if (mainScheduleClaims.length > 0) {
+    const restoreResult = await restoreSwappedAssignmentsForClaims(supabase, mainScheduleClaims);
+
+    if (!restoreResult.ok) {
+      return {
+        ok: false,
+        message: restoreResult.message,
+      };
+    }
+
+    const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(supabase, mainScheduleClaims);
+
+    if (!clearAssignmentsResult.ok) {
+      return {
+        ok: false,
+        message: clearAssignmentsResult.message,
+      };
+    }
+  }
+
+  if (subScheduleClaims.length > 0) {
+    const deleteResults = await Promise.all(
+      subScheduleClaims.map((claim) =>
+        (claim.competency_id
+          ? supabase
+              .from("sub_schedule_assignments")
+              .delete()
+              .eq("sub_schedule_id", claim.sub_schedule_id)
+              .eq("employee_id", claim.employee_id)
+              .eq("assignment_date", claim.assignment_date)
+              .eq("competency_id", claim.competency_id)
+          : supabase
+              .from("sub_schedule_assignments")
+              .delete()
+              .eq("sub_schedule_id", claim.sub_schedule_id)
+              .eq("employee_id", claim.employee_id)
+              .eq("assignment_date", claim.assignment_date)
+              .eq("time_code_id", claim.time_code_id!)),
+      ),
+    );
+
+    const deleteError = deleteResults.find((result) => result.error)?.error;
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not clear sub-schedule overtime assignments: ${deleteError.message}`,
+      };
+    }
+  }
+
   if ((count ?? 0) > 0) {
-    return {
-      ok: false,
-      message: "Release the current claim before deleting this manual posting.",
-    };
+    const { error: claimDeleteError } = await supabase
+      .from("overtime_claims")
+      .delete()
+      .eq("manual_posting_id", input.postingId);
+
+    if (claimDeleteError) {
+      return {
+        ok: false,
+        message: `Could not release overtime claims: ${claimDeleteError.message}`,
+      };
+    }
   }
 
   const { error } = await supabase.from("manual_overtime_postings").delete().eq("id", input.postingId);
@@ -1049,10 +1421,16 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
   }
 
   revalidatePath("/overtime");
+  if ((posting as { sub_schedule_id?: string | null }).sub_schedule_id) {
+    revalidatePath("/sub-schedules");
+  }
 
   return {
     ok: true,
-    message: "Manual overtime posting deleted.",
+    message:
+      (count ?? 0) > 0
+        ? `Manual overtime posting deleted and released ${count} claim${count === 1 ? "" : "s"}.`
+        : "Manual overtime posting deleted.",
   };
 }
 
@@ -1095,31 +1473,242 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     };
   }
 
+  const targetScheduleId = input.scheduleId ?? null;
+  const targetSubScheduleId = input.subScheduleId ?? null;
+  const targetCompetencyId = input.competencyId ?? null;
+  const targetTimeCodeId = input.timeCodeId ?? null;
+
+  if ((targetScheduleId ? 1 : 0) + (targetSubScheduleId ? 1 : 0) !== 1) {
+    return {
+      ok: false,
+      message: "Choose exactly one overtime target: either a main schedule or a sub-schedule.",
+    };
+  }
+
+  if ((targetCompetencyId ? 1 : 0) + (targetTimeCodeId ? 1 : 0) !== 1) {
+    return {
+      ok: false,
+      message: "Choose exactly one overtime assignment: either a competency or a time code.",
+    };
+  }
+
   const month = normalizedDates[0]?.slice(0, 7);
-  const snapshot = await getSchedulerSnapshot(month, session);
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: true,
+    includeCompetencies: true,
+    includeTimeCodes: true,
+    includeSubSchedules: true,
+    includeAssignments: true,
+    includeSubScheduleAssignments: true,
+    includeOvertimeClaims: true,
+    includeManualOvertimePostings: true,
+  });
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
-  const targetSchedule = getScheduleById(snapshot, input.scheduleId);
-  const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId);
-  const coverageCompetencyId = input.coverageCompetencyId ?? input.competencyId;
-  const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
+  const targetSchedule = targetScheduleId ? getScheduleById(snapshot, targetScheduleId) : null;
+  const targetSubSchedule = targetSubScheduleId
+    ? snapshot.subSchedules.find((entry) => entry.id === targetSubScheduleId) ?? null
+    : null;
+  const competency = targetCompetencyId
+    ? snapshot.competencies.find((entry) => entry.id === targetCompetencyId) ?? null
+    : null;
+  const timeCode = targetTimeCodeId
+    ? snapshot.timeCodes.find((entry) => entry.id === targetTimeCodeId) ?? null
+    : null;
+  const coverageCompetencyId = targetCompetencyId ? input.coverageCompetencyId ?? targetCompetencyId : null;
+  const coverageCompetency = coverageCompetencyId
+    ? snapshot.competencies.find((entry) => entry.id === coverageCompetencyId) ?? null
+    : null;
   const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
   const manualPosting = input.manualPostingId
     ? snapshot.manualOvertimePostings.find((posting) => posting.id === input.manualPostingId)
     : null;
+  const targetAssignmentId = competency?.id ?? timeCode?.id ?? null;
 
-  if (!employee || !employeeSchedule || !competency || !coverageCompetency || !targetSchedule) {
+  if (!employee || !employeeSchedule || (!competency && !timeCode) || (!targetSchedule && !targetSubSchedule)) {
     return {
       ok: false,
-      message: "Could not find the employee or competency for this posting.",
+      message: "Could not find the employee or assignment for this posting.",
     };
   }
 
-  if (!employee.competencyIds.includes(input.competencyId)) {
+  if (competency && !employee.competencyIds.includes(competency.id)) {
     return {
       ok: false,
       message: `${employee.name} is not qualified for ${competency.code}.`,
+    };
+  }
+
+  if (targetSchedule && competency && !targetSchedule.competencyIds.includes(competency.id)) {
+    return {
+      ok: false,
+      message: "That competency is not enabled for the selected main schedule.",
+    };
+  }
+
+  if (targetSchedule && coverageCompetencyId && !targetSchedule.competencyIds.includes(coverageCompetencyId)) {
+    return {
+      ok: false,
+      message: "That coverage competency is not enabled for the selected main schedule.",
+    };
+  }
+
+  if (timeCode && timeCode.usageMode === "projected_only") {
+    return {
+      ok: false,
+      message: "Projected-only time codes cannot be used for overtime claims.",
+    };
+  }
+
+  if (targetSubSchedule) {
+    if (competency && !targetSubSchedule.competencyIds.includes(competency.id)) {
+      return {
+        ok: false,
+        message: "That competency is not enabled for the selected sub-schedule.",
+      };
+    }
+
+    if (input.manualPostingId) {
+      if (!manualPosting) {
+        return {
+          ok: false,
+          message: "That manual overtime posting no longer exists.",
+        };
+      }
+
+      if (
+        manualPosting.subScheduleId !== targetSubSchedule.id ||
+        (manualPosting.competencyId ?? null) !== targetCompetencyId ||
+        (manualPosting.timeCodeId ?? null) !== targetTimeCodeId ||
+        manualPosting.dates.length !== normalizedDates.length ||
+        manualPosting.dates.some((date, index) => date !== normalizedDates[index])
+      ) {
+        return {
+          ok: false,
+          message: "That manual overtime posting changed. Refresh and try again.",
+        };
+      }
+    }
+
+    if (timeCode) {
+      if (input.swapEmployeeId || coverageCompetencyId) {
+        return {
+          ok: false,
+          message: "Time-code overtime postings only support direct claims.",
+        };
+      }
+    } else if (coverageCompetencyId !== competency!.id || input.swapEmployeeId) {
+      return {
+        ok: false,
+        message: "Sub-schedule overtime postings only support direct claims.",
+      };
+    }
+
+    if (input.manualPostingId) {
+      const manualPostingClaims = snapshot.overtimeClaims.filter(
+        (claim) => claim.manualPostingId === input.manualPostingId,
+      );
+      const distinctClaimants = Array.from(new Set(manualPostingClaims.map((claim) => claim.employeeId)));
+
+      if (distinctClaimants.includes(input.employeeId)) {
+        return {
+          ok: false,
+          message: `${employee.name} already claimed that manual overtime posting.`,
+        };
+      }
+
+      if (distinctClaimants.length >= manualPosting!.slotCount) {
+        return {
+          ok: false,
+          message: "That manual overtime posting has already been fully claimed.",
+        };
+      }
+    }
+
+    for (const date of normalizedDates) {
+      const hasMainAssignment = snapshot.assignments.some(
+        (assignment) =>
+          assignment.employeeId === employee.id &&
+          assignment.date === date &&
+          Boolean(assignment.competencyId || assignment.timeCodeId),
+      );
+      const hasSubScheduleAssignment = snapshot.subScheduleAssignments.some(
+        (assignment) =>
+          assignment.employeeId === employee.id &&
+          assignment.date === date &&
+          Boolean(assignment.competencyId || assignment.timeCodeId),
+      );
+
+      if (shiftForDate(employeeSchedule, date) !== "OFF" || hasMainAssignment || hasSubScheduleAssignment) {
+        return {
+          ok: false,
+          message: `${employee.name} is not available for every shift in that posting.`,
+        };
+      }
+    }
+
+    const subScheduleScope = {
+      companyId: targetSubSchedule.companyId ?? session.companyId ?? "",
+      siteId: targetSubSchedule.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSubSchedule.businessAreaId ?? session.businessAreaId ?? "",
+    };
+    const assignmentRows = normalizedDates.map((date) => ({
+      id: `sub-ot-${targetSubSchedule.id}-${input.employeeId}-${targetAssignmentId}-${date}`,
+      sub_schedule_id: targetSubSchedule.id,
+      employee_id: input.employeeId,
+      assignment_date: date,
+      competency_id: competency?.id ?? null,
+      time_code_id: timeCode?.id ?? null,
+      notes: buildOvertimeAssignmentNote({
+        claimantEmployeeId: input.employeeId,
+        claimedCompetencyId: targetAssignmentId!,
+        coverageCompetencyId: coverageCompetencyId ?? null,
+        swapEmployeeId: null,
+      }),
+      ...toDatabaseScope(subScheduleScope),
+    }));
+    const claimRows = normalizedDates.map((date) => ({
+      id: `ot-sub-${targetSubSchedule.id}-${input.employeeId}-${targetAssignmentId}-${date}`,
+      schedule_id: null,
+      sub_schedule_id: targetSubSchedule.id,
+      employee_id: input.employeeId,
+      competency_id: competency?.id ?? null,
+      time_code_id: timeCode?.id ?? null,
+      assignment_date: date,
+      manual_posting_id: input.manualPostingId ?? null,
+      ...toDatabaseScope(subScheduleScope),
+    }));
+
+    const { error: assignmentError } = await supabase.from("sub_schedule_assignments").upsert(assignmentRows, {
+      onConflict: "sub_schedule_id,employee_id,assignment_date",
+    });
+
+    if (assignmentError) {
+      return {
+        ok: false,
+        message: `Could not save sub-schedule overtime assignments: ${assignmentError.message}`,
+      };
+    }
+
+    const { error: claimError } = await supabase.from("overtime_claims").upsert(claimRows, {
+      onConflict: "id",
+    });
+
+    if (claimError) {
+      return {
+        ok: false,
+        message: `Could not save overtime claim: ${claimError.message}`,
+      };
+    }
+
+    revalidatePath("/schedule");
+    revalidatePath("/sub-schedules");
+    revalidatePath("/overtime");
+
+    return {
+      ok: true,
+      message: `${employee.name} was added to the overtime posting.`,
     };
   }
 
@@ -1132,8 +1721,9 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     }
 
     if (
-      manualPosting.scheduleId !== input.scheduleId ||
-      manualPosting.competencyId !== input.competencyId ||
+      manualPosting.scheduleId !== targetScheduleId ||
+      (manualPosting.competencyId ?? null) !== targetCompetencyId ||
+      (manualPosting.timeCodeId ?? null) !== targetTimeCodeId ||
       manualPosting.dates.length !== normalizedDates.length ||
       manualPosting.dates.some((date, index) => date !== normalizedDates[index])
     ) {
@@ -1143,7 +1733,14 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       };
     }
 
-    if (coverageCompetencyId !== input.competencyId || input.swapEmployeeId) {
+    if (timeCode) {
+      if (input.swapEmployeeId || coverageCompetencyId) {
+        return {
+          ok: false,
+          message: "Time-code overtime postings only support direct claims.",
+        };
+      }
+    } else if (coverageCompetencyId !== competency!.id || input.swapEmployeeId) {
       return {
         ok: false,
         message: "Manual overtime postings only support direct claims.",
@@ -1153,25 +1750,33 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     const manualPostingClaims = snapshot.overtimeClaims.filter(
       (claim) => claim.manualPostingId === input.manualPostingId,
     );
+    const distinctClaimants = Array.from(new Set(manualPostingClaims.map((claim) => claim.employeeId)));
 
-    if (
-      manualPostingClaims.some(
-        (claim) =>
-          claim.employeeId !== input.employeeId ||
-          claim.scheduleId !== input.scheduleId ||
-          claim.competencyId !== input.competencyId,
-      )
-    ) {
+    if (distinctClaimants.includes(input.employeeId)) {
       return {
         ok: false,
-        message: "That manual overtime posting has already been claimed.",
+        message: `${employee.name} already claimed that manual overtime posting.`,
+      };
+    }
+
+    if (distinctClaimants.length >= manualPosting.slotCount) {
+      return {
+        ok: false,
+        message: "That manual overtime posting has already been fully claimed.",
       };
     }
   }
 
   let swapAssignmentRows: OvertimeAssignmentRow[] = [];
 
-  if (coverageCompetencyId !== input.competencyId) {
+  if (timeCode) {
+    if (input.swapEmployeeId || coverageCompetencyId) {
+      return {
+        ok: false,
+        message: "Time-code overtime postings only support direct claims.",
+      };
+    }
+  } else if (coverageCompetencyId !== competency!.id) {
     if (!input.swapEmployeeId) {
       return {
         ok: false,
@@ -1181,47 +1786,47 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
     const swapEmployee = employeeMap[input.swapEmployeeId];
 
-    if (!swapEmployee || swapEmployee.scheduleId !== input.scheduleId) {
+    if (!swapEmployee || swapEmployee.scheduleId !== targetScheduleId) {
       return {
         ok: false,
         message: "Could not find the team member to rotate for that posting.",
       };
     }
 
-    if (!swapEmployee.competencyIds.includes(coverageCompetencyId)) {
+    if (!swapEmployee.competencyIds.includes(coverageCompetencyId!)) {
       return {
         ok: false,
-        message: `${swapEmployee.name} cannot be moved to ${coverageCompetency.code}.`,
+        message: `${swapEmployee.name} cannot be moved to ${coverageCompetency!.code}.`,
       };
     }
 
     for (const date of normalizedDates) {
-      const swapSelection = assignmentIndex[`${swapEmployee.id}:${date}`] ?? {
+      const swapSelection = assignmentIndex[createAssignmentKey(targetScheduleId ?? "", swapEmployee.id, date)] ?? {
         competencyId: null,
         timeCodeId: null,
       };
 
-      if (swapSelection.competencyId !== input.competencyId) {
+      if (swapSelection.competencyId !== competency!.id) {
         return {
           ok: false,
-          message: `${swapEmployee.name} is no longer on ${competency.code} for every shift in that posting.`,
+          message: `${swapEmployee.name} is no longer on ${competency!.code} for every shift in that posting.`,
         };
       }
     }
 
     swapAssignmentRows = buildSwapOvertimeAssignmentRows({
       claimantEmployeeId: input.employeeId,
-      claimedCompetencyId: input.competencyId,
-      coverageCompetencyId,
+      claimedCompetencyId: competency!.id,
+      coverageCompetencyId: coverageCompetencyId!,
       swapEmployeeId: swapEmployee.id,
       dates: normalizedDates,
-      targetScheduleId: input.scheduleId,
-      shiftKindForDate: (date) => shiftForDate(targetSchedule, date),
+      targetScheduleId: targetScheduleId ?? "",
+      shiftKindForDate: (date) => shiftForDate(targetSchedule!, date),
     });
   }
 
   if (!manualPosting) {
-    const fullSetDays = getWorkedSetDays(targetSchedule, getExtendedMonthDays(month), normalizedDates[0] ?? null);
+    const fullSetDays = getWorkedSetDays(targetSchedule!, getExtendedMonthDays(month), normalizedDates[0] ?? null);
     const completedSetRangeKeys = new Set(
       snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
     );
@@ -1230,7 +1835,7 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       fullSetDays.length === 0 ||
       !completedSetRangeKeys.has(
         createSetRangeKey(
-          input.scheduleId,
+          targetScheduleId ?? "",
           fullSetDays[0].date,
           fullSetDays[fullSetDays.length - 1].date,
         ),
@@ -1245,65 +1850,79 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
   for (const date of normalizedDates) {
     const shiftKind = shiftForDate(employeeSchedule, date);
-    const currentAssignment = assignmentIndex[`${employee.id}:${date}`] ?? {
-      competencyId: null,
-      timeCodeId: null,
-    };
+    const hasExistingAssignment = snapshot.assignments.some(
+      (assignment) =>
+        assignment.employeeId === employee.id &&
+        assignment.date === date &&
+        Boolean(assignment.competencyId || assignment.timeCodeId),
+    );
 
-    if (shiftKind !== "OFF" || currentAssignment.competencyId || currentAssignment.timeCodeId) {
+    if (shiftKind !== "OFF" || hasExistingAssignment) {
       return {
         ok: false,
         message: `${employee.name} is not available for every shift in that posting.`,
+      };
+    }
+
+    if (
+      shiftForDate(targetSchedule!, date) === "DAY" &&
+      hasWorkedNightBeforeDate(employee, employeeSchedule, snapshot, date)
+    ) {
+      return {
+        ok: false,
+        message: `${employee.name} worked a night shift on the previous calendar day.`,
       };
     }
   }
 
   const assignmentRows = normalizedDates.map((date) => ({
     employee_id: input.employeeId,
-    schedule_id: input.scheduleId,
+    schedule_id: targetScheduleId,
     assignment_date: date,
-    competency_id: input.competencyId,
-    time_code_id: null,
+    competency_id: competency?.id ?? null,
+    time_code_id: timeCode?.id ?? null,
     notes: buildOvertimeAssignmentNote({
       claimantEmployeeId: input.employeeId,
-      claimedCompetencyId: input.competencyId,
-      coverageCompetencyId,
+      claimedCompetencyId: targetAssignmentId!,
+      coverageCompetencyId: coverageCompetencyId ?? null,
       swapEmployeeId: input.swapEmployeeId ?? null,
     }),
-    shift_kind: shiftForDate(targetSchedule, date),
+    shift_kind: shiftForDate(targetSchedule!, date),
     ...toDatabaseScope({
-      companyId: targetSchedule.companyId ?? session.companyId ?? "",
-      siteId: targetSchedule.siteId ?? session.siteId ?? "",
-      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+      companyId: targetSchedule!.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule!.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule!.businessAreaId ?? session.businessAreaId ?? "",
     }),
   }));
 
   const claimRows = normalizedDates.map((date) => ({
-    id: `ot-${input.scheduleId}-${input.employeeId}-${input.competencyId}-${date}`,
-    schedule_id: input.scheduleId,
+    id: `ot-${targetScheduleId}-${input.employeeId}-${targetAssignmentId}-${date}`,
+    schedule_id: targetScheduleId,
+    sub_schedule_id: null,
     employee_id: input.employeeId,
-    competency_id: input.competencyId,
+    competency_id: competency?.id ?? null,
+    time_code_id: timeCode?.id ?? null,
     assignment_date: date,
     manual_posting_id: input.manualPostingId ?? null,
     ...toDatabaseScope({
-      companyId: targetSchedule.companyId ?? session.companyId ?? "",
-      siteId: targetSchedule.siteId ?? session.siteId ?? "",
-      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+      companyId: targetSchedule!.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule!.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule!.businessAreaId ?? session.businessAreaId ?? "",
     }),
   }));
 
   swapAssignmentRows = swapAssignmentRows.map((row) => ({
     ...row,
-    schedule_id: input.scheduleId,
+    schedule_id: targetScheduleId,
     ...toDatabaseScope({
-      companyId: targetSchedule.companyId ?? session.companyId ?? "",
-      siteId: targetSchedule.siteId ?? session.siteId ?? "",
-      businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+      companyId: targetSchedule!.companyId ?? session.companyId ?? "",
+      siteId: targetSchedule!.siteId ?? session.siteId ?? "",
+      businessAreaId: targetSchedule!.businessAreaId ?? session.businessAreaId ?? "",
     }),
   }));
 
   const { error: assignmentError } = await supabase.from("schedule_assignments").upsert([...assignmentRows, ...swapAssignmentRows], {
-    onConflict: "employee_id,assignment_date",
+    onConflict: "schedule_id,employee_id,assignment_date",
   });
 
   if (assignmentError) {
@@ -1370,11 +1989,83 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
     };
   }
 
+  const targetCompetencyId = input.competencyId ?? null;
+  const targetTimeCodeId = input.timeCodeId ?? null;
+  const targetAssignmentId = targetCompetencyId ?? targetTimeCodeId;
+
+  if ((targetCompetencyId ? 1 : 0) + (targetTimeCodeId ? 1 : 0) !== 1) {
+    return {
+      ok: false,
+      message: "Choose exactly one overtime assignment to release.",
+    };
+  }
+
+  if (input.subScheduleId) {
+    let claimDeleteQuery = supabase
+      .from("overtime_claims")
+      .delete()
+      .eq("sub_schedule_id", input.subScheduleId)
+      .eq("employee_id", input.employeeId)
+      .in("assignment_date", input.dates);
+
+    claimDeleteQuery = targetCompetencyId
+      ? claimDeleteQuery.eq("competency_id", targetCompetencyId)
+      : claimDeleteQuery.eq("time_code_id", targetTimeCodeId!);
+
+    const { error: claimDeleteError } = await claimDeleteQuery;
+
+    if (claimDeleteError) {
+      return {
+        ok: false,
+        message: `Could not release overtime claim: ${claimDeleteError.message}`,
+      };
+    }
+
+    const deleteResults = await Promise.all(
+      input.dates.map((date) =>
+        (targetCompetencyId
+          ? supabase
+              .from("sub_schedule_assignments")
+              .delete()
+              .eq("sub_schedule_id", input.subScheduleId)
+              .eq("employee_id", input.employeeId)
+              .eq("assignment_date", date)
+              .eq("competency_id", targetCompetencyId)
+          : supabase
+              .from("sub_schedule_assignments")
+              .delete()
+              .eq("sub_schedule_id", input.subScheduleId)
+              .eq("employee_id", input.employeeId)
+              .eq("assignment_date", date)
+              .eq("time_code_id", targetTimeCodeId!)),
+      ),
+    );
+
+    const deleteError = deleteResults.find((result) => result.error)?.error;
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not clear sub-schedule overtime assignments: ${deleteError.message}`,
+      };
+    }
+
+    revalidatePath("/schedule");
+    revalidatePath("/sub-schedules");
+    revalidatePath("/overtime");
+
+    return {
+      ok: true,
+      message: "Overtime claim released.",
+    };
+  }
+
   const restoreResult = await restoreSwappedAssignmentsForClaims(
     supabase,
     input.dates.map((date) => ({
+      scheduleId: input.scheduleId ?? "",
       employeeId: input.employeeId,
-      competencyId: input.competencyId,
+      competencyId: targetAssignmentId ?? "",
       date,
     })),
   );
@@ -1389,10 +2080,10 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
   const { error: claimDeleteError } = await supabase
     .from("overtime_claims")
     .delete()
-    .eq("schedule_id", input.scheduleId)
+    .eq("schedule_id", input.scheduleId ?? "")
     .eq("employee_id", input.employeeId)
-    .eq("competency_id", input.competencyId)
-    .in("assignment_date", input.dates);
+    .in("assignment_date", input.dates)
+    .match(targetCompetencyId ? { competency_id: targetCompetencyId } : { time_code_id: targetTimeCodeId! });
 
   if (claimDeleteError) {
     return {
@@ -1404,8 +2095,9 @@ export async function releaseOvertimePosting(input: ReleaseOvertimePostingInput)
   const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
     supabase,
     input.dates.map((date) => ({
+      scheduleId: input.scheduleId ?? "",
       employeeId: input.employeeId,
-      competencyId: input.competencyId,
+      competencyId: targetAssignmentId ?? "",
       date,
     })),
   );
@@ -1437,10 +2129,10 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
     };
   }
 
-  if (session.role === "worker" && session.employeeId !== input.employeeId) {
+  if (session.role !== "admin" && session.employeeId !== input.employeeId) {
     return {
       ok: false,
-      message: "Workers can only post their own shifts to mutuals.",
+      message: "Only admins can post mutuals on behalf of other workers.",
     };
   }
 
@@ -1462,9 +2154,23 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
     };
   }
 
+  const mutualDateWindowError = getMutualPostingDateWindowError(dates);
+
+  if (mutualDateWindowError) {
+    return {
+      ok: false,
+      message: mutualDateWindowError,
+    };
+  }
+
   const month = dates[0].slice(0, 7);
 
-  const snapshot = await getSchedulerSnapshot(month, session);
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: false,
+    includeCompetencies: false,
+    includeTimeCodes: false,
+    includeSubSchedules: false,
+  });
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
@@ -1534,6 +2240,228 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
   return {
     ok: true,
     message: `${employee.name} posted ${dates.length} shift${dates.length === 1 ? "" : "s"} to mutuals.`,
+  };
+}
+
+type MutualPostingRecord = {
+  id: string;
+  owner_employee_id: string;
+  owner_schedule_id: string;
+  status: string;
+  accepted_application_id: string | null;
+  owner_leader_approved_at?: string | null;
+  owner_leader_approved_by_name?: string | null;
+  applicant_leader_approved_at?: string | null;
+  applicant_leader_approved_by_name?: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+type MutualApplicationRecord = {
+  id: string;
+  status: string;
+  applicant_employee_id: string;
+  applicant_schedule_id: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+async function getEffectiveLeaderScheduleId(
+  session: NonNullable<Awaited<ReturnType<typeof requireActionRole>>>,
+) {
+  if (session.scheduleId) {
+    return session.scheduleId;
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return null;
+  }
+
+  let employeeId = session.employeeId;
+
+  if (!employeeId) {
+    const profileResult = await supabase
+      .from("profiles")
+      .select("employee_id")
+      .eq("email", session.email)
+      .maybeSingle();
+
+    employeeId = (profileResult.data as { employee_id?: string | null } | null)?.employee_id ?? null;
+  }
+
+  if (!employeeId) {
+    return null;
+  }
+
+  const employeeResult = await supabase
+    .from("employees")
+    .select("schedule_id")
+    .eq("id", employeeId)
+    .maybeSingle();
+
+  return (employeeResult.data as { schedule_id?: string | null } | null)?.schedule_id ?? null;
+}
+
+async function canApproveMutualForSchedule(
+  session: NonNullable<Awaited<ReturnType<typeof requireActionRole>>>,
+  scheduleId: string,
+) {
+  if (session.role === "admin") {
+    return true;
+  }
+
+  if (session.role !== "leader") {
+    return false;
+  }
+
+  const effectiveScheduleId = await getEffectiveLeaderScheduleId(session);
+  return effectiveScheduleId === scheduleId;
+}
+
+async function applyAcceptedMutualToSchedule({
+  supabase,
+  posting,
+  application,
+}: {
+  supabase: SupabaseAdminClient;
+  posting: MutualPostingRecord;
+  application: MutualApplicationRecord;
+}) {
+  const mutualTimeCodeResult = await supabase
+    .from("time_codes")
+    .select("id")
+    .eq("code", "M")
+    .maybeSingle();
+  const mutualTimeCodeId = (mutualTimeCodeResult.data as { id: string } | null)?.id ?? null;
+
+  if (mutualTimeCodeResult.error || !mutualTimeCodeId) {
+    return {
+      ok: false,
+      message: 'Time code "M" was not found. Add it before approving mutuals.',
+    };
+  }
+
+  const [postingDatesResult, applicationDatesResult] = await Promise.all([
+    supabase
+      .from("mutual_shift_posting_dates")
+      .select("swap_date, shift_kind")
+      .eq("posting_id", posting.id)
+      .order("swap_date"),
+    supabase
+      .from("mutual_shift_application_dates")
+      .select("swap_date, shift_kind")
+      .eq("application_id", application.id)
+      .order("swap_date"),
+  ]);
+
+  const postingDates = ((postingDatesResult.data as Array<{
+    swap_date: string;
+    shift_kind: ShiftKind;
+  }> | null) ?? []);
+  const applicationDates = ((applicationDatesResult.data as Array<{
+    swap_date: string;
+    shift_kind: ShiftKind;
+  }> | null) ?? []);
+
+  if (postingDatesResult.error || postingDates.length === 0) {
+    return {
+      ok: false,
+      message: "Could not load the original mutual dates.",
+    };
+  }
+
+  if (applicationDatesResult.error || applicationDates.length === 0) {
+    return {
+      ok: false,
+      message: "Could not load the offered mutual dates.",
+    };
+  }
+
+  const scheduleScopesResult = await supabase
+    .from("schedules")
+    .select("id, company_id, site_id, business_area_id")
+    .in("id", [posting.owner_schedule_id, application.applicant_schedule_id]);
+
+  if (scheduleScopesResult.error) {
+    return {
+      ok: false,
+      message: `Could not resolve mutual schedule scope: ${scheduleScopesResult.error.message}`,
+    };
+  }
+
+  const scheduleScopes = new Map(
+    (((scheduleScopesResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [])).map((row) => [
+      row.id,
+      scopeFromRow(row),
+    ]),
+  );
+
+  const allMutualDates = Array.from(
+    new Set([...postingDates.map((row) => row.swap_date), ...applicationDates.map((row) => row.swap_date)]),
+  );
+  const existingAssignmentsResult = await supabase
+    .from("schedule_assignments")
+    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, company_id, site_id, business_area_id")
+    .in("employee_id", [posting.owner_employee_id, application.applicant_employee_id])
+    .in("assignment_date", allMutualDates);
+
+  if (existingAssignmentsResult.error) {
+    return {
+      ok: false,
+      message: `Could not prepare mutual schedule updates: ${existingAssignmentsResult.error.message}`,
+    };
+  }
+
+  const existingAssignments = new Map(
+    (((existingAssignmentsResult.data as Array<{
+      employee_id: string;
+      schedule_id: string | null;
+      assignment_date: string;
+      competency_id: string | null;
+      time_code_id: string | null;
+    }> | null) ?? []))
+      .filter((row) => Boolean(row.schedule_id))
+      .map((row) => [createAssignmentKey(row.schedule_id ?? "", row.employee_id, row.assignment_date), row]),
+  );
+
+  const mutualRows: MutualAssignmentRow[] = buildAcceptedMutualAssignmentRows({
+    postingId: posting.id,
+    mutualTimeCodeId,
+    originalWorkerId: posting.owner_employee_id,
+    originalWorkerScheduleId: posting.owner_schedule_id,
+    originalDates: postingDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
+    applicantEmployeeId: application.applicant_employee_id,
+    applicantScheduleId: application.applicant_schedule_id,
+    applicantDates: applicationDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
+    existingAssignments,
+  }).map((row) => {
+    const parsed = parseMutualAssignmentNote(row.notes);
+    const targetScope = parsed.targetScheduleId ? scheduleScopes.get(parsed.targetScheduleId) : null;
+
+    return {
+      ...row,
+      ...toDatabaseScope(targetScope ?? scopeFromRow(posting)),
+    };
+  });
+
+  const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
+    onConflict: "schedule_id,employee_id,assignment_date",
+  });
+
+  if (mutualRowsError) {
+    return {
+      ok: false,
+      message: `Could not apply approved mutual to the schedule: ${mutualRowsError.message}`,
+    };
+  }
+
+  return {
+    ok: true,
+    message: "Mutual schedule rows applied.",
   };
 }
 
@@ -1626,7 +2554,21 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     };
   }
 
-  const snapshot = await getSchedulerSnapshot(posting.month_key, session);
+  const mutualDateWindowError = getMutualApplicationDateWindowError(dates);
+
+  if (mutualDateWindowError) {
+    return {
+      ok: false,
+      message: mutualDateWindowError,
+    };
+  }
+
+  const snapshot = await getScheduleReferenceSnapshot(posting.month_key, session, {
+    includeEmployeeCompetencies: false,
+    includeCompetencies: false,
+    includeTimeCodes: false,
+    includeSubSchedules: false,
+  });
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
@@ -1637,6 +2579,13 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     return {
       ok: false,
       message: "Could not find the selected employee for this mutual application.",
+    };
+  }
+
+  if (employee.scheduleId === posting.owner_schedule_id) {
+    return {
+      ok: false,
+      message: "Mutuals can only be offered between different shifts.",
     };
   }
 
@@ -1715,8 +2664,12 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
 }
 
 /**
- * Accepts one mutual application, marks it as the winning offer, and writes the
- * `M` time-code schedule rows that make the swap visible on both schedules.
+ * Accepts one mutual application and marks it as the chosen offer.
+ *
+ * This step is intentionally not the point where schedule rows are written.
+ * The posting first moves into `pending_leader_approval`, then each shift's
+ * leader approves their side, and only the second approval makes the mutual
+ * live on the schedule.
  */
 export async function acceptMutualApplication(input: AcceptMutualApplicationInput) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
@@ -1748,6 +2701,7 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     owner_employee_id: string;
     owner_schedule_id: string;
     status: string;
+    accepted_application_id: string | null;
     company_id: string;
     site_id: string;
     business_area_id: string;
@@ -1812,136 +2766,24 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     };
   }
 
-  const mutualTimeCodeResult = await supabase
-    .from("time_codes")
-    .select("id")
-    .eq("code", "M")
-    .maybeSingle();
-  const mutualTimeCodeId = (mutualTimeCodeResult.data as { id: string } | null)?.id ?? null;
-
-  if (mutualTimeCodeResult.error || !mutualTimeCodeId) {
+  if (application.applicant_schedule_id === posting.owner_schedule_id) {
     return {
       ok: false,
-      message: 'Time code "M" was not found. Add it before accepting mutuals.',
-    };
-  }
-
-  const [postingDatesResult, applicationDatesResult] = await Promise.all([
-    supabase
-      .from("mutual_shift_posting_dates")
-      .select("swap_date, shift_kind")
-      .eq("posting_id", input.postingId)
-      .order("swap_date"),
-    supabase
-      .from("mutual_shift_application_dates")
-      .select("swap_date, shift_kind")
-      .eq("application_id", input.applicationId)
-      .order("swap_date"),
-  ]);
-
-  const postingDates = ((postingDatesResult.data as Array<{
-    swap_date: string;
-    shift_kind: ShiftKind;
-  }> | null) ?? []);
-  const applicationDates = ((applicationDatesResult.data as Array<{
-    swap_date: string;
-    shift_kind: ShiftKind;
-  }> | null) ?? []);
-
-  if (postingDatesResult.error || postingDates.length === 0) {
-    return {
-      ok: false,
-      message: "Could not load the original mutual dates.",
-    };
-  }
-
-  if (applicationDatesResult.error || applicationDates.length === 0) {
-    return {
-      ok: false,
-      message: "Could not load the offered mutual dates.",
-    };
-  }
-
-  const scheduleScopesResult = await supabase
-    .from("schedules")
-    .select("id, company_id, site_id, business_area_id")
-    .in("id", [posting.owner_schedule_id, application.applicant_schedule_id]);
-
-  if (scheduleScopesResult.error) {
-    return {
-      ok: false,
-      message: `Could not resolve mutual schedule scope: ${scheduleScopesResult.error.message}`,
-    };
-  }
-
-  const scheduleScopes = new Map(
-    (((scheduleScopesResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [])).map((row) => [
-      row.id,
-      scopeFromRow(row),
-    ]),
-  );
-
-  const allMutualDates = Array.from(
-    new Set([...postingDates.map((row) => row.swap_date), ...applicationDates.map((row) => row.swap_date)]),
-  );
-  const existingAssignmentsResult = await supabase
-    .from("schedule_assignments")
-    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, company_id, site_id, business_area_id")
-    .in("employee_id", [posting.owner_employee_id, application.applicant_employee_id])
-    .in("assignment_date", allMutualDates);
-
-  if (existingAssignmentsResult.error) {
-    return {
-      ok: false,
-      message: `Could not prepare mutual schedule updates: ${existingAssignmentsResult.error.message}`,
-    };
-  }
-
-  const existingAssignments = new Map(
-    (((existingAssignmentsResult.data as Array<{
-      employee_id: string;
-      assignment_date: string;
-      competency_id: string | null;
-      time_code_id: string | null;
-    }> | null) ?? [])).map((row) => [`${row.employee_id}:${row.assignment_date}`, row]),
-  );
-
-  const mutualRows: MutualAssignmentRow[] = buildAcceptedMutualAssignmentRows({
-    postingId: input.postingId,
-    mutualTimeCodeId,
-    originalWorkerId: posting.owner_employee_id,
-    originalWorkerScheduleId: posting.owner_schedule_id,
-    originalDates: postingDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
-    applicantEmployeeId: application.applicant_employee_id,
-    applicantScheduleId: application.applicant_schedule_id,
-    applicantDates: applicationDates.map((row) => ({ date: row.swap_date, shiftKind: row.shift_kind })),
-    existingAssignments,
-  }).map((row) => {
-    const parsed = parseMutualAssignmentNote(row.notes);
-    const targetScope = parsed.targetScheduleId ? scheduleScopes.get(parsed.targetScheduleId) : null;
-
-    return {
-      ...row,
-      ...toDatabaseScope(targetScope ?? scopeFromRow(posting)),
-    };
-  });
-
-  const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
-    onConflict: "employee_id,assignment_date",
-  });
-
-  if (mutualRowsError) {
-    return {
-      ok: false,
-      message: `Could not apply accepted mutual to the schedule: ${mutualRowsError.message}`,
+      message: "Mutuals must be between employees on different shifts.",
     };
   }
 
   const { error: postingError } = await supabase
     .from("mutual_shift_postings")
     .update({
-      status: "accepted",
+      status: "pending_leader_approval",
       accepted_application_id: input.applicationId,
+      owner_leader_approved_at: null,
+      owner_leader_approved_by_employee_id: null,
+      owner_leader_approved_by_name: null,
+      applicant_leader_approved_at: null,
+      applicant_leader_approved_by_employee_id: null,
+      applicant_leader_approved_by_name: null,
     })
     .eq("id", input.postingId);
 
@@ -1966,12 +2808,175 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
 
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
-  revalidatePath("/schedule");
-  revalidatePath("/schedule/print");
 
   return {
     ok: true,
-    message: "Mutual application accepted.",
+    message: "Mutual application accepted. Waiting on both shift leaders.",
+  };
+}
+
+/** Records one side's leader approval and only makes the mutual live after both approvals exist. */
+export async function approveMutualPosting(input: ApproveMutualPostingInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can approve mutuals.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual approvals are unavailable.",
+    };
+  }
+
+  const postingResult = await supabase
+    .from("mutual_shift_postings")
+    .select("id, owner_employee_id, owner_schedule_id, status, accepted_application_id, owner_leader_approved_at, owner_leader_approved_by_name, applicant_leader_approved_at, applicant_leader_approved_by_name, company_id, site_id, business_area_id")
+    .eq("id", input.postingId)
+    .maybeSingle();
+
+  const posting = postingResult.data as MutualPostingRecord | null;
+
+  if (postingResult.error || !posting) {
+    return {
+      ok: false,
+      message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(posting))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual.",
+    };
+  }
+
+  if (posting.status === "accepted") {
+    return {
+      ok: false,
+      message: "That mutual is already live.",
+    };
+  }
+
+  if (posting.status !== "pending_leader_approval" || !posting.accepted_application_id) {
+    return {
+      ok: false,
+      message: "That mutual is not waiting for leader approval.",
+    };
+  }
+
+  const applicationResult = await supabase
+    .from("mutual_shift_applications")
+    .select("id, status, applicant_employee_id, applicant_schedule_id, company_id, site_id, business_area_id")
+    .eq("id", posting.accepted_application_id)
+    .eq("posting_id", input.postingId)
+    .maybeSingle();
+
+  const application = applicationResult.data as MutualApplicationRecord | null;
+
+  if (applicationResult.error || !application || application.status !== "accepted") {
+    return {
+      ok: false,
+      message: "Could not find the accepted mutual offer waiting for approval.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(application))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual offer.",
+    };
+  }
+
+  const sideScheduleId =
+    input.side === "owner" ? posting.owner_schedule_id : application.applicant_schedule_id;
+
+  if (!(await canApproveMutualForSchedule(session, sideScheduleId))) {
+    return {
+      ok: false,
+      message: "You are not the leader for that shift.",
+    };
+  }
+
+  const sideAlreadyApproved =
+    input.side === "owner"
+      ? Boolean(posting.owner_leader_approved_at)
+      : Boolean(posting.applicant_leader_approved_at);
+
+  if (sideAlreadyApproved) {
+    return {
+      ok: false,
+      message: "That shift has already approved this mutual.",
+    };
+  }
+
+  const sideUpdate =
+    input.side === "owner"
+      ? {
+          owner_leader_approved_at: new Date().toISOString(),
+          owner_leader_approved_by_employee_id: session.employeeId,
+          owner_leader_approved_by_name: session.displayName,
+        }
+      : {
+          applicant_leader_approved_at: new Date().toISOString(),
+          applicant_leader_approved_by_employee_id: session.employeeId,
+          applicant_leader_approved_by_name: session.displayName,
+        };
+
+  const bothApprovedAfterThisAction =
+    input.side === "owner"
+      ? Boolean(posting.applicant_leader_approved_at)
+      : Boolean(posting.owner_leader_approved_at);
+
+  if (bothApprovedAfterThisAction) {
+    const applyResult = await applyAcceptedMutualToSchedule({
+      supabase,
+      posting,
+      application,
+    });
+
+    if (!applyResult.ok) {
+      return applyResult;
+    }
+  }
+
+  const { error: approvalError } = await supabase
+    .from("mutual_shift_postings")
+    .update({
+      ...sideUpdate,
+      ...(bothApprovedAfterThisAction ? { status: "accepted" } : {}),
+    })
+    .eq("id", input.postingId);
+
+  if (approvalError) {
+    return {
+      ok: false,
+      message: `Could not save mutual approval: ${approvalError.message}`,
+    };
+  }
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  if (bothApprovedAfterThisAction) {
+    revalidatePath("/schedule");
+    revalidatePath("/schedule/print");
+
+    return {
+      ok: true,
+      message: "Both leaders approved. The mutual is now live on the schedule.",
+    };
+  }
+
+  return {
+    ok: true,
+    message: "Leader approval recorded. Waiting on the other shift leader.",
   };
 }
 
@@ -2237,7 +3242,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
 
   if (restoreRows.length > 0) {
     const { error: restoreError } = await supabase.from("schedule_assignments").upsert(restoreRows, {
-      onConflict: "employee_id,assignment_date",
+      onConflict: "schedule_id,employee_id,assignment_date",
     });
 
     if (restoreError) {
@@ -2254,6 +3259,7 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
         .from("schedule_assignments")
         .delete()
         .eq("employee_id", row.employee_id)
+        .eq("schedule_id", row.schedule_id ?? parseMutualAssignmentNote(row.notes).targetScheduleId ?? "")
         .eq("assignment_date", row.assignment_date)
         .like("notes", `MUT|posting:${input.postingId}|%`);
 
@@ -2311,13 +3317,17 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   const invalidEmployee = input.updates.find(
-    (update) => isBlank(update.name) || isBlank(update.role) || isBlank(update.scheduleId),
+    (update) =>
+      isBlank(update.firstName) ||
+      isBlank(update.lastName) ||
+      isBlank(update.email) ||
+      isBlank(update.scheduleId),
   );
 
   if (invalidEmployee) {
     return {
       ok: false,
-      message: "Each employee needs a name, role, and shift before saving.",
+      message: "Each employee needs a first name, last name, email, and shift before saving.",
     };
   }
 
@@ -2439,14 +3449,18 @@ export async function savePersonnel(input: SavePersonnelInput) {
     }
   }
 
-  const employeeRows = input.updates.map((update) => ({
-    ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
-    id: update.employeeId,
-    full_name: update.name.trim(),
-    role_title: update.role.trim(),
-    schedule_id: update.scheduleId,
-    is_active: true,
-  }));
+  const employeeRows = input.updates.map((update) => {
+    return {
+      ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
+      id: update.employeeId,
+      first_name: update.firstName.trim(),
+      last_name: update.lastName.trim(),
+      email: update.email.trim().toLowerCase() || null,
+      role_title: update.role.trim() || "Operator",
+      schedule_id: update.scheduleId,
+      is_active: true,
+    };
+  });
 
   const employeeError =
     employeeRows.length > 0
@@ -2572,6 +3586,7 @@ export async function saveSchedules(input: SaveSchedulesInput) {
     day_shift_days: update.dayShiftDays,
     night_shift_days: update.nightShiftDays,
     off_days: update.offDays,
+    is_active: update.isActive,
     ...toDatabaseScope(sessionScope),
   }));
 
@@ -2759,6 +3774,668 @@ export async function saveCompetencies(input: SaveCompetenciesInput) {
   };
 }
 
+/** Persists the catalog of event/overlay schedules that project codes like CO1. */
+export async function saveSubSchedules(input: SaveSubSchedulesInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can change sub-schedules.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Sub-schedules are unavailable.",
+    };
+  }
+
+  const invalidSubSchedule = input.updates.find(
+    (update) => isBlank(update.name) || isBlank(update.summaryTimeCodeId),
+  );
+
+  if (invalidSubSchedule) {
+    return {
+      ok: false,
+      message: "Each sub-schedule needs a name and a summary time code.",
+    };
+  }
+
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  const summaryTimeCodeIds = Array.from(new Set(input.updates.map((update) => update.summaryTimeCodeId)));
+  const timeCodeRowsResult = await supabase
+    .from("time_codes")
+    .select("id, usage_mode, company_id, site_id, business_area_id")
+    .in("id", summaryTimeCodeIds);
+
+  const timeCodeRows = ((timeCodeRowsResult.data as Array<{
+    id: string;
+    usage_mode: "manual" | "projected_only" | "both";
+  } & ScopedDatabaseRow> | null) ?? []);
+
+  if (timeCodeRowsResult.error || timeCodeRows.length !== summaryTimeCodeIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected summary time codes.",
+    };
+  }
+
+  for (const row of timeCodeRows) {
+    if (!canAccessScope(session, scopeFromRow(row))) {
+      return {
+        ok: false,
+        message: "You do not have permission to use one or more selected summary time codes.",
+      };
+    }
+
+    if (row.usage_mode === "manual") {
+      return {
+        ok: false,
+        message: "Sub-schedules must use a projected or dual-use summary time code.",
+      };
+    }
+  }
+
+  const rows = input.updates.map((update) => ({
+    id: update.subScheduleId,
+    name: update.name.trim(),
+    summary_time_code_id: update.summaryTimeCodeId,
+    is_archived: update.isArchived,
+    ...toDatabaseScope(sessionScope),
+  }));
+
+  const error =
+    rows.length > 0
+      ? (
+          await supabase.from("sub_schedules").upsert(rows, {
+            onConflict: "id",
+          })
+        ).error
+      : null;
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not save sub-schedules: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/sub-schedules");
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
+  revalidatePath("/metrics");
+
+  return {
+    ok: true,
+    message: "Sub-schedule changes saved to Supabase.",
+  };
+}
+
+/** Persists the competency set allowed inside one selected main schedule. */
+export async function saveScheduleCompetencies(input: SaveScheduleCompetenciesInput) {
+  const session = await requireActionRole(["admin"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins can change main schedule competencies.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Main schedule competencies are unavailable.",
+    };
+  }
+
+  const scheduleResult = await supabase
+    .from("schedules")
+    .select("id, company_id, site_id, business_area_id")
+    .eq("id", input.scheduleId)
+    .maybeSingle();
+
+  const schedule = scheduleResult.data as ({ id: string } & ScopedDatabaseRow) | null;
+
+  if (scheduleResult.error || !schedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected main schedule.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(schedule))) {
+    return {
+      ok: false,
+      message: "You do not have permission to edit that main schedule.",
+    };
+  }
+
+  const competencyIds = Array.from(new Set(input.competencyIds.filter(Boolean)));
+  const competencyRowsResult =
+    competencyIds.length > 0
+      ? await supabase
+          .from("competencies")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", competencyIds)
+      : { data: [], error: null };
+
+  const competencyRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+  if (competencyRowsResult.error || competencyRows.length !== competencyIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected competencies.",
+    };
+  }
+
+  const scheduleScope = scopeFromRow(schedule);
+
+  for (const row of competencyRows) {
+    const competencyScope = scopeFromRow(row);
+
+    if (
+      competencyScope.companyId !== scheduleScope.companyId ||
+      competencyScope.siteId !== scheduleScope.siteId ||
+      competencyScope.businessAreaId !== scheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Schedule competencies must come from the same company, site, and business area as the schedule.",
+      };
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("schedule_competencies")
+    .delete()
+    .eq("schedule_id", input.scheduleId);
+
+  if (deleteError) {
+    return {
+      ok: false,
+      message: `Could not clear existing schedule competencies: ${deleteError.message}`,
+    };
+  }
+
+  if (competencyIds.length > 0) {
+    const { error: insertError } = await supabase.from("schedule_competencies").insert(
+      competencyIds.map((competencyId) => ({
+        schedule_id: input.scheduleId,
+        competency_id: competencyId,
+        ...toDatabaseScope(scheduleScope),
+      })),
+    );
+
+    if (insertError) {
+      return {
+        ok: false,
+        message: `Could not save schedule competencies: ${insertError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/schedule");
+  revalidatePath("/competencies");
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: "Main schedule competencies saved to Supabase.",
+  };
+}
+
+/** Persists the competency set allowed inside one selected sub-schedule. */
+export async function saveSubScheduleCompetencies(input: SaveSubScheduleCompetenciesInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can change sub-schedule competencies.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Sub-schedule competencies are unavailable.",
+    };
+  }
+
+  const subScheduleResult = await supabase
+    .from("sub_schedules")
+    .select("id, is_archived, company_id, site_id, business_area_id")
+    .eq("id", input.subScheduleId)
+    .maybeSingle();
+
+  const subSchedule = subScheduleResult.data as ({ id: string; is_archived: boolean } & ScopedDatabaseRow) | null;
+
+  if (subScheduleResult.error || !subSchedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected sub-schedule.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(subSchedule))) {
+    return {
+      ok: false,
+      message: "You do not have permission to edit that sub-schedule.",
+    };
+  }
+
+  if (subSchedule.is_archived) {
+    return {
+      ok: false,
+      message: "Archived sub-schedules are read-only.",
+    };
+  }
+
+  const competencyIds = Array.from(new Set(input.competencyIds.filter(Boolean)));
+  const competencyRowsResult =
+    competencyIds.length > 0
+      ? await supabase
+          .from("competencies")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", competencyIds)
+      : { data: [], error: null };
+
+  const competencyRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+  if (competencyRowsResult.error || competencyRows.length !== competencyIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected competencies.",
+    };
+  }
+
+  const subScheduleScope = scopeFromRow(subSchedule);
+
+  for (const row of competencyRows) {
+    const competencyScope = scopeFromRow(row);
+
+    if (
+      competencyScope.companyId !== subScheduleScope.companyId ||
+      competencyScope.siteId !== subScheduleScope.siteId ||
+      competencyScope.businessAreaId !== subScheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Sub-schedule competencies must come from the same company, site, and business area as the sub-schedule.",
+      };
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("sub_schedule_competencies")
+    .delete()
+    .eq("sub_schedule_id", input.subScheduleId);
+
+  if (deleteError) {
+    return {
+      ok: false,
+      message: `Could not clear existing sub-schedule competencies: ${deleteError.message}`,
+    };
+  }
+
+  if (competencyIds.length > 0) {
+    const { error: insertError } = await supabase.from("sub_schedule_competencies").insert(
+      competencyIds.map((competencyId) => ({
+        sub_schedule_id: input.subScheduleId,
+        competency_id: competencyId,
+        ...toDatabaseScope(subScheduleScope),
+      })),
+    );
+
+    if (insertError) {
+      return {
+        ok: false,
+        message: `Could not save sub-schedule competencies: ${insertError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/competencies");
+  revalidatePath("/sub-schedules");
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: "Sub-schedule competencies saved to Supabase.",
+  };
+}
+
+/** Saves one month of detailed staffing inside a selected sub-schedule. */
+export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmentsInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can change sub-schedule assignments.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Sub-schedule assignments are unavailable.",
+    };
+  }
+
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  const subScheduleResult = await supabase
+    .from("sub_schedules")
+    .select("id, is_archived, company_id, site_id, business_area_id")
+    .eq("id", input.subScheduleId)
+    .maybeSingle();
+
+  const subSchedule = subScheduleResult.data as ({ id: string; is_archived: boolean } & ScopedDatabaseRow) | null;
+
+  if (subScheduleResult.error || !subSchedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected sub-schedule.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(subSchedule))) {
+    return {
+      ok: false,
+      message: "You do not have permission to edit that sub-schedule.",
+    };
+  }
+
+  if (subSchedule.is_archived) {
+    return {
+      ok: false,
+      message: "Archived sub-schedules are read-only.",
+    };
+  }
+
+  const employeeIds = Array.from(new Set(input.updates.map((update) => update.employeeId).filter(Boolean)));
+  const competencyIds = Array.from(
+    new Set(input.updates.map((update) => update.competencyId).filter((competencyId): competencyId is string => Boolean(competencyId))),
+  );
+  const timeCodeIds = Array.from(
+    new Set(input.updates.map((update) => update.timeCodeId).filter((timeCodeId): timeCodeId is string => Boolean(timeCodeId))),
+  );
+
+  const [employeeRowsResult, competencyRowsResult, timeCodeRowsResult, subScheduleCompetencyRowsResult] = await Promise.all([
+    employeeIds.length > 0
+      ? supabase
+          .from("employees")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", employeeIds)
+      : Promise.resolve({ data: [], error: null }),
+    competencyIds.length > 0
+      ? supabase
+          .from("competencies")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", competencyIds)
+      : Promise.resolve({ data: [], error: null }),
+    timeCodeIds.length > 0
+      ? supabase
+          .from("time_codes")
+          .select("id, usage_mode, company_id, site_id, business_area_id")
+          .in("id", timeCodeIds)
+      : Promise.resolve({ data: [], error: null }),
+    supabase
+      .from("sub_schedule_competencies")
+      .select("competency_id")
+      .eq("sub_schedule_id", input.subScheduleId),
+  ]);
+
+  const employeeRows = (employeeRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+  const competencyRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+  const timeCodeRows =
+    (timeCodeRowsResult.data as Array<{ id: string; usage_mode: string | null } & ScopedDatabaseRow> | null) ?? [];
+
+  if (employeeRowsResult.error || employeeRows.length !== employeeIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected employees.",
+    };
+  }
+
+  if (competencyRowsResult.error || competencyRows.length !== competencyIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected competencies.",
+    };
+  }
+
+  if (timeCodeRowsResult.error || timeCodeRows.length !== timeCodeIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected time codes.",
+    };
+  }
+
+  if (subScheduleCompetencyRowsResult.error) {
+    return {
+      ok: false,
+      message: "Could not resolve the allowed competencies for this sub-schedule.",
+    };
+  }
+
+  const subScheduleScope = scopeFromRow(subSchedule);
+  const employeeScopeMap = new Map(employeeRows.map((row) => [row.id, scopeFromRow(row)]));
+  const competencyScopeMap = new Map(competencyRows.map((row) => [row.id, scopeFromRow(row)]));
+  const timeCodeRowsById = new Map(timeCodeRows.map((row) => [row.id, row]));
+  const allowedCompetencyIds = new Set(
+    (((subScheduleCompetencyRowsResult.data as Array<{ competency_id: string }> | null) ?? []).map(
+      (row) => row.competency_id,
+    )),
+  );
+
+  for (const employeeScope of employeeScopeMap.values()) {
+    if (
+      employeeScope.companyId !== subScheduleScope.companyId ||
+      employeeScope.siteId !== subScheduleScope.siteId ||
+      employeeScope.businessAreaId !== subScheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Sub-schedule employees must be in the same company, site, and business area as the sub-schedule.",
+      };
+    }
+  }
+
+  for (const competencyScope of competencyScopeMap.values()) {
+    if (
+      competencyScope.companyId !== subScheduleScope.companyId ||
+      competencyScope.siteId !== subScheduleScope.siteId ||
+      competencyScope.businessAreaId !== subScheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Sub-schedule posts must come from the same company, site, and business area as the sub-schedule.",
+      };
+    }
+  }
+
+  for (const timeCodeRow of timeCodeRowsById.values()) {
+    const timeCodeScope = scopeFromRow(timeCodeRow);
+
+    if (
+      timeCodeScope.companyId !== subScheduleScope.companyId ||
+      timeCodeScope.siteId !== subScheduleScope.siteId ||
+      timeCodeScope.businessAreaId !== subScheduleScope.businessAreaId
+    ) {
+      return {
+        ok: false,
+        message: "Sub-schedule time codes must come from the same company, site, and business area as the sub-schedule.",
+      };
+    }
+
+    if (timeCodeRow.usage_mode === "projected_only") {
+      return {
+        ok: false,
+        message: "Projected-only event codes cannot be entered directly inside sub-schedule cells.",
+      };
+    }
+  }
+
+  for (const update of input.updates) {
+    if (update.competencyId && update.timeCodeId) {
+      return {
+        ok: false,
+        message: "Each sub-schedule cell can hold either a post or a time code, not both.",
+      };
+    }
+
+    if (update.competencyId && !allowedCompetencyIds.has(update.competencyId)) {
+      return {
+        ok: false,
+        message: "That competency is not assigned to the selected sub-schedule.",
+      };
+    }
+  }
+
+  const rowsToUpsert = input.updates
+    .filter(
+      (update) =>
+        update.competencyId ||
+        update.timeCodeId ||
+        (update.notes?.trim().length ?? 0) > 0,
+    )
+    .map((update) => ({
+      id: update.subScheduleAssignmentId,
+      sub_schedule_id: input.subScheduleId,
+      employee_id: update.employeeId,
+      assignment_date: update.date,
+      competency_id: update.competencyId,
+      time_code_id: update.timeCodeId,
+      notes: update.notes?.trim() ? update.notes.trim() : null,
+      ...toDatabaseScope(subScheduleScope),
+    }));
+
+  const rowsToDelete = input.updates
+    .filter(
+      (update) =>
+        !update.competencyId &&
+        !update.timeCodeId &&
+        !(update.notes?.trim().length ?? 0),
+    )
+    .map((update) => ({
+      sub_schedule_id: input.subScheduleId,
+      employee_id: update.employeeId,
+      assignment_date: update.date,
+    }));
+
+  if (rowsToUpsert.length > 0) {
+    const conflictingSubScheduleDeletes = await Promise.all(
+      rowsToUpsert.map((row) =>
+        supabase
+          .from("sub_schedule_assignments")
+          .delete()
+          .eq("employee_id", row.employee_id)
+          .eq("assignment_date", row.assignment_date)
+          .neq("sub_schedule_id", input.subScheduleId),
+      ),
+    );
+
+    const conflictingSubScheduleError = conflictingSubScheduleDeletes.find((result) => result.error)?.error;
+
+    if (conflictingSubScheduleError) {
+      return {
+        ok: false,
+        message: `Could not clear conflicting sub-schedule work: ${conflictingSubScheduleError.message}`,
+      };
+    }
+
+    const conflictingScheduleDeletes = await Promise.all(
+      rowsToUpsert.map((row) =>
+        supabase
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", row.employee_id)
+          .eq("assignment_date", row.assignment_date),
+      ),
+    );
+
+    const conflictingScheduleError = conflictingScheduleDeletes.find((result) => result.error)?.error;
+
+    if (conflictingScheduleError) {
+      return {
+        ok: false,
+        message: `Could not clear conflicting main-schedule work: ${conflictingScheduleError.message}`,
+      };
+    }
+
+    const { error: upsertError } = await supabase.from("sub_schedule_assignments").upsert(rowsToUpsert, {
+      onConflict: "sub_schedule_id,employee_id,assignment_date",
+    });
+
+    if (upsertError) {
+      return {
+        ok: false,
+        message: `Could not save sub-schedule assignments: ${upsertError.message}`,
+      };
+    }
+  }
+
+  if (rowsToDelete.length > 0) {
+    const deleteResults = await Promise.all(
+      rowsToDelete.map((row) =>
+        supabase
+          .from("sub_schedule_assignments")
+          .delete()
+          .eq("sub_schedule_id", row.sub_schedule_id)
+          .eq("employee_id", row.employee_id)
+          .eq("assignment_date", row.assignment_date),
+      ),
+    );
+
+    const deleteError = deleteResults.find((result) => result.error)?.error;
+
+    if (deleteError) {
+      return {
+        ok: false,
+        message: `Could not clear sub-schedule assignments: ${deleteError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/sub-schedules");
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
+  revalidatePath("/metrics");
+
+  return {
+    ok: true,
+    message: "Sub-schedule assignments saved to Supabase.",
+  };
+}
+
 /** Persists time-code reference data changes from the Time Codes admin page. */
 export async function saveTimeCodes(input: SaveTimeCodesInput) {
   const session = await requireActionRole(["admin"]);
@@ -2808,8 +4485,28 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
     code: update.code.trim(),
     label: update.label.trim(),
     color_token: update.colorToken,
+    usage_mode: update.usageMode,
     ...toDatabaseScope(sessionScope),
   }));
+
+  const manualSummaryTimeCodeIds = input.updates
+    .filter((update) => update.usageMode === "manual")
+    .map((update) => update.timeCodeId);
+
+  if (manualSummaryTimeCodeIds.length > 0) {
+    const subScheduleUsageResult = await supabase
+      .from("sub_schedules")
+      .select("id")
+      .in("summary_time_code_id", manualSummaryTimeCodeIds)
+      .limit(1);
+
+    if ((subScheduleUsageResult.data as Array<{ id: string }> | null)?.length) {
+      return {
+        ok: false,
+        message: "A sub-schedule summary code cannot be switched to manual-only.",
+      };
+    }
+  }
 
   if (input.deletedTimeCodeIds.length > 0) {
     const deleteScopeResult = await supabase

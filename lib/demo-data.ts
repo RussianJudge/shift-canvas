@@ -1,4 +1,23 @@
+import {
+  formatEmployeeDisplayName,
+  splitEmployeeDisplayName,
+} from "@/lib/employee-names";
 import type { SchedulerSnapshot } from "@/lib/types";
+
+type DemoEmployee = Omit<SchedulerSnapshot["schedules"][number]["employees"][number], "firstName" | "lastName" | "email">;
+
+/** Adds split name fields to compact demo rows while preserving display labels. */
+function demoEmployee(employee: DemoEmployee): SchedulerSnapshot["schedules"][number]["employees"][number] {
+  const nameParts = splitEmployeeDisplayName(employee.name);
+
+  return {
+    ...employee,
+    email: null,
+    firstName: nameParts.firstName,
+    lastName: nameParts.lastName,
+    name: formatEmployeeDisplayName(nameParts),
+  };
+}
 
 export const demoSchedulerSnapshot: SchedulerSnapshot = {
   month: "2026-03",
@@ -32,13 +51,13 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
     { id: "comp-pack-9", code: "Pack 9", label: "Final QA hold", colorToken: "rose", requiredStaff: 1 },
   ],
   timeCodes: [
-    { id: "time-ill", code: "ILL", label: "Illness", colorToken: "rose" },
-    { id: "time-absa", code: "ABSA", label: "Absent", colorToken: "orange" },
-    { id: "time-bot", code: "BOT", label: "Booked off", colorToken: "amber" },
-    { id: "time-days", code: "DAY", label: "Day shift", colorToken: "blue" },
-    { id: "time-nights", code: "NIGHT", label: "Night shift", colorToken: "violet" },
-    { id: "time-sim", code: "SIM", label: "Simulation", colorToken: "teal" },
-    { id: "time-v", code: "V", label: "Vacation", colorToken: "lime" },
+    { id: "time-ill", code: "ILL", label: "Illness", colorToken: "rose", usageMode: "manual" },
+    { id: "time-absa", code: "ABSA", label: "Absent", colorToken: "orange", usageMode: "manual" },
+    { id: "time-bot", code: "BOT", label: "Booked off", colorToken: "amber", usageMode: "manual" },
+    { id: "time-days", code: "DAY", label: "Day shift", colorToken: "blue", usageMode: "manual" },
+    { id: "time-nights", code: "NIGHT", label: "Night shift", colorToken: "violet", usageMode: "manual" },
+    { id: "time-sim", code: "SIM", label: "Simulation", colorToken: "teal", usageMode: "manual" },
+    { id: "time-v", code: "V", label: "Vacation", colorToken: "lime", usageMode: "manual" },
   ],
   schedules: [
     {
@@ -48,13 +67,15 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      isActive: true,
+      competencyIds: ["comp-post-1", "comp-post-11", "comp-post-12", "comp-post-21", "comp-dock-2", "comp-dock-7", "comp-pack-3", "comp-pack-6", "comp-pack-9"],
       employees: [
-        { id: "emp-ava", name: "Ava Patel", role: "Senior Operator", scheduleId: "schedule-601", competencyIds: ["comp-post-1", "comp-post-11", "comp-post-12"] },
-        { id: "emp-cam", name: "Cam Russell", role: "Dispatch Lead", scheduleId: "schedule-601", competencyIds: ["comp-dock-2", "comp-dock-7"] },
-        { id: "emp-kira", name: "Kira Walsh", role: "Packaging Lead", scheduleId: "schedule-601", competencyIds: ["comp-pack-3", "comp-pack-6"] },
-        { id: "emp-siena", name: "Siena Morales", role: "Team Lead", scheduleId: "schedule-601", competencyIds: ["comp-post-1", "comp-post-21"] },
-        { id: "emp-nina", name: "Nina Brooks", role: "Yard Controller", scheduleId: "schedule-601", competencyIds: ["comp-dock-2", "comp-dock-7"] },
-        { id: "emp-dina", name: "Dina Scott", role: "Line Operator", scheduleId: "schedule-601", competencyIds: ["comp-pack-3", "comp-pack-9"] },
+        demoEmployee({ id: "emp-ava", name: "Ava Patel", role: "Senior Operator", scheduleId: "schedule-601", competencyIds: ["comp-post-1", "comp-post-11", "comp-post-12"] }),
+        demoEmployee({ id: "emp-cam", name: "Cam Russell", role: "Dispatch Lead", scheduleId: "schedule-601", competencyIds: ["comp-dock-2", "comp-dock-7"] }),
+        demoEmployee({ id: "emp-kira", name: "Kira Walsh", role: "Packaging Lead", scheduleId: "schedule-601", competencyIds: ["comp-pack-3", "comp-pack-6"] }),
+        demoEmployee({ id: "emp-siena", name: "Siena Morales", role: "Team Lead", scheduleId: "schedule-601", competencyIds: ["comp-post-1", "comp-post-21"] }),
+        demoEmployee({ id: "emp-nina", name: "Nina Brooks", role: "Yard Controller", scheduleId: "schedule-601", competencyIds: ["comp-dock-2", "comp-dock-7"] }),
+        demoEmployee({ id: "emp-dina", name: "Dina Scott", role: "Line Operator", scheduleId: "schedule-601", competencyIds: ["comp-pack-3", "comp-pack-9"] }),
       ],
     },
     {
@@ -64,13 +85,15 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      isActive: true,
+      competencyIds: ["comp-post-11", "comp-post-12", "comp-post-21", "comp-dock-2", "comp-dock-7", "comp-dock-9", "comp-pack-3", "comp-pack-6", "comp-pack-9"],
       employees: [
-        { id: "emp-noah", name: "Noah Kim", role: "Relief Operator", scheduleId: "schedule-602", competencyIds: ["comp-post-11", "comp-post-21"] },
-        { id: "emp-lena", name: "Lena Abbas", role: "Yard Specialist", scheduleId: "schedule-602", competencyIds: ["comp-dock-7", "comp-dock-9"] },
-        { id: "emp-joel", name: "Joel Park", role: "Case Packer", scheduleId: "schedule-602", competencyIds: ["comp-pack-3", "comp-pack-9"] },
-        { id: "emp-owen", name: "Owen Clarke", role: "Operator", scheduleId: "schedule-602", competencyIds: ["comp-post-11", "comp-post-12"] },
-        { id: "emp-hugo", name: "Hugo Tran", role: "Manifest Clerk", scheduleId: "schedule-602", competencyIds: ["comp-dock-2", "comp-dock-9"] },
-        { id: "emp-finn", name: "Finn Alvarez", role: "Palletizer", scheduleId: "schedule-602", competencyIds: ["comp-pack-6", "comp-pack-9"] },
+        demoEmployee({ id: "emp-noah", name: "Noah Kim", role: "Relief Operator", scheduleId: "schedule-602", competencyIds: ["comp-post-11", "comp-post-21"] }),
+        demoEmployee({ id: "emp-lena", name: "Lena Abbas", role: "Yard Specialist", scheduleId: "schedule-602", competencyIds: ["comp-dock-7", "comp-dock-9"] }),
+        demoEmployee({ id: "emp-joel", name: "Joel Park", role: "Case Packer", scheduleId: "schedule-602", competencyIds: ["comp-pack-3", "comp-pack-9"] }),
+        demoEmployee({ id: "emp-owen", name: "Owen Clarke", role: "Operator", scheduleId: "schedule-602", competencyIds: ["comp-post-11", "comp-post-12"] }),
+        demoEmployee({ id: "emp-hugo", name: "Hugo Tran", role: "Manifest Clerk", scheduleId: "schedule-602", competencyIds: ["comp-dock-2", "comp-dock-9"] }),
+        demoEmployee({ id: "emp-finn", name: "Finn Alvarez", role: "Palletizer", scheduleId: "schedule-602", competencyIds: ["comp-pack-6", "comp-pack-9"] }),
       ],
     },
     {
@@ -80,13 +103,15 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      isActive: true,
+      competencyIds: ["comp-post-11", "comp-post-12", "comp-post-21", "comp-dock-2", "comp-dock-7", "comp-dock-9", "comp-pack-3", "comp-pack-6", "comp-pack-9"],
       employees: [
-        { id: "emp-jules", name: "Jules Martin", role: "Coordinator", scheduleId: "schedule-603", competencyIds: ["comp-post-12", "comp-post-21"] },
-        { id: "emp-eli", name: "Eli Foster", role: "Coordinator", scheduleId: "schedule-603", competencyIds: ["comp-dock-2", "comp-dock-9"] },
-        { id: "emp-maia", name: "Maia Chen", role: "QA Tech", scheduleId: "schedule-603", competencyIds: ["comp-pack-6", "comp-pack-9"] },
-        { id: "emp-rina", name: "Rina Das", role: "Utility Relief", scheduleId: "schedule-603", competencyIds: ["comp-post-11", "comp-post-12", "comp-post-21"] },
-        { id: "emp-iris", name: "Iris Bennett", role: "Dispatch Operator", scheduleId: "schedule-603", competencyIds: ["comp-dock-7", "comp-dock-9"] },
-        { id: "emp-gia", name: "Gia Turner", role: "Packaging Tech", scheduleId: "schedule-603", competencyIds: ["comp-pack-3", "comp-pack-6", "comp-pack-9"] },
+        demoEmployee({ id: "emp-jules", name: "Jules Martin", role: "Coordinator", scheduleId: "schedule-603", competencyIds: ["comp-post-12", "comp-post-21"] }),
+        demoEmployee({ id: "emp-eli", name: "Eli Foster", role: "Coordinator", scheduleId: "schedule-603", competencyIds: ["comp-dock-2", "comp-dock-9"] }),
+        demoEmployee({ id: "emp-maia", name: "Maia Chen", role: "QA Tech", scheduleId: "schedule-603", competencyIds: ["comp-pack-6", "comp-pack-9"] }),
+        demoEmployee({ id: "emp-rina", name: "Rina Das", role: "Utility Relief", scheduleId: "schedule-603", competencyIds: ["comp-post-11", "comp-post-12", "comp-post-21"] }),
+        demoEmployee({ id: "emp-iris", name: "Iris Bennett", role: "Dispatch Operator", scheduleId: "schedule-603", competencyIds: ["comp-dock-7", "comp-dock-9"] }),
+        demoEmployee({ id: "emp-gia", name: "Gia Turner", role: "Packaging Tech", scheduleId: "schedule-603", competencyIds: ["comp-pack-3", "comp-pack-6", "comp-pack-9"] }),
       ],
     },
     {
@@ -96,18 +121,23 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
       dayShiftDays: 3,
       nightShiftDays: 3,
       offDays: 6,
+      isActive: true,
+      competencyIds: ["comp-post-1", "comp-post-12", "comp-dock-2", "comp-dock-7", "comp-dock-9", "comp-pack-3", "comp-pack-6"],
       employees: [
-        { id: "emp-mika", name: "Mika Stone", role: "Operator", scheduleId: "schedule-604", competencyIds: ["comp-post-1", "comp-post-12"] },
-        { id: "emp-zara", name: "Zara Shah", role: "Relief Operator", scheduleId: "schedule-604", competencyIds: ["comp-dock-2", "comp-dock-7", "comp-dock-9"] },
-        { id: "emp-rhett", name: "Rhett Cole", role: "Forklift Operator", scheduleId: "schedule-604", competencyIds: ["comp-pack-3", "comp-pack-6"] },
-        { id: "emp-teo", name: "Teo Ramirez", role: "Operator", scheduleId: "schedule-604", competencyIds: ["comp-post-1", "comp-post-12"] },
-        { id: "emp-omar", name: "Omar Vega", role: "Release Specialist", scheduleId: "schedule-604", competencyIds: ["comp-dock-2", "comp-dock-7"] },
-        { id: "emp-leo", name: "Leo Morris", role: "Inventory Relief", scheduleId: "schedule-604", competencyIds: ["comp-pack-6"] },
+        demoEmployee({ id: "emp-mika", name: "Mika Stone", role: "Operator", scheduleId: "schedule-604", competencyIds: ["comp-post-1", "comp-post-12"] }),
+        demoEmployee({ id: "emp-zara", name: "Zara Shah", role: "Relief Operator", scheduleId: "schedule-604", competencyIds: ["comp-dock-2", "comp-dock-7", "comp-dock-9"] }),
+        demoEmployee({ id: "emp-rhett", name: "Rhett Cole", role: "Forklift Operator", scheduleId: "schedule-604", competencyIds: ["comp-pack-3", "comp-pack-6"] }),
+        demoEmployee({ id: "emp-teo", name: "Teo Ramirez", role: "Operator", scheduleId: "schedule-604", competencyIds: ["comp-post-1", "comp-post-12"] }),
+        demoEmployee({ id: "emp-omar", name: "Omar Vega", role: "Release Specialist", scheduleId: "schedule-604", competencyIds: ["comp-dock-2", "comp-dock-7"] }),
+        demoEmployee({ id: "emp-leo", name: "Leo Morris", role: "Inventory Relief", scheduleId: "schedule-604", competencyIds: ["comp-pack-6"] }),
       ],
     },
   ],
   assignments: [],
+  projectedAssignments: [],
   overtimeClaims: [],
   manualOvertimePostings: [],
   completedSets: [],
+  subSchedules: [],
+  subScheduleAssignments: [],
 };

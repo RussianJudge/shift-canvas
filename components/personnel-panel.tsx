@@ -4,7 +4,9 @@ import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { savePersonnel } from "@/app/actions";
-import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
+import { createAccountInvite } from "@/app/auth-actions";
+import { formatEmployeeDisplayName, splitEmployeeDisplayName } from "@/lib/employee-names";
+import type { AppRole, AppSession, PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
 
 /**
  * Personnel editor with inline row editing and CSV import.
@@ -14,7 +16,9 @@ import type { PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/l
  */
 type EditableEmployee = {
   id: string;
-  name: string;
+  firstName: string;
+  lastName: string;
+  email: string;
   role: string;
   scheduleId: string;
   competencyIds: string[];
@@ -38,15 +42,43 @@ type PendingCsvImport = {
   summary: string;
 };
 
+type InviteDraft = {
+  employeeId: string;
+  role: AppRole;
+  firstName: string;
+  lastName: string;
+  email: string;
+};
+
 /** Creates the unsaved row shown at the top of the table before add/save. */
 function createDraftEmployee() {
   return {
     id: `emp-${crypto.randomUUID().slice(0, 8)}`,
-    name: "",
-    role: "",
+    firstName: "",
+    lastName: "",
+    email: "",
+    role: "Operator",
     scheduleId: "",
     competencyIds: [],
   };
+}
+
+function createInviteDraft(): InviteDraft {
+  return {
+    employeeId: "",
+    role: "worker",
+    firstName: "",
+    lastName: "",
+    email: "",
+  };
+}
+
+/** Keeps UI sorting/search/display consistent while the editor stores split names. */
+function getEditableEmployeeDisplayName(employee: Pick<EditableEmployee, "firstName" | "lastName">) {
+  return formatEmployeeDisplayName({
+    firstName: employee.firstName,
+    lastName: employee.lastName,
+  });
 }
 
 /** Normalizes CSV headers so import accepts a wide range of spreadsheet exports. */
@@ -117,6 +149,21 @@ function createCompetencyLookupKeys(competency: SchedulerSnapshot["competencies"
       }
     });
   }
+
+  return [...variants];
+}
+
+/** Accept both `Last, First` and `First Last` when matching people during imports. */
+function createEmployeeLookupKeys(employee: Pick<EditableEmployee, "firstName" | "lastName">) {
+  const variants = new Set<string>();
+  const displayName = getEditableEmployeeDisplayName(employee);
+  const naturalName = `${employee.firstName} ${employee.lastName}`.trim();
+
+  [displayName, naturalName].forEach((value) => {
+    for (const variant of createLookupVariants(value)) {
+      variants.add(variant);
+    }
+  });
 
   return [...variants];
 }
@@ -238,45 +285,74 @@ function cloneEmployees(employees: EditableEmployee[]) {
 function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   return {
     employeeId: employee.id,
-    name: employee.name.trim(),
-    role: employee.role.trim(),
+    firstName: employee.firstName.trim(),
+    lastName: employee.lastName.trim(),
+    email: employee.email.trim().toLowerCase(),
+    role: employee.role.trim() || "Operator",
     scheduleId: employee.scheduleId,
     competencyIds: [...employee.competencyIds].sort(),
   };
 }
 
-/** Returns the required-field issues that block save/add for a row. */
-function getEmployeeIssues(employee: EditableEmployee) {
-  const issues: string[] = [];
+type EmployeeFieldIssues = {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  scheduleId?: string;
+};
 
-  if (!employee.name.trim()) {
-    issues.push("Name required");
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+/** Returns column-specific validation messages so each warning can sit under its input. */
+function getEmployeeFieldIssues(employee: EditableEmployee): EmployeeFieldIssues {
+  const issues: EmployeeFieldIssues = {};
+
+  if (!employee.firstName.trim()) {
+    issues.firstName = "First name required";
   }
 
-  if (!employee.role.trim()) {
-    issues.push("Role required");
+  if (!employee.lastName.trim()) {
+    issues.lastName = "Last name required";
+  }
+
+  if (!employee.email.trim()) {
+    issues.email = "Email required";
+  } else if (!isValidEmail(employee.email)) {
+    issues.email = "Enter a valid email";
   }
 
   if (!employee.scheduleId) {
-    issues.push("Shift required");
+    issues.scheduleId = "Shift required";
   }
 
   return issues;
 }
 
+/** Flattens field-level validation back into a simple list for save gating logic. */
+function getEmployeeIssues(employee: EditableEmployee) {
+  return Object.values(getEmployeeFieldIssues(employee));
+}
+
 export function PersonnelPanel({
   snapshot,
+  viewer,
 }: {
   snapshot: SchedulerSnapshot;
+  viewer: AppSession;
 }) {
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
   const initialEmployees = useMemo<EditableEmployee[]>(
     () =>
       snapshot.schedules.flatMap((schedule) =>
         schedule.employees.map((employee) => ({
           id: employee.id,
-          name: employee.name,
-          role: employee.role,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+          email: employee.email ?? "",
+          role: employee.role || "Operator",
           scheduleId: employee.scheduleId,
           competencyIds: employee.competencyIds,
         })),
@@ -293,7 +369,16 @@ export function PersonnelPanel({
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
   const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
+  const [showInviteBuilder, setShowInviteBuilder] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const [inviteDraft, setInviteDraft] = useState<InviteDraft>(createInviteDraft);
+  const [inviteLink, setInviteLink] = useState("");
+  const [inviteStatusMessage, setInviteStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
+  const [isCreatingInvite, startInviteTransition] = useTransition();
+  const canManageInvites = viewer.role === "admin" || viewer.role === "leader";
+  const canInviteAdmin = viewer.role === "admin";
+  const canInviteLeader = viewer.role === "admin";
   const defaultSchedule =
     [...snapshot.schedules]
       .sort((left, right) => left.employees.length - right.employees.length || left.name.localeCompare(right.name))[0] ??
@@ -302,6 +387,16 @@ export function PersonnelPanel({
   const scheduleNameById = useMemo(
     () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
     [snapshot.schedules],
+  );
+  const employeeOptions = useMemo(
+    () =>
+      [...employees].sort(
+        (left, right) =>
+          left.lastName.localeCompare(right.lastName) ||
+          left.firstName.localeCompare(right.firstName) ||
+          left.email.localeCompare(right.email),
+      ),
+    [employees],
   );
   const baselineMap = useMemo(
     () => new Map(baselineEmployees.map((employee) => [employee.id, normalizeEmployee(employee)])),
@@ -348,6 +443,10 @@ export function PersonnelPanel({
         "personnel_id",
         "name",
         "full_name",
+        "first_name",
+        "last_name",
+        "email",
+        "email_address",
         "employee",
         "employee_name",
         "role",
@@ -384,9 +483,72 @@ export function PersonnelPanel({
     setSelectedCompetencyFilter("all");
     setPendingCsvImport(null);
     setDraftEmployee(null);
+    setShowInviteBuilder(false);
+    setShowActionsMenu(false);
+    setInviteDraft(createInviteDraft());
+    setInviteLink("");
+    setInviteStatusMessage("");
   }, [initialEmployees]);
+
+  useEffect(() => {
+    if (!inviteDraft.employeeId) {
+      return;
+    }
+
+    const employee = employeeOptions.find((entry) => entry.id === inviteDraft.employeeId);
+
+    if (!employee) {
+      return;
+    }
+
+    setInviteDraft((current) => ({
+      ...current,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      email: employee.email || current.email,
+    }));
+  }, [employeeOptions, inviteDraft.employeeId]);
+
+  useEffect(() => {
+    if (canInviteAdmin || inviteDraft.role === "worker") {
+      return;
+    }
+
+    setInviteDraft((current) => ({
+      ...current,
+      role: "worker",
+    }));
+  }, [canInviteAdmin, inviteDraft.role]);
+
+  useEffect(() => {
+    if (!showActionsMenu) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!actionsMenuRef.current?.contains(event.target as Node)) {
+        setShowActionsMenu(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowActionsMenu(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [showActionsMenu]);
+
   const hasValidationErrors = invalidEmployeeIds.size > 0;
   const draftEmployeeIssues = draftEmployee ? getEmployeeIssues(draftEmployee) : [];
+  const draftEmployeeFieldIssues = draftEmployee ? getEmployeeFieldIssues(draftEmployee) : {};
 
   const visibleEmployees = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -408,14 +570,15 @@ export function PersonnelPanel({
           return true;
         }
 
-        return `${employee.name} ${employee.role} ${scheduleNameById[employee.scheduleId] ?? ""}`
+        return `${employee.firstName} ${employee.lastName} ${getEditableEmployeeDisplayName(employee)} ${employee.email} ${employee.role} ${scheduleNameById[employee.scheduleId] ?? ""}`
           .toLowerCase()
           .includes(query);
       })
       .sort(
         (left, right) =>
           (scheduleNameById[left.scheduleId] ?? "").localeCompare(scheduleNameById[right.scheduleId] ?? "") ||
-          left.name.localeCompare(right.name),
+          left.lastName.localeCompare(right.lastName) ||
+          left.firstName.localeCompare(right.firstName),
       );
   }, [employees, scheduleNameById, search, selectedCompetencyFilter, selectedScheduleFilter]);
 
@@ -490,6 +653,7 @@ export function PersonnelPanel({
       return;
     }
 
+    setShowActionsMenu(false);
     setDraftEmployee((current) => current ?? createDraftEmployee());
     setStatusMessage("");
   }
@@ -512,6 +676,7 @@ export function PersonnelPanel({
   }
 
   async function handleCsvImport(event: ChangeEvent<HTMLInputElement>) {
+    setShowActionsMenu(false);
     const file = event.target.files?.[0];
     event.target.value = "";
 
@@ -534,7 +699,9 @@ export function PersonnelPanel({
     const nextEmployees = cloneEmployees(employees);
     const indexById = new Map(nextEmployees.map((employee, index) => [employee.id, index]));
     const indexByName = new Map(
-      nextEmployees.map((employee, index) => [normalizeLookupValue(employee.name), index]),
+      nextEmployees.flatMap((employee, index) =>
+        createEmployeeLookupKeys(employee).map((key) => [key, index] as const),
+      ),
     );
     const restoredIds = new Set<string>();
     const previewRows: CsvPreviewRow[] = [];
@@ -546,6 +713,23 @@ export function PersonnelPanel({
     for (const row of csvRows) {
       const csvId = pickCsvValue(row, ["id", "employee_id", "personnel_id"]);
       const csvName = pickCsvValue(row, ["name", "full_name", "employee", "employee_name"]);
+      const csvFirstName = pickCsvValue(row, ["first_name", "first"]);
+      const csvLastName = pickCsvValue(row, ["last_name", "last", "surname"]);
+      const csvEmail = pickCsvValue(row, ["email", "email_address"]);
+      const resolvedCsvName =
+        csvName ||
+        (csvFirstName || csvLastName
+          ? formatEmployeeDisplayName({
+              firstName: csvFirstName,
+              lastName: csvLastName,
+            })
+          : "");
+      const resolvedCsvNameParts = resolvedCsvName
+        ? splitEmployeeDisplayName(resolvedCsvName)
+        : {
+            firstName: "",
+            lastName: "",
+          };
       const csvRole = pickCsvValue(row, ["role", "role_title", "title", "position"]);
       const csvShift = pickCsvValue(row, ["shift", "schedule", "shift_code", "schedule_code", "pattern"]);
       const csvCompetencies = pickCsvValue(row, [
@@ -571,7 +755,7 @@ export function PersonnelPanel({
         return competencyId;
       });
 
-      if (!csvName && !csvId) {
+      if (!resolvedCsvName && !csvId) {
         skippedCount += 1;
         previewRows.push({
           key: `skip-${previewRows.length}`,
@@ -585,8 +769,13 @@ export function PersonnelPanel({
       }
 
       const matchedIndexById = csvId ? indexById.get(csvId) : undefined;
-      const matchedIndexByName = csvName ? indexByName.get(normalizeLookupValue(csvName)) : undefined;
-      const matchedIndex = matchedIndexById ?? matchedIndexByName;
+      const existingNameMatchIndex =
+        resolvedCsvName
+          ? createEmployeeLookupKeys(resolvedCsvNameParts)
+              .map((key) => indexByName.get(key))
+              .find((index): index is number => index !== undefined)
+          : undefined;
+      const matchedIndex = matchedIndexById ?? existingNameMatchIndex;
       const existing = matchedIndex === undefined ? null : nextEmployees[matchedIndex];
       const resolvedScheduleId = csvShift
         ? scheduleIdByLookup.get(normalizeLookupValue(csvShift)) ?? ""
@@ -617,7 +806,9 @@ export function PersonnelPanel({
 
       const nextEmployee: EditableEmployee = {
         id: existing?.id ?? (csvId || `emp-${crypto.randomUUID().slice(0, 8)}`),
-        name: csvName || existing?.name || "New Employee",
+        firstName: resolvedCsvNameParts.firstName || existing?.firstName || "New",
+        lastName: resolvedCsvNameParts.lastName || existing?.lastName || "Employee",
+        email: csvEmail.toLowerCase() || existing?.email || "",
         role: csvRole || existing?.role || "Operator",
         scheduleId: resolvedScheduleId || existing?.scheduleId || defaultSchedule.id,
         competencyIds:
@@ -630,11 +821,11 @@ export function PersonnelPanel({
         nextEmployees.push(nextEmployee);
         const nextIndex = nextEmployees.length - 1;
         indexById.set(nextEmployee.id, nextIndex);
-        indexByName.set(normalizeLookupValue(nextEmployee.name), nextIndex);
+        createEmployeeLookupKeys(nextEmployee).forEach((key) => indexByName.set(key, nextIndex));
       } else {
         nextEmployees[matchedIndex] = nextEmployee;
         indexById.set(nextEmployee.id, matchedIndex);
-        indexByName.set(normalizeLookupValue(nextEmployee.name), matchedIndex);
+        createEmployeeLookupKeys(nextEmployee).forEach((key) => indexByName.set(key, matchedIndex));
       }
 
       restoredIds.add(nextEmployee.id);
@@ -642,7 +833,7 @@ export function PersonnelPanel({
 
       previewRows.push({
         key: nextEmployee.id,
-        name: nextEmployee.name,
+        name: getEditableEmployeeDisplayName(nextEmployee),
         role: nextEmployee.role,
         shiftName: scheduleNameById[nextEmployee.scheduleId] ?? nextEmployee.scheduleId,
         action: existing ? "Update" : "Add",
@@ -682,13 +873,64 @@ export function PersonnelPanel({
   }
 
   function handleRemoveEmployee(employeeId: string) {
+    const employee = employees.find((entry) => entry.id === employeeId);
+
+    if (!employee) {
+      return;
+    }
+
+    const employeeName = getEditableEmployeeDisplayName(employee);
+
+    if (!window.confirm(`Remove ${employeeName} from Personnel? This change will not save until you click Save.`)) {
+      return;
+    }
+
     setEmployees((current) => current.filter((employee) => employee.id !== employeeId));
 
     if (baselineMap.has(employeeId)) {
       setDeletedEmployeeIds((current) => [...current, employeeId]);
     }
 
-    setStatusMessage("");
+    setStatusMessage(`${employeeName} removed from the table. Save when you're ready.`);
+  }
+
+  function handleInviteDraftChange<K extends keyof InviteDraft>(key: K, value: InviteDraft[K]) {
+    setInviteDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function handleCreateInvite() {
+    startInviteTransition(async () => {
+      const result = await createAccountInvite({
+        email: inviteDraft.email,
+        firstName: inviteDraft.firstName,
+        lastName: inviteDraft.lastName,
+        role: inviteDraft.role,
+        employeeId: inviteDraft.employeeId || null,
+      });
+
+      setInviteStatusMessage(result.message);
+      setInviteLink(result.ok && "inviteUrl" in result && result.inviteUrl ? result.inviteUrl : "");
+
+      if (result.ok) {
+        setShowInviteBuilder(true);
+      }
+    });
+  }
+
+  async function handleCopyInviteLink() {
+    if (!inviteLink) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setInviteStatusMessage("Invite link copied to clipboard.");
+    } catch {
+      setInviteStatusMessage("Could not copy automatically. Copy the invite link manually.");
+    }
   }
 
   return (
@@ -738,13 +980,51 @@ export function PersonnelPanel({
           </select>
         </label>
 
-        <div className="planner-actions">
-          <button type="button" className="ghost-button" onClick={handleAddEmployee}>
-            Add employee
-          </button>
-          <button type="button" className="ghost-button" onClick={() => csvInputRef.current?.click()}>
-            Import CSV
-          </button>
+        <div className="planner-actions personnel-toolbar-actions">
+          <div className="personnel-actions-menu" ref={actionsMenuRef}>
+            <button
+              type="button"
+              className="ghost-button"
+              aria-haspopup="menu"
+              aria-expanded={showActionsMenu}
+              onClick={() => setShowActionsMenu((current) => !current)}
+            >
+              Actions
+            </button>
+            {showActionsMenu ? (
+              <div className="personnel-actions-menu__panel" role="menu" aria-label="Personnel actions">
+                <button
+                  type="button"
+                  className="ghost-button personnel-actions-menu__item"
+                  onClick={handleAddEmployee}
+                >
+                  Add employee
+                </button>
+                {canManageInvites ? (
+                  <button
+                    type="button"
+                    className="ghost-button personnel-actions-menu__item"
+                    onClick={() => {
+                      setShowActionsMenu(false);
+                      setShowInviteBuilder((current) => !current);
+                    }}
+                  >
+                    {showInviteBuilder ? "Hide invite builder" : "Invite account"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="ghost-button personnel-actions-menu__item"
+                  onClick={() => {
+                    setShowActionsMenu(false);
+                    csvInputRef.current?.click();
+                  }}
+                >
+                  Import CSV
+                </button>
+              </div>
+            ) : null}
+          </div>
           <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
             Revert
           </button>
@@ -774,6 +1054,122 @@ export function PersonnelPanel({
           ) : null}
         </div>
       </div>
+
+      {canManageInvites && showInviteBuilder ? (
+        <section className="invite-builder">
+          <div className="invite-builder__header">
+            <div>
+              <strong>Create Account Invite</strong>
+              <p>
+                Generate a secure sign-up link that assigns the invited workspace profile on the server.
+              </p>
+            </div>
+            <div className="planner-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setInviteDraft(createInviteDraft());
+                  setInviteLink("");
+                  setInviteStatusMessage("");
+                }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+	          <div className="invite-builder__grid">
+            <label className="field">
+              <span>App role</span>
+              <select
+                value={inviteDraft.role}
+                onChange={(event) => handleInviteDraftChange("role", event.target.value as AppRole)}
+              >
+                <option value="worker">Worker</option>
+                {canInviteLeader ? <option value="leader">Leader</option> : null}
+                {canInviteAdmin ? <option value="admin">Admin</option> : null}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Link employee</span>
+              <select
+                value={inviteDraft.employeeId}
+                onChange={(event) => handleInviteDraftChange("employeeId", event.target.value)}
+              >
+                <option value="">None</option>
+                {employeeOptions.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {getEditableEmployeeDisplayName(employee)}{employee.email ? ` · ${employee.email}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>First Name</span>
+              <input
+                type="text"
+                value={inviteDraft.firstName}
+                onChange={(event) => handleInviteDraftChange("firstName", event.target.value)}
+              />
+            </label>
+
+            <label className="field">
+              <span>Last Name</span>
+              <input
+                type="text"
+                value={inviteDraft.lastName}
+                onChange={(event) => handleInviteDraftChange("lastName", event.target.value)}
+              />
+            </label>
+
+            <label className="field invite-builder__email">
+              <span>Email</span>
+              <input
+                type="email"
+                value={inviteDraft.email}
+                placeholder="you@company.com"
+                onChange={(event) => handleInviteDraftChange("email", event.target.value)}
+              />
+            </label>
+          </div>
+
+          <p className="toolbar-status">
+            {viewer.role === "leader"
+              ? "Leaders can send worker invites for linked employees on their own shift."
+              : inviteDraft.role === "admin"
+              ? "Admin invites can be standalone or linked to an employee."
+              : "Leader and worker invites should be linked to an employee so the correct shift and scope are assigned."}
+          </p>
+
+          <div className="invite-builder__actions">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleCreateInvite}
+              disabled={isCreatingInvite}
+            >
+              {isCreatingInvite ? "Creating invite..." : "Create invite"}
+            </button>
+            {inviteLink ? (
+              <button type="button" className="ghost-button" onClick={handleCopyInviteLink}>
+                Copy invite link
+              </button>
+            ) : null}
+          </div>
+
+          {inviteStatusMessage ? <p className="toolbar-status">{inviteStatusMessage}</p> : null}
+
+          {inviteLink ? (
+            <label className="field invite-builder__link">
+              <span>Invite Link</span>
+              <input type="text" readOnly value={inviteLink} />
+            </label>
+          ) : null}
+        </section>
+      ) : null}
 
       {pendingCsvImport ? (
         <section className="import-preview">
@@ -811,74 +1207,113 @@ export function PersonnelPanel({
         <table className="personnel-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Role</th>
+              <th className="column-name">First Name</th>
+              <th className="column-name">Last Name</th>
+              <th className="column-email">Email</th>
               <th className="column-shift">Shift</th>
-              <th>Competencies</th>
-              <th />
+              <th className="column-competencies">Competencies</th>
+              <th className="column-actions" />
             </tr>
           </thead>
           <tbody>
             {draftEmployee ? (
               <tr className="table-row--draft">
-                <td>
-                  <input
-                    className="table-input"
-                    placeholder="Enter name"
-                    value={draftEmployee.name}
-                    onChange={(event) =>
-                      setDraftEmployee((current) =>
-                        current
-                          ? {
-                              ...current,
-                              name: event.target.value,
-                            }
-                          : current,
-                      )
-                    }
-                  />
+                <td className="column-name">
+                  <div className="table-input-stack">
+                    <input
+                      className="table-input"
+                      placeholder="Enter first name"
+                      value={draftEmployee.firstName}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                firstName: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                    {draftEmployeeFieldIssues.firstName ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.firstName}</p>
+                    ) : null}
+                  </div>
                 </td>
-                <td>
-                  <input
-                    className="table-input"
-                    placeholder="Enter role"
-                    value={draftEmployee.role}
-                    onChange={(event) =>
-                      setDraftEmployee((current) =>
-                        current
-                          ? {
-                              ...current,
-                              role: event.target.value,
-                            }
-                          : current,
-                      )
-                    }
-                  />
+                <td className="column-name">
+                  <div className="table-input-stack">
+                    <input
+                      className="table-input"
+                      placeholder="Enter last name"
+                      value={draftEmployee.lastName}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                lastName: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                    {draftEmployeeFieldIssues.lastName ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.lastName}</p>
+                    ) : null}
+                  </div>
+                </td>
+                <td className="column-email">
+                  <div className="table-input-stack">
+                    <input
+                      className="table-input"
+                      type="email"
+                      placeholder="email@company.com"
+                      value={draftEmployee.email}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                email: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                    {draftEmployeeFieldIssues.email ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.email}</p>
+                    ) : null}
+                  </div>
                 </td>
                 <td className="column-shift">
-                  <select
-                    className="table-select"
-                    value={draftEmployee.scheduleId}
-                    onChange={(event) =>
-                      setDraftEmployee((current) =>
-                        current
-                          ? {
-                              ...current,
-                              scheduleId: event.target.value,
-                            }
-                          : current,
-                      )
-                    }
-                  >
-                    <option value="">Select shift</option>
-                    {snapshot.schedules.map((schedule) => (
-                      <option key={schedule.id} value={schedule.id}>
-                        {schedule.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="table-input-stack">
+                    <select
+                      className="table-select"
+                      value={draftEmployee.scheduleId}
+                      onChange={(event) =>
+                        setDraftEmployee((current) =>
+                          current
+                            ? {
+                                ...current,
+                                scheduleId: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                    >
+                      <option value="">Select shift</option>
+                      {snapshot.schedules.map((schedule) => (
+                        <option key={schedule.id} value={schedule.id}>
+                          {schedule.name}
+                        </option>
+                      ))}
+                    </select>
+                    {draftEmployeeFieldIssues.scheduleId ? (
+                      <p className="row-issue">{draftEmployeeFieldIssues.scheduleId}</p>
+                    ) : null}
+                  </div>
                 </td>
-                <td>
+                <td className="column-competencies">
                   <div className="table-pills table-pills--editable">
                     {snapshot.competencies.map((competency) => {
                       const isSelected = draftEmployee.competencyIds.includes(competency.id);
@@ -910,11 +1345,8 @@ export function PersonnelPanel({
                     })}
                   </div>
                 </td>
-                <td>
+                <td className="column-actions">
                   <div className="table-actions-cell">
-                    {draftEmployeeIssues.length > 0 ? (
-                      <p className="row-issue">{draftEmployeeIssues.join(" · ")}</p>
-                    ) : null}
                     <div className="table-actions-inline">
                       <button
                         type="button"
@@ -939,7 +1371,7 @@ export function PersonnelPanel({
             {groupedEmployees.map((entry) =>
               entry.type === "group" ? (
                 <tr key={`group-${entry.label}`} className="table-group-row">
-                  <td colSpan={5}>{entry.label}</td>
+                  <td colSpan={6}>{entry.label}</td>
                 </tr>
               ) : (
                 <tr
@@ -948,49 +1380,80 @@ export function PersonnelPanel({
                     invalidEmployeeIds.has(entry.value.id) ? "table-row--invalid" : ""
                   }`}
                 >
-                  <td>
-                    <input
-                      className="table-input"
-                      value={entry.value.name}
-                      onChange={(event) =>
-                        updateEmployee(entry.value.id, (current) => ({
-                          ...current,
-                          name: event.target.value,
-                        }))
-                      }
-                    />
+                  {(() => {
+                    const fieldIssues = getEmployeeFieldIssues(entry.value);
+
+                    return (
+                      <>
+                  <td className="column-name">
+                    <div className="table-input-stack">
+                      <input
+                        className="table-input"
+                        value={entry.value.firstName}
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            firstName: event.target.value,
+                          }))
+                        }
+                      />
+                      {fieldIssues.firstName ? <p className="row-issue">{fieldIssues.firstName}</p> : null}
+                    </div>
                   </td>
-                  <td>
-                    <input
-                      className="table-input"
-                      value={entry.value.role}
-                      onChange={(event) =>
-                        updateEmployee(entry.value.id, (current) => ({
-                          ...current,
-                          role: event.target.value,
-                        }))
-                      }
-                    />
+                  <td className="column-name">
+                    <div className="table-input-stack">
+                      <input
+                        className="table-input"
+                        value={entry.value.lastName}
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            lastName: event.target.value,
+                          }))
+                        }
+                      />
+                      {fieldIssues.lastName ? <p className="row-issue">{fieldIssues.lastName}</p> : null}
+                    </div>
+                  </td>
+                  <td className="column-email">
+                    <div className="table-input-stack">
+                      <input
+                        className="table-input"
+                        type="email"
+                        value={entry.value.email}
+                        placeholder="email@company.com"
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            email: event.target.value,
+                          }))
+                        }
+                      />
+                      {fieldIssues.email ? <p className="row-issue">{fieldIssues.email}</p> : null}
+                    </div>
                   </td>
                   <td className="column-shift">
-                    <select
-                      className="table-select"
-                      value={entry.value.scheduleId}
-                      onChange={(event) =>
-                        updateEmployee(entry.value.id, (current) => ({
-                          ...current,
-                          scheduleId: event.target.value,
-                        }))
-                      }
-                    >
-                      {snapshot.schedules.map((schedule) => (
-                        <option key={schedule.id} value={schedule.id}>
-                          {schedule.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="table-input-stack">
+                      <select
+                        className="table-select"
+                        value={entry.value.scheduleId}
+                        onChange={(event) =>
+                          updateEmployee(entry.value.id, (current) => ({
+                            ...current,
+                            scheduleId: event.target.value,
+                          }))
+                        }
+                      >
+                        {snapshot.schedules.map((schedule) => (
+                          <option key={schedule.id} value={schedule.id}>
+                            {schedule.name}
+                          </option>
+                        ))}
+                      </select>
+                      {fieldIssues.scheduleId ? <p className="row-issue">{fieldIssues.scheduleId}</p> : null}
+                    </div>
                   </td>
-                  <td>
+                  <td className="column-competencies">
                     <div className="table-pills table-pills--editable">
                       {snapshot.competencies.map((competency) => {
                         const isSelected = entry.value.competencyIds.includes(competency.id);
@@ -1011,11 +1474,8 @@ export function PersonnelPanel({
                       })}
                     </div>
                   </td>
-                  <td>
+                  <td className="column-actions">
                     <div className="table-actions-cell">
-                      {invalidEmployeeIds.has(entry.value.id) ? (
-                        <p className="row-issue">{getEmployeeIssues(entry.value).join(" · ")}</p>
-                      ) : null}
                       <button
                         type="button"
                         className="table-action table-action--danger"
@@ -1025,12 +1485,15 @@ export function PersonnelPanel({
                       </button>
                     </div>
                   </td>
+                      </>
+                    );
+                  })()}
                 </tr>
               ),
             )}
             {groupedEmployees.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   <div className="empty-state">
                     <strong>No employees matched that filter.</strong>
                     <span>Try a different search term, shift, or competency filter.</span>

@@ -7,9 +7,11 @@ import { useRouter } from "next/navigation";
 import {
   formatMonthLabel,
   getEmployeeMap,
+  getMonthDays,
   shiftMonthKey,
+  shiftForDate,
 } from "@/lib/scheduling";
-import type { Competency, OvertimeClaim, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
+import type { Competency, OvertimeClaim, SchedulerSnapshot, StoredAssignment, TimeCode } from "@/lib/types";
 
 /**
  * Metrics dashboard and planning sandbox.
@@ -29,6 +31,7 @@ type TeamMetric = {
   scheduleId: string;
   scheduleName: string;
   competencyMetrics: TeamCompetencyMetric[];
+  shiftFragilityMetrics: ShiftFragilityMetric[];
   overtimeShifts: number;
   overtimeWorkers: number;
   topCompetencyCode: string | null;
@@ -44,6 +47,42 @@ type TeamMetric = {
   }>;
 };
 
+type ShiftFragilityMetric = {
+  competencyId: string;
+  code: string;
+  colorToken: string;
+  riskScore: number;
+  overtimeClaims: number;
+  recentWeight: number;
+  qualifiedPeople: number;
+  requiredStaff: number;
+  lastClaimDate: string | null;
+};
+
+type FatigueBand = "green" | "amber" | "red" | "critical";
+
+type EmployeeFatigueMetric = {
+  employeeId: string;
+  employeeName: string;
+  consecutiveShifts: number;
+  band: FatigueBand;
+  excessOverNormalCycle: number;
+};
+
+type TeamFatigueMetric = {
+  scheduleId: string;
+  scheduleName: string;
+  totalScheduledEmployees: number;
+  greenCount: number;
+  amberCount: number;
+  redCount: number;
+  criticalCount: number;
+  highestStreak: number;
+  countAboveNormalCycle: number;
+  averageConsecutiveShifts: number;
+  topEmployees: EmployeeFatigueMetric[];
+};
+
 type TeamTimeCodeMetric = {
   scheduleId: string;
   scheduleName: string;
@@ -56,8 +95,18 @@ type TeamTimeCodeMetric = {
   }>;
 };
 
-type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
-type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
+type OvertimeMetricEntry = {
+  scheduleId: string;
+  employeeId: string;
+  competencyId: string | null;
+  date: string;
+};
+
+export type OvertimeWindow = "30d" | "90d" | "1y" | "ytd";
+export type TimeCodeWindow = "30d" | "90d" | "1y" | "ytd";
+export type FragilityWindow = OvertimeWindow;
+export const NORMAL_FATIGUE_CYCLE = 6;
+const FATIGUE_LOOKBACK_DAYS = 30;
 
 type TransferProjection = {
   competencyId: string;
@@ -71,7 +120,7 @@ type TransferProjection = {
   improvesTarget: boolean;
 };
 
-type TransferSuggestion = {
+export type TransferSuggestion = {
   employeeId: string;
   employeeName: string;
   employeeRole: string;
@@ -83,13 +132,20 @@ type TransferSuggestion = {
 };
 
 /** Pads "top 3" lists with blanks so metric cards keep a stable height. */
-function padMetricPeopleRows<T extends { employeeId: string; employeeName: string }>(rows: T[], size = 3) {
+export function padMetricPeopleRows<T extends { employeeId: string; employeeName: string }>(rows: T[], size = 3) {
   return Array.from({ length: size }, (_, index) => rows[index] ?? null);
 }
 
 /** Generic version used for non-person metric rows that still need stable height. */
-function padMetricRows<T>(rows: T[], size = 3) {
+export function padMetricRows<T>(rows: T[], size = 3) {
   return Array.from({ length: size }, (_, index) => rows[index] ?? null);
+}
+
+/** Creates an inclusive UTC date list for streak scans. */
+function getDateRange(startDate: string, endDate: string) {
+  const days = daysBetweenDateKeys(startDate, endDate);
+
+  return Array.from({ length: days + 1 }, (_, index) => shiftDateKey(startDate, index));
 }
 
 /** Shifts an ISO date string by whole days while keeping the result in UTC. */
@@ -99,8 +155,18 @@ function shiftDateKey(dateKey: string, deltaDays: number) {
   return shifted.toISOString().slice(0, 10);
 }
 
+/** Counts calendar days between two ISO date keys in UTC. */
+function daysBetweenDateKeys(startDate: string, endDate: string) {
+  const [startYear, startMonth, startDay] = startDate.split("-").map(Number);
+  const [endYear, endMonth, endDay] = endDate.split("-").map(Number);
+  const startTime = Date.UTC(startYear, startMonth - 1, startDay);
+  const endTime = Date.UTC(endYear, endMonth - 1, endDay);
+
+  return Math.max(0, Math.round((endTime - startTime) / 86_400_000));
+}
+
 /** Returns the first day included in the selected overtime time window. */
-function getWindowStart(today: string, window: OvertimeWindow) {
+export function getWindowStart(today: string, window: OvertimeWindow) {
   switch (window) {
     case "30d":
       return shiftDateKey(today, -29);
@@ -114,7 +180,7 @@ function getWindowStart(today: string, window: OvertimeWindow) {
 }
 
 /** Returns the first day included in the selected time-code analytics window. */
-function getTimeCodeWindowStart(today: string, window: TimeCodeWindow) {
+export function getTimeCodeWindowStart(today: string, window: TimeCodeWindow) {
   switch (window) {
     case "30d":
       return shiftDateKey(today, -29);
@@ -141,12 +207,12 @@ function getMonthEndDateKey(month: string) {
  * like as of the end of the chosen month?" instead of blending that question
  * with today's real date.
  */
-function getMetricsAnchorDate(month: string) {
+export function getMetricsAnchorDate(month: string) {
   return getMonthEndDateKey(month);
 }
 
 /** Compact label used to show which day the rolling windows are anchored to. */
-function formatAnchorDateLabel(isoDate: string) {
+export function formatAnchorDateLabel(isoDate: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -155,8 +221,163 @@ function formatAnchorDateLabel(isoDate: string) {
   }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
+export function formatFragilityScore(score: number) {
+  return score.toFixed(1);
+}
+
+function getFatigueBand(consecutiveShifts: number): FatigueBand {
+  if (consecutiveShifts <= 6) {
+    return "green";
+  }
+
+  if (consecutiveShifts <= 12) {
+    return "amber";
+  }
+
+  if (consecutiveShifts < 18) {
+    return "red";
+  }
+
+  return "critical";
+}
+
+export function formatFatigueBandLabel(band: FatigueBand) {
+  switch (band) {
+    case "green":
+      return "Good";
+    case "amber":
+      return "Caution";
+    case "red":
+      return "Warning";
+    case "critical":
+      return "Critical";
+  }
+}
+
+function isNonWorkingTimeCode(timeCode: TimeCode | undefined) {
+  if (!timeCode) {
+    return false;
+  }
+
+  const code = timeCode.code.trim().toUpperCase();
+  const label = timeCode.label.trim().toUpperCase();
+
+  return (
+    code === "OFF" ||
+    code === "V" ||
+    code === "VAC" ||
+    code === "VACATION" ||
+    code === "BOT" ||
+    label.includes("BOOKED OFF") ||
+    label.includes("VACATION") ||
+    label.includes("LEAVE")
+  );
+}
+
+function isWorkingAssignment(assignment: StoredAssignment, timeCodeMap: Record<string, TimeCode>) {
+  if (assignment.competencyId) {
+    return true;
+  }
+
+  if (!assignment.timeCodeId) {
+    return false;
+  }
+
+  return !isNonWorkingTimeCode(timeCodeMap[assignment.timeCodeId]);
+}
+
+/**
+ * Converts schedule rows entered on a worker's rostered day off into overtime
+ * metric events.
+ *
+ * Claimed overtime already has an `overtime_claims` row and an assignment row,
+ * so those claim-backed assignment rows are skipped here. This keeps metrics
+ * from double-counting normal claimed OT while still counting leader-entered
+ * work that was keyed straight into the schedule.
+ */
+function getManualOffDayOvertimeEntries(
+  snapshot: SchedulerSnapshot,
+  assignmentHistory: StoredAssignment[],
+  claimEntries: OvertimeMetricEntry[],
+): OvertimeMetricEntry[] {
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const scheduleMap = Object.fromEntries(
+    snapshot.schedules.map((schedule) => [schedule.id, schedule]),
+  );
+  const timeCodeMap = Object.fromEntries(
+    snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode]),
+  ) as Record<string, TimeCode>;
+  const claimKeys = new Set(
+    claimEntries.map(
+      (claim) => `${claim.scheduleId}:${claim.employeeId}:${claim.date}:${claim.competencyId ?? ""}`,
+    ),
+  );
+
+  return assignmentHistory.flatMap((assignment) => {
+    const employee = employeeMap[assignment.employeeId];
+    const homeSchedule = employee ? scheduleMap[employee.scheduleId] : null;
+
+    if (!employee || !homeSchedule) {
+      return [];
+    }
+
+    if (shiftForDate(homeSchedule, assignment.date) !== "OFF") {
+      return [];
+    }
+
+    if (!isWorkingAssignment(assignment, timeCodeMap)) {
+      return [];
+    }
+
+    const claimKey = `${assignment.scheduleId}:${assignment.employeeId}:${assignment.date}:${assignment.competencyId ?? ""}`;
+
+    if (claimKeys.has(claimKey) || assignment.notes?.startsWith("OT|")) {
+      return [];
+    }
+
+    return [
+      {
+        scheduleId: assignment.scheduleId ?? employee.scheduleId,
+        employeeId: assignment.employeeId,
+        competencyId: assignment.competencyId,
+        date: assignment.date,
+      },
+    ];
+  });
+}
+
+/** Builds the overtime events used by metrics cards from claims plus manual schedule work. */
+export function getOvertimeMetricEntries(
+  snapshot: SchedulerSnapshot,
+  overtimeClaims: OvertimeClaim[],
+  assignmentHistory: StoredAssignment[],
+) {
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const claimEntries = overtimeClaims.flatMap<OvertimeMetricEntry>((claim) => {
+    const metricScheduleId = claim.scheduleId ?? employeeMap[claim.employeeId]?.scheduleId;
+
+    if (!metricScheduleId) {
+      return [];
+    }
+
+    return [
+      {
+        scheduleId: metricScheduleId,
+        employeeId: claim.employeeId,
+        competencyId: claim.competencyId,
+        date: claim.date,
+      },
+    ];
+  });
+
+  return [
+    ...claimEntries,
+    ...getManualOffDayOvertimeEntries(snapshot, assignmentHistory, claimEntries),
+  ];
+}
+
 /** Summarizes one chosen time code across teams for the selected history window. */
-function getTeamTimeCodeMetrics(
+export function getTeamTimeCodeMetrics(
   snapshot: SchedulerSnapshot,
   assignmentHistory: StoredAssignment[],
   timeCodeId: string,
@@ -199,8 +420,132 @@ function getTeamTimeCodeMetrics(
   });
 }
 
-/** Builds the two main dashboard summaries shown on the metrics screen. */
-function getTeamMetrics(snapshot: SchedulerSnapshot, overtimeClaims: OvertimeClaim[]): TeamMetric[] {
+export function getTeamFatigueMetrics({
+  snapshot,
+  assignmentHistory,
+  overtimeHistory,
+  month,
+}: {
+  snapshot: SchedulerSnapshot;
+  assignmentHistory: StoredAssignment[];
+  overtimeHistory: OvertimeClaim[];
+  month: string;
+}): TeamFatigueMetric[] {
+  const monthDays = getMonthDays(month);
+  const monthStart = monthDays[0]?.date ?? `${month}-01`;
+  const monthEnd = monthDays[monthDays.length - 1]?.date ?? getMonthEndDateKey(month);
+  const scanStart = shiftDateKey(monthStart, -FATIGUE_LOOKBACK_DAYS);
+  const scanDates = getDateRange(scanStart, monthEnd);
+  const timeCodeMap = Object.fromEntries(
+    snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode]),
+  ) as Record<string, TimeCode>;
+  const assignmentsByEmployeeDate = assignmentHistory.reduce<Map<string, StoredAssignment[]>>((map, assignment) => {
+    const key = `${assignment.employeeId}:${assignment.date}`;
+    const existing = map.get(key);
+
+    if (existing) {
+      existing.push(assignment);
+      return map;
+    }
+
+    map.set(key, [assignment]);
+    return map;
+  }, new Map<string, StoredAssignment[]>());
+  const overtimeClaimDatesByEmployee = overtimeHistory.reduce<Record<string, Set<string>>>((map, claim) => {
+    map[claim.employeeId] ??= new Set<string>();
+    map[claim.employeeId].add(claim.date);
+    return map;
+  }, {});
+
+  return snapshot.schedules.map((schedule) => {
+    const employeeMetrics = schedule.employees.map<EmployeeFatigueMetric>((employee) => {
+      let currentStreak = 0;
+      let highestStreak = 0;
+
+      for (const date of scanDates) {
+        const assignmentEntries = assignmentsByEmployeeDate.get(`${employee.id}:${date}`) ?? [];
+        const hasWorkedAssignment = assignmentEntries.some((assignment) => {
+          if (assignment.competencyId) {
+            return true;
+          }
+
+          if (!assignment.timeCodeId) {
+            return false;
+          }
+
+          return !isNonWorkingTimeCode(timeCodeMap[assignment.timeCodeId]);
+        });
+        const defaultWorkedShift = shiftForDate(schedule, date) !== "OFF";
+        const hasOvertimeClaim = overtimeClaimDatesByEmployee[employee.id]?.has(date) ?? false;
+
+        /**
+         * Fatigue is intentionally based on worked-day exposure only. The base
+         * rotation counts as work, overtime/mutual/saved work entries add work
+         * exposure, and obvious leave/off time codes break the streak.
+         */
+        const workedDate =
+          defaultWorkedShift || hasOvertimeClaim || hasWorkedAssignment;
+
+        currentStreak = workedDate ? currentStreak + 1 : 0;
+
+        if (date >= monthStart) {
+          highestStreak = Math.max(highestStreak, currentStreak);
+        }
+      }
+
+      return {
+        employeeId: employee.id,
+        employeeName: employee.name,
+        consecutiveShifts: highestStreak,
+        band: getFatigueBand(highestStreak),
+        excessOverNormalCycle: Math.max(0, highestStreak - NORMAL_FATIGUE_CYCLE),
+      };
+    });
+    const bandCounts = employeeMetrics.reduce<Record<FatigueBand, number>>(
+      (counts, employee) => {
+        counts[employee.band] += 1;
+        return counts;
+      },
+      { green: 0, amber: 0, red: 0, critical: 0 },
+    );
+    const topEmployees = [...employeeMetrics]
+      .sort(
+        (left, right) =>
+          right.consecutiveShifts - left.consecutiveShifts ||
+          left.employeeName.localeCompare(right.employeeName),
+      )
+      .slice(0, 3);
+    const totalConsecutiveShifts = employeeMetrics.reduce(
+      (total, employee) => total + employee.consecutiveShifts,
+      0,
+    );
+
+    return {
+      scheduleId: schedule.id,
+      scheduleName: schedule.name,
+      totalScheduledEmployees: schedule.employees.length,
+      greenCount: bandCounts.green,
+      amberCount: bandCounts.amber,
+      redCount: bandCounts.red,
+      criticalCount: bandCounts.critical,
+      highestStreak: topEmployees[0]?.consecutiveShifts ?? 0,
+      countAboveNormalCycle: employeeMetrics.filter(
+        (employee) => employee.consecutiveShifts > NORMAL_FATIGUE_CYCLE,
+      ).length,
+      averageConsecutiveShifts:
+        employeeMetrics.length === 0 ? 0 : totalConsecutiveShifts / employeeMetrics.length,
+      topEmployees,
+    };
+  });
+}
+
+/** Builds the main dashboard summaries shown on the metrics screen. */
+export function getTeamMetrics(
+  snapshot: SchedulerSnapshot,
+  overtimeEntries: OvertimeMetricEntry[],
+  fragilityEntries: OvertimeMetricEntry[],
+  anchorDate: string,
+): TeamMetric[] {
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const competencyMap = Object.fromEntries(
     snapshot.competencies.map((competency) => [competency.id, competency]),
@@ -218,16 +563,32 @@ function getTeamMetrics(snapshot: SchedulerSnapshot, overtimeClaims: OvertimeCla
       }))
       .sort((left, right) => right.qualifiedPeople - left.qualifiedPeople || left.code.localeCompare(right.code));
 
-    const borrowedClaims = overtimeClaims.filter((claim) => {
+    const incurredOvertimeEntries = overtimeEntries.filter((claim) => {
       if (claim.scheduleId !== schedule.id) {
         return false;
       }
 
       const claimEmployee = employeeMap[claim.employeeId];
-      return Boolean(claimEmployee && claimEmployee.scheduleId !== schedule.id);
+      return Boolean(claimEmployee);
+    });
+    const teamPersonnelOvertimeEntries = overtimeEntries.filter((claim) => {
+      const claimEmployee = employeeMap[claim.employeeId];
+      return claimEmployee?.scheduleId === schedule.id;
+    });
+    const fragilityOvertimeEntries = fragilityEntries.filter((claim) => {
+      if (claim.scheduleId !== schedule.id) {
+        return false;
+      }
+
+      const claimEmployee = employeeMap[claim.employeeId];
+      return Boolean(claimEmployee && claim.competencyId);
     });
 
-    const overtimeCounts = borrowedClaims.reduce<Record<string, number>>((counts, claim) => {
+    const overtimeCounts = incurredOvertimeEntries.reduce<Record<string, number>>((counts, claim) => {
+      if (!claim.competencyId) {
+        return counts;
+      }
+
       counts[claim.competencyId] = (counts[claim.competencyId] ?? 0) + 1;
       return counts;
     }, {});
@@ -251,7 +612,7 @@ function getTeamMetrics(snapshot: SchedulerSnapshot, overtimeClaims: OvertimeCla
       )
       .slice(0, 3);
 
-    const overtimePeopleCounts = borrowedClaims.reduce<Record<string, number>>((counts, claim) => {
+    const overtimePeopleCounts = teamPersonnelOvertimeEntries.reduce<Record<string, number>>((counts, claim) => {
       counts[claim.employeeId] = (counts[claim.employeeId] ?? 0) + 1;
       return counts;
     }, {});
@@ -269,12 +630,66 @@ function getTeamMetrics(snapshot: SchedulerSnapshot, overtimeClaims: OvertimeCla
       )
       .slice(0, 3);
 
+    const shiftFragilityMetrics = snapshot.competencies
+      .map((competency) => {
+        const claims = fragilityOvertimeEntries.filter((claim) => claim.competencyId === competency.id);
+        const qualifiedPeople = schedule.employees.filter((employee) =>
+          employee.competencyIds.includes(competency.id),
+        ).length;
+        const requiredStaff = Math.max(1, competency.requiredStaff);
+        const lastClaimDate = claims
+          .map((claim) => claim.date)
+          .sort((left, right) => right.localeCompare(left))[0] ?? null;
+        const recentWeight = claims.reduce((total, claim) => {
+          const daysAgo = daysBetweenDateKeys(claim.date, anchorDate);
+
+          /**
+           * Every claim counts, but recent overtime should move a competency
+           * higher on the fragility list because it represents a risk that has
+           * happened under the current staffing reality.
+           */
+          return total + Math.max(0.25, 1 - daysAgo / 365);
+        }, 0);
+        const coverageRatio = qualifiedPeople / requiredStaff;
+        const depthMultiplier =
+          qualifiedPeople === 0
+            ? 3
+            : coverageRatio < 1
+            ? 2.4
+            : coverageRatio < 1.5
+            ? 1.8
+            : coverageRatio < 2
+            ? 1.35
+            : 1;
+
+        return {
+          competencyId: competency.id,
+          code: competency.code,
+          colorToken: competency.colorToken,
+          riskScore: recentWeight * depthMultiplier,
+          overtimeClaims: claims.length,
+          recentWeight,
+          qualifiedPeople,
+          requiredStaff,
+          lastClaimDate,
+        } satisfies ShiftFragilityMetric;
+      })
+      .filter((metric) => metric.overtimeClaims > 0)
+      .sort(
+        (left, right) =>
+          right.riskScore - left.riskScore ||
+          right.overtimeClaims - left.overtimeClaims ||
+          left.code.localeCompare(right.code),
+      )
+      .slice(0, 3);
+
     return {
       scheduleId: schedule.id,
       scheduleName: schedule.name,
       competencyMetrics,
-      overtimeShifts: borrowedClaims.length,
-      overtimeWorkers: new Set(borrowedClaims.map((claim) => claim.employeeId)).size,
+      shiftFragilityMetrics,
+      overtimeShifts: incurredOvertimeEntries.length,
+      overtimeWorkers: new Set(teamPersonnelOvertimeEntries.map((claim) => claim.employeeId)).size,
       topCompetencyCode,
       topOvertimeCompetencies,
       topOvertimePeople,
@@ -302,7 +717,7 @@ function buildQualifiedCountMap(snapshot: SchedulerSnapshot) {
  * set of competencies. Higher scores favor teams that gain scarce coverage
  * without overly hollowing out the source shift.
  */
-function getTransferSuggestions({
+export function getTransferSuggestions({
   snapshot,
   sourceScheduleId,
   targetScheduleId,
@@ -428,6 +843,7 @@ export function MetricsPanel({
 }) {
   const router = useRouter();
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
+  const [fragilityWindow, setFragilityWindow] = useState<FragilityWindow>("1y");
   const [timeCodeWindow, setTimeCodeWindow] = useState<TimeCodeWindow>("30d");
   const [selectedTimeCodeId, setSelectedTimeCodeId] = useState(snapshot.timeCodes[0]?.id ?? "");
   const metricsAnchorDate = useMemo(
@@ -438,19 +854,53 @@ export function MetricsPanel({
     const start = getWindowStart(metricsAnchorDate, overtimeWindow);
     return overtimeHistory.filter((claim) => claim.date >= start && claim.date <= metricsAnchorDate);
   }, [overtimeHistory, overtimeWindow, metricsAnchorDate]);
+  const filteredFragilityHistory = useMemo(() => {
+    const start = getWindowStart(metricsAnchorDate, fragilityWindow);
+    return overtimeHistory.filter((claim) => claim.date >= start && claim.date <= metricsAnchorDate);
+  }, [overtimeHistory, fragilityWindow, metricsAnchorDate]);
   const filteredAssignmentHistory = useMemo(() => {
     const start = getTimeCodeWindowStart(metricsAnchorDate, timeCodeWindow);
     return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
   }, [assignmentHistory, timeCodeWindow, metricsAnchorDate]);
+  const filteredOvertimeAssignmentHistory = useMemo(() => {
+    const start = getWindowStart(metricsAnchorDate, overtimeWindow);
+    return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
+  }, [assignmentHistory, overtimeWindow, metricsAnchorDate]);
+  const filteredFragilityAssignmentHistory = useMemo(() => {
+    const start = getWindowStart(metricsAnchorDate, fragilityWindow);
+    return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
+  }, [assignmentHistory, fragilityWindow, metricsAnchorDate]);
+  const filteredOvertimeEntries = useMemo(
+    () => getOvertimeMetricEntries(snapshot, filteredOvertimeHistory, filteredOvertimeAssignmentHistory),
+    [snapshot, filteredOvertimeHistory, filteredOvertimeAssignmentHistory],
+  );
+  const filteredFragilityEntries = useMemo(
+    () => getOvertimeMetricEntries(snapshot, filteredFragilityHistory, filteredFragilityAssignmentHistory),
+    [snapshot, filteredFragilityHistory, filteredFragilityAssignmentHistory],
+  );
   const teamMetrics = useMemo(
-    () => getTeamMetrics(snapshot, filteredOvertimeHistory),
-    [snapshot, filteredOvertimeHistory],
+    () => getTeamMetrics(snapshot, filteredOvertimeEntries, filteredFragilityEntries, metricsAnchorDate),
+    [snapshot, filteredOvertimeEntries, filteredFragilityEntries, metricsAnchorDate],
   );
   const maxQualifiedPeople = Math.max(
     1,
     ...teamMetrics.flatMap((team) => team.competencyMetrics.map((metric) => metric.qualifiedPeople)),
   );
   const maxOvertimeShifts = Math.max(1, ...teamMetrics.map((team) => team.overtimeShifts));
+  const maxFragilityScore = Math.max(
+    1,
+    ...teamMetrics.flatMap((team) => team.shiftFragilityMetrics.map((metric) => metric.riskScore)),
+  );
+  const teamFatigueMetrics = useMemo(
+    () =>
+      getTeamFatigueMetrics({
+        snapshot,
+        assignmentHistory,
+        overtimeHistory,
+        month: snapshot.month,
+      }),
+    [snapshot, assignmentHistory, overtimeHistory],
+  );
   const teamTimeCodeMetrics = useMemo(
     () => getTeamTimeCodeMetrics(snapshot, filteredAssignmentHistory, selectedTimeCodeId),
     [snapshot, filteredAssignmentHistory, selectedTimeCodeId],
@@ -686,6 +1136,171 @@ export function MetricsPanel({
                 </div>
               </article>
             ))}
+          </div>
+        </section>
+
+        <section className="metrics-section">
+          <div className="metrics-section__header">
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Fatigue Potential</h2>
+              <p className="toolbar-status">
+                Consecutive shifts worked in {formatMonthLabel(snapshot.month)}
+              </p>
+            </div>
+          </div>
+
+          <div className="metrics-team-list">
+            {teamFatigueMetrics.map((team) => (
+              <article key={`${team.scheduleId}-fatigue`} className="metrics-card">
+                <div className="metrics-card__header">
+                  <div>
+                    <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
+                    <h3 className="metrics-card__title">
+                      {team.totalScheduledEmployees} scheduled employee{team.totalScheduledEmployees === 1 ? "" : "s"}
+                    </h3>
+                  </div>
+                  <div className="metrics-card__stats">
+                    <span>Highest streak {team.highestStreak}</span>
+                    <span>{team.countAboveNormalCycle} above normal cycle</span>
+                    <span>Avg {team.averageConsecutiveShifts.toFixed(1)}</span>
+                  </div>
+                </div>
+
+                <div className="metrics-fatigue-bands" aria-label={`Fatigue bands for shift ${team.scheduleName}`}>
+                  <span className="metrics-fatigue-band metrics-fatigue-band--green">
+                    Good <strong>{team.greenCount}</strong>
+                  </span>
+                  <span className="metrics-fatigue-band metrics-fatigue-band--amber">
+                    Caution <strong>{team.amberCount}</strong>
+                  </span>
+                  <span className="metrics-fatigue-band metrics-fatigue-band--red">
+                    Warning <strong>{team.redCount}</strong>
+                  </span>
+                  <span className="metrics-fatigue-band metrics-fatigue-band--critical">
+                    Critical <strong>{team.criticalCount}</strong>
+                  </span>
+                </div>
+
+                <div className="metrics-top-list">
+                  <strong className="metrics-top-list__title">Top 3 fatigue potential</strong>
+                  <div className="metrics-top-list__rows">
+                    {padMetricRows(team.topEmployees).map((employee, index) => (
+                      <div
+                        key={employee?.employeeId ?? `fatigue-empty-${team.scheduleId}-${index}`}
+                        className={`metrics-top-list__row metrics-top-list__row--stacked ${
+                          employee ? "" : "metrics-top-list__row--empty"
+                        }`}
+                        title={
+                          employee
+                            ? `${employee.employeeName}: ${employee.consecutiveShifts} consecutive shifts worked. Normal cycle = ${NORMAL_FATIGUE_CYCLE}. Excess = ${employee.excessOverNormalCycle}. Exposure band = ${formatFatigueBandLabel(employee.band)}.`
+                            : undefined
+                        }
+                      >
+                        <span>
+                          {employee ? (
+                            <>
+                              <span className={`metrics-fatigue-dot metrics-fatigue-dot--${employee.band}`} />
+                              <span>{employee.employeeName}</span>
+                              <small>{formatFatigueBandLabel(employee.band)}</small>
+                            </>
+                          ) : (
+                            "\u00A0"
+                          )}
+                        </span>
+                        <strong>{employee ? employee.consecutiveShifts : "\u00A0"}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="metrics-section">
+          <div className="metrics-section__header">
+            <div className="metrics-section__title-group">
+              <h2 className="metrics-section__title">Shift Fragility</h2>
+              <p className="toolbar-status">
+                Historical overtime risk, anchored to {formatAnchorDateLabel(metricsAnchorDate)}
+              </p>
+            </div>
+            <div className="metrics-window-toggle" aria-label="Shift fragility history window">
+              {(["30d", "90d", "1y", "ytd"] as FragilityWindow[]).map((window) => (
+                <button
+                  key={window}
+                  type="button"
+                  className={`ghost-button ${fragilityWindow === window ? "ghost-button--active" : ""}`}
+                  onClick={() => setFragilityWindow(window)}
+                >
+                  {window.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="metrics-team-list">
+            {teamMetrics.map((team) => {
+              const topFragilityScore = team.shiftFragilityMetrics[0]?.riskScore ?? 0;
+
+              return (
+                <article key={`${team.scheduleId}-fragility`} className="metrics-card">
+                  <div className="metrics-card__header">
+                    <div>
+                      <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
+                      <h3 className="metrics-card__title">
+                        {topFragilityScore > 0
+                          ? `${formatFragilityScore(topFragilityScore)} risk score`
+                          : "No historical fragility"}
+                      </h3>
+                    </div>
+                    <div className="metrics-card__stats">
+                      <span>Recent OT weighted</span>
+                      <span>Depth adjusted</span>
+                    </div>
+                  </div>
+
+                  <div className="metrics-bar-track metrics-bar-track--tall">
+                    <span
+                      className="metrics-bar-fill metrics-bar-fill--fragility"
+                      style={{
+                        width: `${topFragilityScore === 0 ? 0 : Math.max(10, (topFragilityScore / maxFragilityScore) * 100)}%`,
+                      }}
+                    />
+                  </div>
+
+                  <div className="metrics-top-list">
+                    <strong className="metrics-top-list__title">Top risk competencies</strong>
+                    <div className="metrics-top-list__rows">
+                      {padMetricRows(team.shiftFragilityMetrics).map((metric, index) => (
+                        <div
+                          key={metric?.competencyId ?? `fragility-empty-${team.scheduleId}-${index}`}
+                          className={`metrics-top-list__row metrics-top-list__row--stacked ${
+                            metric ? "" : "metrics-top-list__row--empty"
+                          }`}
+                        >
+                          <span>
+                            {metric ? (
+                              <>
+                                <span className={`legend-pill legend-pill--${metric.colorToken.toLowerCase()}`}>
+                                  {metric.code}
+                                </span>
+                                <small>
+                                  {metric.overtimeClaims} OT · {metric.qualifiedPeople}/{metric.requiredStaff} qualified
+                                </small>
+                              </>
+                            ) : (
+                              "\u00A0"
+                            )}
+                          </span>
+                          <strong>{metric ? formatFragilityScore(metric.riskScore) : "\u00A0"}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
 

@@ -1,5 +1,5 @@
-import type { AppSession, SchedulerSnapshot } from "@/lib/types";
+import type { AppSession } from "@/lib/types";
 
-export function scopeScheduleSnapshot(snapshot: SchedulerSnapshot, session: AppSession) {
+export function scopeScheduleSnapshot<T>(snapshot: T, session: AppSession) {
   return snapshot;
 }

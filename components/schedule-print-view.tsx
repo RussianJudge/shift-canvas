@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
+import { buildProjectedAssignmentIndex } from "@/lib/sub-schedules";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -21,7 +22,7 @@ import type {
   TimeCode,
 } from "@/lib/types";
 
-type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null };
+type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes?: string | null };
 
 type DisplayEmployee = {
   rowId: string;
@@ -30,7 +31,7 @@ type DisplayEmployee = {
   role: string;
   competencyIds: string[];
   overtimeDates?: string[];
-  overtimeCompetencyByDate?: Record<string, string>;
+  overtimeCompetencyByDate?: Record<string, string | null>;
   mutualDates?: string[];
 };
 
@@ -68,7 +69,15 @@ function getSelectionCode(
   timeCodeMap: Record<string, TimeCode>,
 ) {
   if (selection.timeCodeId) {
-    return timeCodeMap[selection.timeCodeId]?.code ?? "";
+    const timeCode = timeCodeMap[selection.timeCodeId];
+    const baseCode = timeCode?.code ?? "";
+
+    if (baseCode.trim().toUpperCase() === "T") {
+      const noteDigits = selection.notes?.match(/\d/g)?.slice(0, 3).join("") ?? "";
+      return noteDigits ? `${baseCode}${noteDigits}` : baseCode;
+    }
+
+    return baseCode;
   }
 
   if (selection.competencyId) {
@@ -78,12 +87,32 @@ function getSelectionCode(
   return "";
 }
 
+function getScheduleCellComment({
+  notes,
+  employeeName,
+  employeeMap,
+}: {
+  notes: string | null | undefined;
+  employeeName: string;
+  employeeMap: Record<string, Employee>;
+}) {
+  const parsedMutual = parseMutualAssignmentNote(notes);
+
+  if (parsedMutual.partnerEmployeeId) {
+    const partnerName = employeeMap[parsedMutual.partnerEmployeeId]?.name ?? "their mutual partner";
+    return `${employeeName} working for ${partnerName}`;
+  }
+
+  return notes ?? undefined;
+}
+
 function getSelectionForCell(
+  scheduleId: string,
   employeeId: string,
   date: string,
   assignments: Record<string, AssignmentSelection>,
 ) {
-  const key = createAssignmentKey(employeeId, date);
+  const key = createAssignmentKey(scheduleId, employeeId, date);
 
   return assignments[key] ?? {
     competencyId: null,
@@ -112,38 +141,71 @@ function buildDisplayEmployeesForSchedule({
     competencyIds: employee.competencyIds,
   }));
 
-  const overtimeRows = Object.values(
-    snapshot.overtimeClaims
-      .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
-      .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
-        const employee = employeeMap[claim.employeeId];
+  const borrowedRowsByEmployee = snapshot.overtimeClaims
+    .filter((claim) => claim.scheduleId === schedule.id && claim.date.slice(0, 7) === currentMonth)
+    .reduce<Record<string, DisplayEmployee>>((rows, claim) => {
+      const employee = employeeMap[claim.employeeId];
 
-        if (!employee || employee.scheduleId === schedule.id) {
-          return rows;
-        }
-
-        const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
-        const existingDates = rows[employee.id]?.overtimeDates ?? [];
-        const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
-
-        rows[employee.id] = {
-          rowId: `ot:${schedule.id}:${employee.id}`,
-          sourceEmployeeId: employee.id,
-          name: employee.name,
-          role: `${employee.role} · OT from ${homeSchedule.name}`,
-          competencyIds: employee.competencyIds,
-          overtimeDates: existingDates.includes(claim.date)
-            ? existingDates
-            : [...existingDates, claim.date].sort(),
-          overtimeCompetencyByDate: {
-            ...existingCompetencies,
-            [claim.date]: claim.competencyId,
-          },
-        };
-
+      if (!employee || employee.scheduleId === schedule.id) {
         return rows;
-      }, {}),
-  ).sort((left, right) => left.name.localeCompare(right.name));
+      }
+
+      const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+      const existingDates = rows[employee.id]?.overtimeDates ?? [];
+      const existingCompetencies = rows[employee.id]?.overtimeCompetencyByDate ?? {};
+
+      rows[employee.id] = {
+        rowId: `ot:${schedule.id}:${employee.id}`,
+        sourceEmployeeId: employee.id,
+        name: employee.name,
+        role: `${employee.role} · OT from ${homeSchedule.name}`,
+        competencyIds: employee.competencyIds,
+        overtimeDates: existingDates.includes(claim.date)
+          ? existingDates
+          : [...existingDates, claim.date].sort(),
+        overtimeCompetencyByDate: {
+          ...existingCompetencies,
+          [claim.date]: claim.competencyId,
+        },
+      };
+
+      return rows;
+    }, {});
+
+  for (const assignment of snapshot.assignments) {
+    if (assignment.scheduleId !== schedule.id || assignment.date.slice(0, 7) !== currentMonth) {
+      continue;
+    }
+
+    const employee = employeeMap[assignment.employeeId];
+
+    if (!employee || employee.scheduleId === schedule.id) {
+      continue;
+    }
+
+    const parsed = parseMutualAssignmentNote(assignment.notes);
+
+    if (parsed.targetScheduleId === schedule.id) {
+      continue;
+    }
+
+    const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
+    const existingDates = borrowedRowsByEmployee[employee.id]?.overtimeDates ?? [];
+
+    borrowedRowsByEmployee[employee.id] = {
+      rowId: borrowedRowsByEmployee[employee.id]?.rowId ?? `manual:${schedule.id}:${employee.id}`,
+      sourceEmployeeId: employee.id,
+      name: employee.name,
+      role: borrowedRowsByEmployee[employee.id]?.role ?? `${employee.role} · Manual from ${homeSchedule.name}`,
+      competencyIds: employee.competencyIds,
+      overtimeDates: existingDates.includes(assignment.date)
+        ? existingDates
+        : [...existingDates, assignment.date].sort(),
+      overtimeCompetencyByDate: borrowedRowsByEmployee[employee.id]?.overtimeCompetencyByDate,
+    };
+  }
+
+  const borrowedRows = Object.values(borrowedRowsByEmployee).sort((left, right) => left.name.localeCompare(right.name));
 
   const mutualRows = Object.values(
     snapshot.assignments
@@ -179,7 +241,7 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  const rows = [...baseRows, ...overtimeRows, ...mutualRows];
+  const rows = [...baseRows, ...borrowedRows, ...mutualRows];
   const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
   const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
 
@@ -212,15 +274,19 @@ function PrintScheduleSheet({
   schedule,
   monthKey,
   assignments,
+  projectedAssignmentIndex,
   competencyMap,
   timeCodeMap,
+  employeeMap,
   employees,
 }: {
   schedule: Schedule;
   monthKey: string;
   assignments: Record<string, AssignmentSelection>;
+  projectedAssignmentIndex: Record<string, SchedulerSnapshot["projectedAssignments"][number]>;
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
+  employeeMap: Record<string, Employee>;
   employees: DisplayEmployee[];
 }) {
   const monthDays = getMonthDays(monthKey);
@@ -269,7 +335,7 @@ function PrintScheduleSheet({
                   (!mutualDateSet || mutualDateSet.has(day.date));
                 const shiftKind = isBorrowedCellVisible ? shiftForDate(schedule, day.date) : "OFF";
                 const selection = isBorrowedCellVisible
-                  ? getSelectionForCell(employee.sourceEmployeeId, day.date, assignments)
+                  ? getSelectionForCell(schedule.id, employee.sourceEmployeeId, day.date, assignments)
                   : {
                       competencyId: null,
                       timeCodeId: null,
@@ -288,17 +354,31 @@ function PrintScheduleSheet({
                   ? timeCodeMap[effectiveSelection.timeCodeId]
                   : null;
                 const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
+                const projectedAssignment =
+                  projectedAssignmentIndex[createAssignmentKey(schedule.id, employee.sourceEmployeeId, day.date)] ?? null;
+                const selectionCode = isBorrowedCellVisible
+                  ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)
+                  : "";
+                const cellTitle = projectedAssignment
+                  ? `${projectedAssignment.subScheduleName ?? "Sub-schedule"} manages this cell`
+                  : getScheduleCellComment({
+                      notes: selection.notes,
+                      employeeName: employee.name,
+                      employeeMap,
+                    });
 
                 return (
                   <div
                     key={`print-cell-${schedule.id}-${employee.rowId}-${day.date}`}
+                    title={cellTitle}
                   className={`shift-cell print-cell shift-cell--${getShiftTone(shiftKind)} ${
                     day.isWeekend ? "shift-cell--weekend" : ""
                   } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
                     activeColorToken ? "shift-cell--coded" : ""
-                  }`}
+                  } ${selectionCode ? "" : "shift-cell--blank"
+                  } ${projectedAssignment ? "shift-cell--projected" : ""}`}
                 >
-                    {isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""}
+                    {selectionCode}
                   </div>
                 );
               })}
@@ -319,7 +399,20 @@ export function SchedulePrintView({
   monthKey: string;
   pinnedEmployeesBySchedule: Record<string, string[]>;
 }) {
-  const assignments = buildAssignmentIndex(snapshot.assignments);
+  const assignments = {
+    ...buildAssignmentIndex(snapshot.assignments),
+    ...Object.fromEntries(
+      snapshot.projectedAssignments.map((assignment) => [
+        createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date),
+        {
+          competencyId: assignment.competencyId,
+          timeCodeId: assignment.timeCodeId,
+          notes: assignment.notes ?? null,
+        },
+      ]),
+    ),
+  };
+  const projectedAssignmentIndex = buildProjectedAssignmentIndex(snapshot.projectedAssignments);
   const competencyMap = getCompetencyMap(snapshot.competencies);
   const timeCodeMap = getTimeCodeMap(snapshot.timeCodes);
   const employeeMap = getEmployeeMap(snapshot.schedules);
@@ -332,8 +425,10 @@ export function SchedulePrintView({
           schedule={schedule}
           monthKey={monthKey}
           assignments={assignments}
+          projectedAssignmentIndex={projectedAssignmentIndex}
           competencyMap={competencyMap}
           timeCodeMap={timeCodeMap}
+          employeeMap={employeeMap}
           employees={buildDisplayEmployeesForSchedule({
             schedule,
             snapshot,

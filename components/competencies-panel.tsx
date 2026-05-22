@@ -2,8 +2,18 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
-import { saveCompetencies } from "@/app/actions";
-import type { CompetencyUpdate, SaveCompetenciesInput, SchedulerSnapshot } from "@/lib/types";
+import {
+  saveCompetencies,
+  saveScheduleCompetencies,
+  saveSubScheduleCompetencies,
+} from "@/app/actions";
+import type {
+  CompetencyUpdate,
+  SaveCompetenciesInput,
+  SaveScheduleCompetenciesInput,
+  SaveSubScheduleCompetenciesInput,
+  SchedulerSnapshot,
+} from "@/lib/types";
 
 const COLOR_TOKENS = ["amber", "teal", "violet", "rose", "blue", "lime", "orange", "slate"];
 
@@ -16,12 +26,12 @@ type EditableCompetency = {
   qualifiedEmployeeCount: number;
 };
 
-/** Clones editable rows so revert/save operations do not mutate the baseline. */
+type ScheduleTargetKey = "main" | `sub:${string}`;
+
 function cloneCompetencies(competencies: EditableCompetency[]) {
   return competencies.map((competency) => ({ ...competency }));
 }
 
-/** Converts a UI competency row into the payload shape used by the save action. */
 function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
   return {
     competencyId: competency.id,
@@ -32,7 +42,6 @@ function normalizeCompetency(competency: EditableCompetency): CompetencyUpdate {
   };
 }
 
-/** Returns the field-level issues that prevent a competency from saving. */
 function getCompetencyIssues(competency: EditableCompetency) {
   const issues: string[] = [];
   const trimmedCode = competency.code.trim();
@@ -56,12 +65,24 @@ function getCompetencyIssues(competency: EditableCompetency) {
   return issues;
 }
 
-/** Admin editor for competency codes, labels, colors, and staffing targets. */
+function buildInitialTargetKey(snapshot: SchedulerSnapshot): ScheduleTargetKey | "" {
+  if (snapshot.schedules.length > 0) {
+    return "main";
+  }
+
+  if (snapshot.subSchedules[0]?.id) {
+    return `sub:${snapshot.subSchedules[0].id}`;
+  }
+
+  return "";
+}
+
 export function CompetenciesPanel({
   snapshot,
 }: {
   snapshot: SchedulerSnapshot;
 }) {
+  const [viewMode, setViewMode] = useState<"library" | "availability">("library");
   const initialCompetencies = useMemo<EditableCompetency[]>(
     () =>
       snapshot.competencies.map((competency) => ({
@@ -70,9 +91,9 @@ export function CompetenciesPanel({
         label: competency.label,
         colorToken: competency.colorToken,
         requiredStaff: competency.requiredStaff,
-        qualifiedEmployeeCount: snapshot.schedules.flatMap((schedule) => schedule.employees).filter((employee) =>
-          employee.competencyIds.includes(competency.id),
-        ).length,
+        qualifiedEmployeeCount: snapshot.schedules
+          .flatMap((schedule) => schedule.employees)
+          .filter((employee) => employee.competencyIds.includes(competency.id)).length,
       })),
     [snapshot.competencies, snapshot.schedules],
   );
@@ -82,6 +103,9 @@ export function CompetenciesPanel({
   const [deletedCompetencyIds, setDeletedCompetencyIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
+  const [isSavingScheduleCompetencies, startScheduleSaveTransition] = useTransition();
+  const [isSavingSubScheduleCompetencies, startSubScheduleSaveTransition] = useTransition();
+  const [selectedTargetKey, setSelectedTargetKey] = useState<ScheduleTargetKey | "">(buildInitialTargetKey(snapshot));
 
   useEffect(() => {
     setCompetencies(cloneCompetencies(initialCompetencies));
@@ -89,6 +113,50 @@ export function CompetenciesPanel({
     setDeletedCompetencyIds([]);
     setStatusMessage("");
   }, [initialCompetencies]);
+
+  useEffect(() => {
+    setSelectedTargetKey((current) => {
+      if (
+        current &&
+        ((current === "main" && snapshot.schedules.length > 0) ||
+          snapshot.subSchedules.some((subSchedule) => `sub:${subSchedule.id}` === current))
+      ) {
+        return current;
+      }
+
+      return buildInitialTargetKey(snapshot);
+    });
+  }, [snapshot.schedules, snapshot.subSchedules]);
+
+  const selectedSubScheduleId = selectedTargetKey.startsWith("sub:") ? selectedTargetKey.slice("sub:".length) : "";
+  const selectedSubSchedule = snapshot.subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleId) ?? null;
+  const selectedTargetLabel = selectedTargetKey === "main"
+    ? "Main schedule"
+    : selectedSubSchedule?.name ?? null;
+  const selectedTargetIsArchived = selectedSubSchedule?.isArchived ?? false;
+  const selectedTargetCompetencyIds = useMemo(
+    () =>
+      selectedTargetKey === "main"
+        ? Array.from(new Set(snapshot.schedules.flatMap((schedule) => schedule.competencyIds))).sort()
+        : [...(selectedSubSchedule?.competencyIds ?? [])].sort(),
+    [selectedSubSchedule?.competencyIds, selectedTargetKey, snapshot.schedules],
+  );
+  const selectedTargetCompetencySignature = useMemo(
+    () => JSON.stringify(selectedTargetCompetencyIds),
+    [selectedTargetCompetencyIds],
+  );
+  const [baselineTargetCompetencyIds, setBaselineTargetCompetencyIds] = useState<string[]>(
+    selectedTargetCompetencyIds,
+  );
+  const [draftTargetCompetencyIds, setDraftTargetCompetencyIds] = useState<string[]>(
+    selectedTargetCompetencyIds,
+  );
+
+  useEffect(() => {
+    setBaselineTargetCompetencyIds(selectedTargetCompetencyIds);
+    setDraftTargetCompetencyIds(selectedTargetCompetencyIds);
+    setStatusMessage("");
+  }, [selectedTargetCompetencySignature, selectedTargetKey]);
 
   const baselineMap = useMemo(
     () => new Map(baselineCompetencies.map((competency) => [competency.id, normalizeCompetency(competency)])),
@@ -121,8 +189,11 @@ export function CompetenciesPanel({
       (competency) =>
         JSON.stringify(baselineMap.get(competency.competencyId)) !== JSON.stringify(competency),
     );
-  const hasChanges = dirtyUpdates.length > 0 || deletedCompetencyIds.length > 0;
+  const hasLibraryChanges = dirtyUpdates.length > 0 || deletedCompetencyIds.length > 0;
   const hasValidationErrors = invalidCompetencyIds.size > 0;
+  const hasAvailabilityChanges =
+    JSON.stringify([...baselineTargetCompetencyIds].sort()) !==
+    JSON.stringify([...draftTargetCompetencyIds].sort());
 
   function updateCompetency(
     competencyId: string,
@@ -157,7 +228,7 @@ export function CompetenciesPanel({
     setStatusMessage("");
   }
 
-  function handleSave() {
+  function handleSaveLibrary() {
     if (hasValidationErrors) {
       setStatusMessage("Fix the highlighted competencies before saving.");
       return;
@@ -177,9 +248,64 @@ export function CompetenciesPanel({
     });
   }
 
-  function handleRevert() {
+  function handleRevertLibrary() {
     setCompetencies(cloneCompetencies(baselineCompetencies));
     setDeletedCompetencyIds([]);
+    setStatusMessage("Changes reverted.");
+  }
+
+  function toggleTargetCompetency(competencyId: string) {
+    setDraftTargetCompetencyIds((current) =>
+      current.includes(competencyId)
+        ? current.filter((id) => id !== competencyId)
+        : [...current, competencyId],
+    );
+    setStatusMessage("");
+  }
+
+  function handleSaveAvailability() {
+    if (selectedTargetKey !== "main" && !selectedSubSchedule) {
+      setStatusMessage("Select a schedule first.");
+      return;
+    }
+
+    if (selectedTargetKey === "main") {
+      startScheduleSaveTransition(async () => {
+        for (const schedule of snapshot.schedules) {
+          const result = await saveScheduleCompetencies({
+            scheduleId: schedule.id,
+            competencyIds: draftTargetCompetencyIds,
+          } as SaveScheduleCompetenciesInput);
+
+          if (!result.ok) {
+            setStatusMessage(result.message);
+            return;
+          }
+        }
+
+        setStatusMessage("Main schedule competencies saved.");
+        if (snapshot.schedules.length > 0) {
+          setBaselineTargetCompetencyIds([...draftTargetCompetencyIds]);
+        }
+      });
+      return;
+    }
+
+    startSubScheduleSaveTransition(async () => {
+      const result = await saveSubScheduleCompetencies({
+        subScheduleId: selectedSubSchedule!.id,
+        competencyIds: draftTargetCompetencyIds,
+      } as SaveSubScheduleCompetenciesInput);
+      setStatusMessage(result.message);
+
+      if (result.ok) {
+        setBaselineTargetCompetencyIds([...draftTargetCompetencyIds]);
+      }
+    });
+  }
+
+  function handleRevertAvailability() {
+    setDraftTargetCompetencyIds([...baselineTargetCompetencyIds]);
     setStatusMessage("Changes reverted.");
   }
 
@@ -191,143 +317,277 @@ export function CompetenciesPanel({
 
       <div className="workspace-toolbar workspace-toolbar--actions">
         <div className="planner-actions">
-          <button type="button" className="ghost-button" onClick={handleAddCompetency}>
-            Add competency
-          </button>
-          <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
-            Revert
+          <button
+            type="button"
+            className={viewMode === "library" ? "primary-button" : "ghost-button"}
+            onClick={() => setViewMode("library")}
+          >
+            Competency library
           </button>
           <button
             type="button"
-            className="primary-button"
-            onClick={handleSave}
-            disabled={isSaving || !hasChanges || hasValidationErrors}
+            className={viewMode === "availability" ? "primary-button" : "ghost-button"}
+            onClick={() => setViewMode("availability")}
           >
-            {isSaving ? "Saving..." : "Save"}
+            Schedule availability
           </button>
+
+          {viewMode === "library" ? (
+            <>
+              <button type="button" className="ghost-button" onClick={handleAddCompetency}>
+                Add competency
+              </button>
+              <button type="button" className="ghost-button" onClick={handleRevertLibrary} disabled={isSaving || !hasLibraryChanges}>
+                Revert
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleSaveLibrary}
+                disabled={isSaving || !hasLibraryChanges || hasValidationErrors}
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </button>
+            </>
+          ) : (
+            <>
+              <label className="field">
+                <span>Schedule</span>
+                <select
+                  value={selectedTargetKey}
+                  onChange={(event) => {
+                    setSelectedTargetKey(event.target.value as ScheduleTargetKey);
+                    setStatusMessage("");
+                  }}
+                >
+                  {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}
+                  <optgroup label="Sub-schedules">
+                    {snapshot.subSchedules.map((subSchedule) => (
+                      <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
+                        {subSchedule.name}{subSchedule.isArchived ? " (Archived)" : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </label>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={handleRevertAvailability}
+                disabled={
+                  isSavingScheduleCompetencies ||
+                  isSavingSubScheduleCompetencies ||
+                  !hasAvailabilityChanges
+                }
+              >
+                Revert
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleSaveAvailability}
+                disabled={
+                  isSavingScheduleCompetencies ||
+                  isSavingSubScheduleCompetencies ||
+                  !selectedTargetLabel ||
+                  selectedTargetIsArchived ||
+                  !hasAvailabilityChanges
+                }
+              >
+                {isSavingScheduleCompetencies || isSavingSubScheduleCompetencies ? "Saving..." : "Save"}
+              </button>
+            </>
+          )}
         </div>
+
         <div className="toolbar-status-wrap">
-          {hasValidationErrors ? (
+          {viewMode === "library" && hasValidationErrors ? (
             <p className="toolbar-status">Fix the highlighted competencies before saving.</p>
           ) : statusMessage ? (
             <p className="toolbar-status">{statusMessage}</p>
+          ) : viewMode === "availability" && selectedTargetLabel ? (
+            <p className="toolbar-status">
+              {selectedTargetIsArchived
+                ? "Archived sub-schedules stay visible for history but their competency set is read-only."
+                : selectedTargetKey === "main"
+                  ? "Choose which competencies the main schedule can use across its builder and overtime board."
+                  : `Choose which competencies ${selectedTargetLabel} can use in its builder and overtime board.`}
+            </p>
           ) : null}
         </div>
       </div>
 
-      <div className="personnel-table-wrap">
-        <table className="personnel-table">
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Label</th>
-              <th>Staff required</th>
-              <th>Qualified staff</th>
-              <th>Color</th>
-              <th>Preview</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {competencies.map((competency) => (
-              <tr
-                key={competency.id}
-                className={`${dirtyCompetencyIds.has(competency.id) ? "table-row--dirty" : ""} ${
-                  invalidCompetencyIds.has(competency.id) ? "table-row--invalid" : ""
-                }`}
-              >
-                <td>
-                  <input
-                    className="table-input"
-                    maxLength={5}
-                    value={competency.code}
-                    onChange={(event) =>
-                      updateCompetency(competency.id, (current) => ({
-                        ...current,
-                        code: event.target.value,
-                      }))
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    className="table-input"
-                    value={competency.label}
-                    onChange={(event) =>
-                      updateCompetency(competency.id, (current) => ({
-                        ...current,
-                        label: event.target.value,
-                      }))
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    className="table-input"
-                    type="number"
-                    min="1"
-                    value={competency.requiredStaff}
-                    onChange={(event) =>
-                      updateCompetency(competency.id, (current) => ({
-                        ...current,
-                        requiredStaff: Math.max(1, Number(event.target.value || 1)),
-                      }))
-                    }
-                  />
-                </td>
-                <td>{competency.qualifiedEmployeeCount}</td>
-                <td>
-                  <select
-                    className="table-select"
-                    value={competency.colorToken}
-                    onChange={(event) =>
-                      updateCompetency(competency.id, (current) => ({
-                        ...current,
-                        colorToken: event.target.value,
-                      }))
-                    }
-                  >
-                    {COLOR_TOKENS.map((token) => (
-                      <option key={token} value={token}>
-                        {token}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
-                    {competency.code}
-                  </span>
-                </td>
-                <td>
-                  <div className="table-actions-cell">
-                    {invalidCompetencyIds.has(competency.id) ? (
-                      <p className="row-issue">{getCompetencyIssues(competency).join(" · ")}</p>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="table-action table-action--danger"
-                      onClick={() => handleRemoveCompetency(competency.id)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {competencies.length === 0 ? (
+      {viewMode === "library" ? (
+        <div className="personnel-table-wrap">
+          <table className="personnel-table">
+            <thead>
               <tr>
-                <td colSpan={7}>
-                  <div className="empty-state">
-                    <strong>No competencies yet.</strong>
-                    <span>Add a competency to populate the schedule options.</span>
-                  </div>
-                </td>
+                <th>Code</th>
+                <th>Label</th>
+                <th>Staff required</th>
+                <th>Qualified staff</th>
+                <th>Color</th>
+                <th>Preview</th>
+                <th />
               </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {competencies.map((competency) => (
+                <tr
+                  key={competency.id}
+                  className={`${dirtyCompetencyIds.has(competency.id) ? "table-row--dirty" : ""} ${
+                    invalidCompetencyIds.has(competency.id) ? "table-row--invalid" : ""
+                  }`}
+                >
+                  <td>
+                    <input
+                      className="table-input"
+                      maxLength={5}
+                      value={competency.code}
+                      onChange={(event) =>
+                        updateCompetency(competency.id, (current) => ({
+                          ...current,
+                          code: event.target.value,
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="table-input"
+                      value={competency.label}
+                      onChange={(event) =>
+                        updateCompetency(competency.id, (current) => ({
+                          ...current,
+                          label: event.target.value,
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="table-input"
+                      type="number"
+                      min="1"
+                      value={competency.requiredStaff}
+                      onChange={(event) =>
+                        updateCompetency(competency.id, (current) => ({
+                          ...current,
+                          requiredStaff: Math.max(1, Number(event.target.value || 1)),
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>{competency.qualifiedEmployeeCount}</td>
+                  <td>
+                    <select
+                      className="table-select"
+                      value={competency.colorToken}
+                      onChange={(event) =>
+                        updateCompetency(competency.id, (current) => ({
+                          ...current,
+                          colorToken: event.target.value,
+                        }))
+                      }
+                    >
+                      {COLOR_TOKENS.map((token) => (
+                        <option key={token} value={token}>
+                          {token}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
+                      {competency.code}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="table-actions-cell">
+                      {invalidCompetencyIds.has(competency.id) ? (
+                        <p className="row-issue">{getCompetencyIssues(competency).join(" · ")}</p>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="table-action table-action--danger"
+                        onClick={() => handleRemoveCompetency(competency.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {competencies.length === 0 ? (
+                <tr>
+                  <td colSpan={7}>
+                    <div className="empty-state">
+                      <strong>No competencies yet.</strong>
+                      <span>Add a competency to populate the schedule options.</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="personnel-table-wrap">
+          <table className="personnel-table">
+            <thead>
+              <tr>
+                <th>Enabled</th>
+                <th>Code</th>
+                <th>Label</th>
+                <th>Staff required</th>
+                <th>Qualified staff</th>
+                <th>Preview</th>
+              </tr>
+            </thead>
+            <tbody>
+              {selectedTargetLabel ? (
+                competencies.map((competency) => {
+                  const isEnabled = draftTargetCompetencyIds.includes(competency.id);
+
+                  return (
+                    <tr key={`${selectedTargetKey}-${competency.id}`}>
+                      <td>
+                        <label className="subschedule-status-toggle">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            disabled={selectedTargetIsArchived}
+                            onChange={() => toggleTargetCompetency(competency.id)}
+                          />
+                          <span>{isEnabled ? "Included" : "Hidden"}</span>
+                        </label>
+                      </td>
+                      <td>{competency.code}</td>
+                      <td>{competency.label}</td>
+                      <td>{competency.requiredStaff}</td>
+                      <td>{competency.qualifiedEmployeeCount}</td>
+                      <td>
+                        <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
+                          {competency.code}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6}>
+                    <div className="empty-state">
+                      <strong>No schedules available.</strong>
+                      <span>Create a main schedule or sub-schedule first, then assign its allowed competencies here.</span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
