@@ -2558,7 +2558,7 @@ select {
 }
 
 .shift-cell--off {
-  background: linear-gradient(180deg, rgba(252, 241, 228, 0.94), rgba(245, 227, 203, 0.96));
+  background: linear-gradient(180deg, rgba(243, 239, 234, 0.94), rgba(236, 231, 225, 0.96));
 }
 
 .shift-cell--weekend {
