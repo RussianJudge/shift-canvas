@@ -289,6 +289,29 @@ function getClaimStatus(
   return { canClaim: true, reason: "Available to claim." };
 }
 
+function isDirectOvertimeOption(posting: OvertimePosting) {
+  return (
+    !posting.competencyId ||
+    !posting.coverageCompetencyId ||
+    posting.competencyId === posting.coverageCompetencyId
+  );
+}
+
+function getVisiblePostingsForEmployee(postings: OvertimePosting[], employee: Employee | null) {
+  if (!employee) {
+    return postings;
+  }
+
+  const hasDirectCompetencyMatch = postings.some(
+    (posting) =>
+      isDirectOvertimeOption(posting) &&
+      posting.competencyId &&
+      employee.competencyIds.includes(posting.competencyId),
+  );
+
+  return hasDirectCompetencyMatch ? postings.filter(isDirectOvertimeOption) : postings;
+}
+
 function OvertimeEligibilityReportModal({
   posting,
   eligibleEmployees,
@@ -924,7 +947,7 @@ export function OvertimePanel({
                   dates: [...currentRun],
                   staffedPeople,
                   requiredStaff: competency.requiredStaff,
-                  openShifts: currentRun.length,
+                  openShifts: 0,
                   manualPostingId: null,
                   claimedEmployeeId: employeeId,
                   claimedByName: claimEmployee?.name ?? "Unknown worker",
@@ -1245,6 +1268,12 @@ export function OvertimePanel({
           groups[key].postings.push(posting);
           return groups;
         }, {}),
+      ).sort(
+        (left, right) =>
+          left.dates[0].localeCompare(right.dates[0]) ||
+          left.dates[left.dates.length - 1].localeCompare(right.dates[right.dates.length - 1]) ||
+          left.scheduleName.localeCompare(right.scheduleName) ||
+          left.shiftKind.localeCompare(right.shiftKind),
       ),
     [filteredPostings],
   );
@@ -1522,9 +1551,28 @@ export function OvertimePanel({
       <div className="overtime-list">
         {groupedPostings.map((group) => (
           (() => {
+            const visiblePostings = getVisiblePostingsForEmployee(group.postings, claimingEmployee);
+            const selectedPostingId = selectedPostingByGroup[group.key];
+            const selectedPostingCandidate = selectedPostingId
+              ? visiblePostings.find((posting) => posting.id === selectedPostingId) ?? null
+              : null;
+            const preferredClaimablePosting =
+              visiblePostings.find((posting) => {
+                if (posting.claimedEmployeeIds.includes(claimingEmployeeId)) {
+                  return true;
+                }
+
+                return getClaimStatus(claimingEmployee, posting, snapshot, assignmentIndex).canClaim;
+              }) ?? null;
             const selectedPosting =
-              group.postings.find((posting) => posting.id === selectedPostingByGroup[group.key]) ??
-              group.postings[0];
+              (selectedPostingCandidate &&
+              (selectedPostingCandidate.claimedEmployeeIds.includes(claimingEmployeeId) ||
+                getClaimStatus(claimingEmployee, selectedPostingCandidate, snapshot, assignmentIndex).canClaim)
+                ? selectedPostingCandidate
+                : null) ??
+              preferredClaimablePosting ??
+              selectedPostingCandidate ??
+              visiblePostings[0];
             const claimStatus = selectedPosting
               ? getClaimStatus(claimingEmployee, selectedPosting, snapshot, assignmentIndex)
               : { canClaim: false, reason: "No overtime posting selected." };
@@ -1556,7 +1604,7 @@ export function OvertimePanel({
                   </div>
 
                   <div className="overtime-option-pills">
-                    {group.postings.map((posting) => (
+                    {visiblePostings.map((posting) => (
                       <button
                         key={posting.id}
                         type="button"
