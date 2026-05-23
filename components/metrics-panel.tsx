@@ -342,7 +342,11 @@ function getManualOffDayOvertimeEntries(
 
     const claimKey = `${assignment.scheduleId}:${assignment.employeeId}:${assignment.date}:${assignment.competencyId ?? ""}`;
 
-    if (claimKeys.has(claimKey) || assignment.notes?.startsWith("OT|")) {
+    if (
+      claimKeys.has(claimKey) ||
+      assignment.notes?.startsWith("OT|") ||
+      assignment.notes?.startsWith("MUT|")
+    ) {
       return [];
     }
 
