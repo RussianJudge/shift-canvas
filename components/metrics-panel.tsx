@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
+import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
   formatMonthLabel,
   getEmployeeMap,
@@ -363,6 +364,19 @@ export function getOvertimeMetricEntries(
   assignmentHistory: StoredAssignment[],
 ) {
   const employeeMap = getEmployeeMap(snapshot.schedules);
+  const overtimeAssignmentCoverageIndex = assignmentHistory.reduce<Record<string, string | null>>(
+    (index, assignment) => {
+      if (!assignment.scheduleId || !assignment.notes?.startsWith("OT|")) {
+        return index;
+      }
+
+      index[`${assignment.scheduleId}:${assignment.employeeId}:${assignment.date}`] =
+        parseOvertimeAssignmentNote(assignment.notes).coverageCompetencyId;
+
+      return index;
+    },
+    {},
+  );
   const claimEntries = overtimeClaims.flatMap<OvertimeMetricEntry>((claim) => {
     const metricScheduleId = claim.scheduleId ?? employeeMap[claim.employeeId]?.scheduleId;
 
@@ -374,7 +388,9 @@ export function getOvertimeMetricEntries(
       {
         scheduleId: metricScheduleId,
         employeeId: claim.employeeId,
-        competencyId: claim.competencyId,
+        competencyId:
+          overtimeAssignmentCoverageIndex[`${metricScheduleId}:${claim.employeeId}:${claim.date}`] ??
+          claim.competencyId,
         date: claim.date,
       },
     ];
