@@ -83,6 +83,10 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
   const [transferSuggestions, setTransferSuggestions] = useState<TransferSuggestion[]>([]);
   const [selectedTransferSuggestionIndex, setSelectedTransferSuggestionIndex] = useState(0);
   const [transferMessage, setTransferMessage] = useState("");
+  const [selectedCompetencyModal, setSelectedCompetencyModal] = useState<{
+    scheduleId: string;
+    competencyId: string;
+  } | null>(null);
 
   useEffect(() => {
     setSourceScheduleId((current) =>
@@ -149,6 +153,14 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
   }
 
   const transferSuggestion = transferSuggestions[selectedTransferSuggestionIndex] ?? null;
+  const selectedCompetencyTeam = selectedCompetencyModal
+    ? teamMetrics.find((team) => team.scheduleId === selectedCompetencyModal.scheduleId) ?? null
+    : null;
+  const selectedCompetencyMetric = selectedCompetencyTeam && selectedCompetencyModal
+    ? selectedCompetencyTeam.competencyMetrics.find(
+        (metric) => metric.competencyId === selectedCompetencyModal.competencyId,
+      ) ?? null
+    : null;
 
   return (
     <section className="metrics-section">
@@ -173,7 +185,17 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
 
             <div className="metrics-bars">
               {team.competencyMetrics.map((metric) => (
-                <div key={metric.competencyId} className="metrics-bar-row">
+                <button
+                  key={metric.competencyId}
+                  type="button"
+                  className="metrics-bar-row metrics-bar-row--interactive"
+                  onClick={() =>
+                    setSelectedCompetencyModal({
+                      scheduleId: team.scheduleId,
+                      competencyId: metric.competencyId,
+                    })
+                  }
+                >
                   <div className="metrics-bar-row__label">
                     <span className={`legend-pill legend-pill--${metric.colorToken.toLowerCase()}`}>
                       {metric.code}
@@ -191,12 +213,62 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                       }}
                     />
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </article>
         ))}
       </div>
+
+      {selectedCompetencyTeam && selectedCompetencyMetric && typeof document !== "undefined"
+        ? createPortal(
+            <div className="assignment-modal-backdrop" onClick={() => setSelectedCompetencyModal(null)}>
+              <section
+                className="assignment-modal metrics-competency-modal"
+                aria-label="Qualified staff list"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="assignment-modal__header">
+                  <div>
+                    <h2 className="assignment-modal__title">
+                      Shift {selectedCompetencyTeam.scheduleName} · {selectedCompetencyMetric.code}
+                    </h2>
+                    <p className="assignment-modal__context">
+                      All workers on this team who are qualified for the selected competency.
+                    </p>
+                  </div>
+                  <button type="button" className="ghost-button" onClick={() => setSelectedCompetencyModal(null)}>
+                    Close
+                  </button>
+                </div>
+
+                <div className="overtime-eligibility-modal__summary">
+                  <div className="overtime-eligibility-modal__summary-row">
+                    <span>Qualified staff</span>
+                    <strong>
+                      {selectedCompetencyMetric.qualifiedPeople} worker
+                      {selectedCompetencyMetric.qualifiedPeople === 1 ? "" : "s"}
+                    </strong>
+                  </div>
+                </div>
+
+                {selectedCompetencyMetric.qualifiedEmployees.length > 0 ? (
+                  <div className="metrics-competency-modal__list">
+                    {selectedCompetencyMetric.qualifiedEmployees.map((employee) => (
+                      <div key={employee.employeeId} className="metrics-competency-modal__row">
+                        <strong>{employee.employeeName}</strong>
+                        <span>{employee.employeeRole}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="metrics-top-list__empty">No qualified workers on this team.</p>
+                )}
+              </section>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {isTransferModalOpen && typeof document !== "undefined"
         ? createPortal(
@@ -390,6 +462,7 @@ export function MetricsOvertimeSection({
   assignmentHistory: StoredAssignment[];
 }) {
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
+  const [selectedOvertimeTeamId, setSelectedOvertimeTeamId] = useState<string | null>(null);
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
   const filteredOvertimeHistory = useMemo(() => {
     const start = getWindowStart(metricsAnchorDate, overtimeWindow);
@@ -408,6 +481,16 @@ export function MetricsOvertimeSection({
     [filteredEntries, metricsAnchorDate, snapshot],
   );
   const maxOvertimeShifts = Math.max(1, ...teamMetrics.map((team) => team.overtimeShifts));
+  const selectedOvertimeTeam = useMemo(
+    () => teamMetrics.find((team) => team.scheduleId === selectedOvertimeTeamId) ?? null,
+    [selectedOvertimeTeamId, teamMetrics],
+  );
+
+  useEffect(() => {
+    if (selectedOvertimeTeamId && !selectedOvertimeTeam) {
+      setSelectedOvertimeTeamId(null);
+    }
+  }, [selectedOvertimeTeam, selectedOvertimeTeamId]);
 
   return (
     <section className="metrics-section">
@@ -432,7 +515,20 @@ export function MetricsOvertimeSection({
 
       <div className="metrics-team-list">
         {teamMetrics.map((team) => (
-          <article key={`${team.scheduleId}-overtime`} className="metrics-card">
+          <article
+            key={`${team.scheduleId}-overtime`}
+            className="metrics-card metrics-card--interactive"
+            onClick={() => setSelectedOvertimeTeamId(team.scheduleId)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setSelectedOvertimeTeamId(team.scheduleId);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open overtime personnel list for shift ${team.scheduleName}`}
+          >
             <div className="metrics-card__header">
               <div>
                 <p className="metrics-card__eyebrow">Shift {team.scheduleName}</p>
@@ -487,6 +583,61 @@ export function MetricsOvertimeSection({
           </article>
         ))}
       </div>
+
+      {selectedOvertimeTeam && typeof document !== "undefined"
+        ? createPortal(
+            <div className="assignment-modal-backdrop" onClick={() => setSelectedOvertimeTeamId(null)}>
+              <section
+                className="assignment-modal metrics-overtime-modal"
+                aria-label="Overtime personnel list"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="assignment-modal__header">
+                  <div>
+                    <h2 className="assignment-modal__title">Shift {selectedOvertimeTeam.scheduleName} overtime</h2>
+                    <p className="assignment-modal__context">
+                      All workers with overtime on this card in the selected {overtimeWindow.toUpperCase()} window.
+                    </p>
+                  </div>
+                  <button type="button" className="ghost-button" onClick={() => setSelectedOvertimeTeamId(null)}>
+                    Close
+                  </button>
+                </div>
+
+                <div className="overtime-eligibility-modal__summary">
+                  <div className="overtime-eligibility-modal__summary-row">
+                    <span>Total overtime shifts</span>
+                    <strong>
+                      {selectedOvertimeTeam.overtimeShifts} shift{selectedOvertimeTeam.overtimeShifts === 1 ? "" : "s"}
+                    </strong>
+                  </div>
+                  <div className="overtime-eligibility-modal__summary-row">
+                    <span>Total workers</span>
+                    <strong>
+                      {selectedOvertimeTeam.overtimeWorkers} worker{selectedOvertimeTeam.overtimeWorkers === 1 ? "" : "s"}
+                    </strong>
+                  </div>
+                </div>
+
+                {selectedOvertimeTeam.allOvertimePeople.length > 0 ? (
+                  <div className="metrics-overtime-modal__list">
+                    {selectedOvertimeTeam.allOvertimePeople.map((person) => (
+                      <div key={person.employeeId} className="metrics-overtime-modal__row">
+                        <strong>{person.employeeName}</strong>
+                        <span>
+                          {person.claimedShifts} overtime shift{person.claimedShifts === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="metrics-top-list__empty">No overtime workers in this time window.</p>
+                )}
+              </section>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }

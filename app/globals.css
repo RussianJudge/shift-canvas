@@ -1284,6 +1284,21 @@ select {
   background: rgba(255, 252, 247, 0.85);
 }
 
+.metrics-card--interactive {
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.metrics-card--interactive:hover,
+.metrics-card--interactive:focus-visible {
+  border-color: color-mix(in srgb, var(--team-accent) 35%, var(--line));
+  box-shadow: 0 0.9rem 2rem rgba(66, 44, 23, 0.08);
+  transform: translateY(-1px);
+}
+
 .metrics-card__header {
   display: flex;
   align-items: flex-start;
@@ -1323,6 +1338,19 @@ select {
 .metrics-bar-row {
   display: grid;
   gap: 0.45rem;
+}
+
+.metrics-bar-row--interactive {
+  padding: 0.2rem 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.metrics-bar-row--interactive:hover .metrics-bar-track,
+.metrics-bar-row--interactive:focus-visible .metrics-bar-track {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--team-accent) 25%, transparent);
 }
 
 .metrics-bar-row__label {
@@ -1514,6 +1542,64 @@ select {
 
 .metrics-transfer-modal {
   width: min(48rem, calc(100vw - 2rem));
+}
+
+.metrics-competency-modal {
+  width: min(38rem, calc(100vw - 2rem));
+}
+
+.metrics-competency-modal__list {
+  display: grid;
+  gap: 0.7rem;
+  max-height: min(22rem, 52vh);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.metrics-competency-modal__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.45rem 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.metrics-competency-modal__row span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.metrics-overtime-modal {
+  width: min(38rem, calc(100vw - 2rem));
+}
+
+.metrics-overtime-modal__list {
+  display: grid;
+  gap: 0.7rem;
+  max-height: min(22rem, 52vh);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.metrics-overtime-modal__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.45rem 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.metrics-overtime-modal__row span {
+  color: var(--muted);
+  font-size: 0.86rem;
 }
 
 .metrics-transfer-grid {

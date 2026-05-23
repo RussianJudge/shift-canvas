@@ -25,6 +25,11 @@ type TeamCompetencyMetric = {
   code: string;
   colorToken: string;
   qualifiedPeople: number;
+  qualifiedEmployees: Array<{
+    employeeId: string;
+    employeeName: string;
+    employeeRole: string;
+  }>;
 };
 
 type TeamMetric = {
@@ -35,6 +40,11 @@ type TeamMetric = {
   overtimeShifts: number;
   overtimeWorkers: number;
   topCompetencyCode: string | null;
+  allOvertimePeople: Array<{
+    employeeId: string;
+    employeeName: string;
+    claimedShifts: number;
+  }>;
   topOvertimeCompetencies: Array<{
     competencyId: string;
     code: string;
@@ -553,14 +563,28 @@ export function getTeamMetrics(
 
   return snapshot.schedules.map((schedule) => {
     const competencyMetrics = snapshot.competencies
-      .map((competency) => ({
-        competencyId: competency.id,
-        code: competency.code,
-        colorToken: competency.colorToken,
-        qualifiedPeople: schedule.employees.filter((employee) =>
-          employee.competencyIds.includes(competency.id),
-        ).length,
-      }))
+      .map((competency) => {
+        const qualifiedEmployees = schedule.employees
+          .filter((employee) => employee.competencyIds.includes(competency.id))
+          .map((employee) => ({
+            employeeId: employee.id,
+            employeeName: employee.name,
+            employeeRole: employee.role,
+          }))
+          .sort(
+            (left, right) =>
+              left.employeeName.localeCompare(right.employeeName) ||
+              left.employeeRole.localeCompare(right.employeeRole),
+          );
+
+        return {
+          competencyId: competency.id,
+          code: competency.code,
+          colorToken: competency.colorToken,
+          qualifiedPeople: qualifiedEmployees.length,
+          qualifiedEmployees,
+        };
+      })
       .sort((left, right) => right.qualifiedPeople - left.qualifiedPeople || left.code.localeCompare(right.code));
 
     const incurredOvertimeEntries = overtimeEntries.filter((claim) => {
@@ -627,8 +651,7 @@ export function getTeamMetrics(
         (left, right) =>
           right.claimedShifts - left.claimedShifts ||
           left.employeeName.localeCompare(right.employeeName),
-      )
-      .slice(0, 3);
+      );
 
     const shiftFragilityMetrics = snapshot.competencies
       .map((competency) => {
@@ -688,11 +711,12 @@ export function getTeamMetrics(
       scheduleName: schedule.name,
       competencyMetrics,
       shiftFragilityMetrics,
-      overtimeShifts: incurredOvertimeEntries.length,
+      overtimeShifts: teamPersonnelOvertimeEntries.length,
       overtimeWorkers: new Set(teamPersonnelOvertimeEntries.map((claim) => claim.employeeId)).size,
       topCompetencyCode,
+      allOvertimePeople: topOvertimePeople,
       topOvertimeCompetencies,
-      topOvertimePeople,
+      topOvertimePeople: topOvertimePeople.slice(0, 3),
     };
   });
 }
