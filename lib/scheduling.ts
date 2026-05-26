@@ -257,6 +257,22 @@ export function isCompletedSetRange(
   return completedSets.some((entry) => createSetRangeKeyFromEntry(entry) === rangeKey);
 }
 
+export function isCompletedSetCoveringDates(
+  completedSets: CompletedSet[],
+  scheduleId: string,
+  dates: string[],
+) {
+  if (dates.length === 0) {
+    return false;
+  }
+
+  return completedSets.some(
+    (entry) =>
+      entry.scheduleId === scheduleId &&
+      dates.every((date) => date >= entry.startDate && date <= entry.endDate),
+  );
+}
+
 /** Returns the month-local dates that belong to completed sets for one schedule. */
 export function getCompletedSetDatesForMonth(
   completedSets: CompletedSet[],

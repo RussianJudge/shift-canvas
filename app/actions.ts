@@ -49,6 +49,7 @@ import {
   getMonthKeysForDateRange,
   getScheduleById,
   getWorkedSetDays,
+  isCompletedSetCoveringDates,
   needsNightBeforeFirstDayShiftConfirmation,
   shiftForDate,
 } from "@/lib/scheduling";
@@ -1850,16 +1851,22 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     const completedSetRangeKeys = new Set(
       snapshot.completedSets.map((entry) => createSetRangeKey(entry.scheduleId, entry.startDate, entry.endDate)),
     );
+    const completedRangeCoversPosting = isCompletedSetCoveringDates(
+      snapshot.completedSets,
+      targetScheduleId ?? "",
+      normalizedDates,
+    );
 
     if (
       fullSetDays.length === 0 ||
-      !completedSetRangeKeys.has(
-        createSetRangeKey(
-          targetScheduleId ?? "",
-          fullSetDays[0].date,
-          fullSetDays[fullSetDays.length - 1].date,
-        ),
-      )
+      (!completedRangeCoversPosting &&
+        !completedSetRangeKeys.has(
+          createSetRangeKey(
+            targetScheduleId ?? "",
+            fullSetDays[0].date,
+            fullSetDays[fullSetDays.length - 1].date,
+          ),
+        ))
     ) {
       return {
         ok: false,
