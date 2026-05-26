@@ -1502,6 +1502,9 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     includeSubScheduleAssignments: true,
     includeOvertimeClaims: true,
     includeManualOvertimePostings: true,
+    includeCompletedSets: true,
+    assignmentWindow: "extended",
+    completedSetWindow: "extended",
   });
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
