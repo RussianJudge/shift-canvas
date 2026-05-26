@@ -101,7 +101,7 @@ export function getPreviousDate(isoDate: string) {
 
 /**
  * Checks whether a worker already worked a night shift on the previous calendar
- * day, which blocks next-day DAY overtime claims.
+ * day, which should trigger a next-day DAY overtime confirmation.
  */
 export function hasWorkedNightBeforeDate(
   employee: Employee,
@@ -133,6 +133,18 @@ export function hasWorkedNightBeforeDate(
     ) && homeShiftKind === "NIGHT";
 
   return hasNightSubScheduleAssignment || homeShiftKind === "NIGHT";
+}
+
+export function needsNightBeforeFirstDayShiftConfirmation(
+  employee: Employee,
+  employeeSchedule: Pick<Schedule, "startDate" | "dayShiftDays" | "nightShiftDays" | "offDays">,
+  snapshot: Pick<SchedulerSnapshot, "assignments" | "subScheduleAssignments">,
+  dates: string[],
+  shiftKind: ShiftKind,
+) {
+  return shiftKind === "DAY" && dates[0]
+    ? hasWorkedNightBeforeDate(employee, employeeSchedule, snapshot, dates[0])
+    : false;
 }
 
 /** Returns the visible calendar grid for a single month. */

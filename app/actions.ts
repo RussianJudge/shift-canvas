@@ -45,11 +45,11 @@ import {
   createSetRangeKey,
   getEmployeeMap,
   getExtendedMonthDays,
-  hasWorkedNightBeforeDate,
   getMonthDays,
   getMonthKeysForDateRange,
   getScheduleById,
   getWorkedSetDays,
+  needsNightBeforeFirstDayShiftConfirmation,
   shiftForDate,
 } from "@/lib/scheduling";
 import { getAppSession } from "@/lib/auth";
@@ -1648,6 +1648,23 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       }
     }
 
+    if (
+      manualPosting?.shiftKind === "DAY" &&
+      needsNightBeforeFirstDayShiftConfirmation(
+        employee,
+        employeeSchedule,
+        snapshot,
+        normalizedDates,
+        manualPosting.shiftKind,
+      ) &&
+      !input.confirmedNightShiftTurnaround
+    ) {
+      return {
+        ok: false,
+        message: `${employee.name} is assigned to a night shift immediately before the first overtime day shift. Confirm they are on a modified schedule before claiming.`,
+      };
+    }
+
     const subScheduleScope = {
       companyId: targetSubSchedule.companyId ?? session.companyId ?? "",
       siteId: targetSubSchedule.siteId ?? session.siteId ?? "",
@@ -1848,6 +1865,25 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     }
   }
 
+  const firstDateShiftKind =
+    manualPosting?.shiftKind ?? (normalizedDates[0] ? shiftForDate(targetSchedule!, normalizedDates[0]) : "OFF");
+
+  if (
+    needsNightBeforeFirstDayShiftConfirmation(
+      employee,
+      employeeSchedule,
+      snapshot,
+      normalizedDates,
+      firstDateShiftKind,
+    ) &&
+    !input.confirmedNightShiftTurnaround
+  ) {
+    return {
+      ok: false,
+      message: `${employee.name} is assigned to a night shift immediately before the first overtime day shift. Confirm they are on a modified schedule before claiming.`,
+    };
+  }
+
   for (const date of normalizedDates) {
     const shiftKind = shiftForDate(employeeSchedule, date);
     const hasExistingAssignment = snapshot.assignments.some(
@@ -1861,16 +1897,6 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
       return {
         ok: false,
         message: `${employee.name} is not available for every shift in that posting.`,
-      };
-    }
-
-    if (
-      shiftForDate(targetSchedule!, date) === "DAY" &&
-      hasWorkedNightBeforeDate(employee, employeeSchedule, snapshot, date)
-    ) {
-      return {
-        ok: false,
-        message: `${employee.name} worked a night shift on the previous calendar day.`,
       };
     }
   }

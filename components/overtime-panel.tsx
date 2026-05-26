@@ -19,10 +19,10 @@ import {
   getCurrentMonthKey,
   getEmployeeMap,
   getExtendedMonthDays,
-  hasWorkedNightBeforeDate,
   getMonthDays,
   getScheduleById,
   getWorkedSetDays,
+  needsNightBeforeFirstDayShiftConfirmation,
   shiftMonthKey,
   shiftForDate,
 } from "@/lib/scheduling";
@@ -252,13 +252,6 @@ function getClaimStatus(
   const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
 
   for (const date of posting.dates) {
-    if (
-      posting.shiftKind === "DAY" &&
-      hasWorkedNightBeforeDate(employee, employeeSchedule, snapshot, date)
-    ) {
-      return { canClaim: false, reason: "Employee worked a night shift on the previous calendar day." };
-    }
-
     const hasExistingAssignment = snapshot.assignments.some(
       (assignment) =>
         assignment.employeeId === employee.id &&
@@ -287,6 +280,20 @@ function getClaimStatus(
   }
 
   return { canClaim: true, reason: "Available to claim." };
+}
+
+function needsTurnaroundConfirmation(employee: Employee | null, posting: OvertimePosting, snapshot: SchedulerSnapshot) {
+  if (!employee) {
+    return false;
+  }
+
+  return needsNightBeforeFirstDayShiftConfirmation(
+    employee,
+    getScheduleById(snapshot, employee.scheduleId),
+    snapshot,
+    posting.dates,
+    posting.shiftKind,
+  );
 }
 
 function isDirectOvertimeOption(posting: OvertimePosting) {
@@ -386,6 +393,57 @@ function OvertimeEligibilityReportModal({
             <span>No employees currently meet the claim requirements for this posting.</span>
           </div>
         )}
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function NightShiftTurnaroundModal({
+  employeeName,
+  posting,
+  onCancel,
+  onConfirm,
+  isSubmitting,
+}: {
+  employeeName: string;
+  posting: OvertimePosting;
+  onCancel: () => void;
+  onConfirm: () => void;
+  isSubmitting: boolean;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Confirm modified schedule</h2>
+            <p className="assignment-modal__context">
+              {employeeName} is assigned to a night shift immediately before the first overtime day shift on{" "}
+              {formatShortDate(posting.dates[0])}.
+            </p>
+          </div>
+        </div>
+
+        <div className="empty-state">
+          <strong>Confirm before claiming</strong>
+          <span>
+            They must be on a modified schedule and able to work this first overtime shift before the claim is saved.
+          </span>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Cancel
+          </button>
+          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+            {isSubmitting ? "Claiming..." : "Confirm and claim"}
+          </button>
+        </div>
       </section>
     </div>,
     document.body,
@@ -647,6 +705,7 @@ export function OvertimePanel({
   const [isClaiming, startClaimTransition] = useTransition();
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [eligibilityReportPostingId, setEligibilityReportPostingId] = useState<string | null>(null);
+  const [turnaroundConfirmationPostingId, setTurnaroundConfirmationPostingId] = useState<string | null>(null);
   const currentPostingMonth = useMemo(() => getCurrentMonthKey("America/Edmonton"), []);
   const manualAvailableMonths = useMemo(
     () => Array.from({ length: 13 }, (_, index) => shiftMonthKey(currentPostingMonth, index)),
@@ -1283,6 +1342,10 @@ export function OvertimePanel({
     () => postings.find((posting) => posting.id === eligibilityReportPostingId) ?? null,
     [eligibilityReportPostingId, postings],
   );
+  const selectedTurnaroundConfirmationPosting = useMemo(
+    () => postings.find((posting) => posting.id === turnaroundConfirmationPostingId) ?? null,
+    [postings, turnaroundConfirmationPostingId],
+  );
   const eligibleEmployeesForReport = useMemo(
     () =>
       selectedEligibilityReportPosting
@@ -1306,7 +1369,13 @@ export function OvertimePanel({
     }
   }, [eligibilityReportPostingId, selectedEligibilityReportPosting]);
 
-  function handleClaim(posting: OvertimePosting) {
+  useEffect(() => {
+    if (turnaroundConfirmationPostingId && !selectedTurnaroundConfirmationPosting) {
+      setTurnaroundConfirmationPostingId(null);
+    }
+  }, [selectedTurnaroundConfirmationPosting, turnaroundConfirmationPostingId]);
+
+  function submitClaim(posting: OvertimePosting, confirmedNightShiftTurnaround = false) {
     if (!claimingEmployeeId) {
       setStatusMessage("Select an employee first.");
       return;
@@ -1323,6 +1392,7 @@ export function OvertimePanel({
         swapEmployeeId: posting.swapEmployeeId,
         manualPostingId: posting.manualPostingId,
         dates: posting.dates,
+        confirmedNightShiftTurnaround,
       });
 
       setStatusMessage(result.message);
@@ -1331,6 +1401,31 @@ export function OvertimePanel({
         router.refresh();
       }
     });
+  }
+
+  function handleClaim(posting: OvertimePosting) {
+    if (!claimingEmployeeId) {
+      setStatusMessage("Select an employee first.");
+      return;
+    }
+
+    if (needsTurnaroundConfirmation(claimingEmployee, posting, snapshot)) {
+      setTurnaroundConfirmationPostingId(posting.id);
+      return;
+    }
+
+    submitClaim(posting);
+  }
+
+  function handleConfirmTurnaroundClaim() {
+    if (!selectedTurnaroundConfirmationPosting) {
+      setTurnaroundConfirmationPostingId(null);
+      return;
+    }
+
+    const posting = selectedTurnaroundConfirmationPosting;
+    setTurnaroundConfirmationPostingId(null);
+    submitClaim(posting, true);
   }
 
   function handleRelease(posting: OvertimePosting) {
@@ -1788,6 +1883,16 @@ export function OvertimePanel({
           posting={selectedEligibilityReportPosting}
           eligibleEmployees={eligibleEmployeesForReport}
           onClose={() => setEligibilityReportPostingId(null)}
+        />
+      ) : null}
+
+      {selectedTurnaroundConfirmationPosting && claimingEmployee ? (
+        <NightShiftTurnaroundModal
+          employeeName={claimingEmployee.name}
+          posting={selectedTurnaroundConfirmationPosting}
+          onCancel={() => setTurnaroundConfirmationPostingId(null)}
+          onConfirm={handleConfirmTurnaroundClaim}
+          isSubmitting={isClaiming}
         />
       ) : null}
     </section>

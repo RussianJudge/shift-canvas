@@ -234,6 +234,7 @@ export interface ClaimOvertimePostingInput {
   swapEmployeeId?: string | null;
   manualPostingId?: string | null;
   dates: string[];
+  confirmedNightShiftTurnaround?: boolean;
 }
 
 export interface ReleaseOvertimePostingInput {
