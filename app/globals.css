@@ -2145,6 +2145,38 @@ select {
   gap: 0.65rem;
 }
 
+.set-completion-modal__list {
+  display: grid;
+  gap: 0.65rem;
+  max-height: min(22rem, 52vh);
+  overflow-y: auto;
+}
+
+.set-completion-modal__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.set-completion-modal__row div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.set-completion-modal__row span,
+.set-completion-modal__row small {
+  color: var(--muted);
+}
+
+.set-completion-modal__row small {
+  text-align: right;
+}
+
 .personnel-table-wrap {
   overflow: auto;
   border-top: 1px solid var(--line);

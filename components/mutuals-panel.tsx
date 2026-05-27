@@ -367,6 +367,58 @@ function MutualPostModal({
   );
 }
 
+function CancelAcceptedMutualModal({
+  posting,
+  onCancel,
+  onConfirm,
+  isSubmitting,
+}: {
+  posting: MutualShiftPosting;
+  onCancel: () => void;
+  onConfirm: () => void;
+  isSubmitting: boolean;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Cancel accepted mutual?</h2>
+            <p className="assignment-modal__context">
+              Cancel this accepted mutual for {posting.ownerEmployeeName}? This will restore the original schedule cells.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Close
+          </button>
+        </div>
+
+        <div className="mutual-date-summary">
+          {posting.dates.map((date, index) => (
+            <span key={date} className="mutual-date-chip">
+              {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
+            </span>
+          ))}
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Keep mutual
+          </button>
+          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+            {isSubmitting ? "Cancelling..." : "Cancel mutual"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 /**
  * Main mutual-shift workspace.
  *
@@ -416,6 +468,7 @@ export function MutualsPanel({
   const [postingDates, setPostingDates] = useState<string[]>([]);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [applyPostingId, setApplyPostingId] = useState<string | null>(null);
+  const [cancelAcceptedPostingId, setCancelAcceptedPostingId] = useState<string | null>(null);
   const [applicationEmployeeId, setApplicationEmployeeId] = useState(
     viewer.role === "worker" ? viewer.employeeId ?? "" : allEmployees[0]?.id ?? "",
   );
@@ -434,6 +487,9 @@ export function MutualsPanel({
           .map((day) => ({ date: day.date, shiftKind: shiftForDate(selectedPostingSchedule, day.date) }))
       : [];
   const applyPosting = applyPostingId ? viewSnapshot.postings.find((posting) => posting.id === applyPostingId) ?? null : null;
+  const cancelAcceptedPosting = cancelAcceptedPostingId
+    ? viewSnapshot.postings.find((posting) => posting.id === cancelAcceptedPostingId) ?? null
+    : null;
 
   const openPostings = viewSnapshot.postings.filter((posting) => posting.status === "open");
   const pendingApprovalPostings = viewSnapshot.postings.filter((posting) => posting.status === "pending_leader_approval");
@@ -541,6 +597,7 @@ export function MutualsPanel({
 
       if (result.ok) {
         setPostingDates([]);
+        setIsPostModalOpen(false);
         loadMutualsMonth(viewMonth);
       }
     });
@@ -574,6 +631,7 @@ export function MutualsPanel({
       setStatusMessage(result.message);
 
       if (result.ok) {
+        setCancelAcceptedPostingId(null);
         loadMutualsMonth(viewMonth);
       }
     });
@@ -951,12 +1009,7 @@ export function MutualsPanel({
                       <button
                         type="button"
                         className="ghost-button"
-                        onClick={() =>
-                          confirmAction(
-                            `Cancel this accepted mutual for ${posting.ownerEmployeeName}? This will restore the original schedule cells.`,
-                            () => cancelAcceptedMutual({ postingId: posting.id }),
-                          )
-                        }
+                        onClick={() => setCancelAcceptedPostingId(posting.id)}
                         disabled={isSubmitting}
                       >
                         Cancel mutual
@@ -1047,6 +1100,15 @@ export function MutualsPanel({
           onToggleDate={togglePostingDate}
           onClose={() => setIsPostModalOpen(false)}
           onSubmit={handleCreatePosting}
+          isSubmitting={isSubmitting}
+        />
+      ) : null}
+
+      {cancelAcceptedPosting ? (
+        <CancelAcceptedMutualModal
+          posting={cancelAcceptedPosting}
+          onCancel={() => setCancelAcceptedPostingId(null)}
+          onConfirm={() => runAction(() => cancelAcceptedMutual({ postingId: cancelAcceptedPosting.id }))}
           isSubmitting={isSubmitting}
         />
       ) : null}

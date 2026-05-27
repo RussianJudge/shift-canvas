@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -91,6 +92,13 @@ type CoverageSummary = {
   isUnderstaffed: boolean;
   missingDates: string[];
 };
+type UnfilledSetCompetency = {
+  id: string;
+  code: string;
+  label: string;
+  missingCells: number;
+  missingDates: string[];
+};
 
 type CopiedSetTemplate = {
   scheduleId: string;
@@ -110,6 +118,69 @@ const ScheduleAssignmentModal = dynamic(
     import("@/components/schedule-assignment-modal").then((module) => module.ScheduleAssignmentModal),
   { ssr: false },
 );
+
+function SetCompletionWarningModal({
+  scheduleName,
+  dateRange,
+  unfilledCompetencies,
+  onCancel,
+  onConfirm,
+  isSubmitting,
+}: {
+  scheduleName: string;
+  dateRange: string;
+  unfilledCompetencies: UnfilledSetCompetency[];
+  onCancel: () => void;
+  onConfirm: () => void;
+  isSubmitting: boolean;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section className="assignment-modal set-completion-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Mark set complete?</h2>
+            <p className="assignment-modal__context">
+              For {scheduleName} {dateRange}, the following competencies are unfilled. Continuing will create overtime postings.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Close
+          </button>
+        </div>
+
+        <div className="set-completion-modal__list">
+          {unfilledCompetencies.map((competency) => (
+            <div key={competency.id} className="set-completion-modal__row">
+              <div>
+                <strong>{competency.code}</strong>
+                <span>{competency.label}</span>
+              </div>
+              <small>
+                {competency.missingCells} unfilled cell{competency.missingCells === 1 ? "" : "s"} ·{" "}
+                {competency.missingDates.map(formatShortDate).join(", ")}
+              </small>
+            </div>
+          ))}
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Cancel
+          </button>
+          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+            {isSubmitting ? "Completing..." : "Accept and create overtime"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
 
 /** Builds the visible roster, including borrowed overtime and mutual rows for the month. */
 function buildDisplayEmployeesForSchedule({
@@ -530,17 +601,25 @@ function isOvertimeManagedSelection(selection: AssignmentSelection) {
 function getScheduleCellComment({
   notes,
   employeeName,
+  employeeId,
+  scheduleId,
   employeeMap,
 }: {
   notes: string | null;
   employeeName: string;
+  employeeId: string;
+  scheduleId: string;
   employeeMap: Record<string, Employee>;
 }) {
   const parsedMutual = parseMutualAssignmentNote(notes);
 
   if (parsedMutual.partnerEmployeeId) {
     const partnerName = employeeMap[parsedMutual.partnerEmployeeId]?.name ?? "their mutual partner";
-    return `${employeeName} working for ${partnerName}`;
+    const isBorrowedMutualCell = employeeMap[employeeId]?.scheduleId !== scheduleId;
+
+    return isBorrowedMutualCell
+      ? `${employeeName} is covering ${partnerName} via mutual.`
+      : `${partnerName} is covering ${employeeName} via mutual.`;
   }
 
   return notes ?? undefined;
@@ -812,6 +891,7 @@ export function MonthlyScheduler({
   const [isSavingTransition, startSaveTransition] = useTransition();
   const [activeSaveCount, setActiveSaveCount] = useState(0);
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
+  const [isSetCompletionWarningOpen, setIsSetCompletionWarningOpen] = useState(false);
   const [isSavingPins, startPinSaveTransition] = useTransition();
   const isSaving = isSavingTransition || activeSaveCount > 0;
   const isScheduleLocked = isSaving || isUpdatingSetCompletion;
@@ -909,21 +989,33 @@ export function MonthlyScheduler({
       for (const day of selectedSetDays) {
         let filledOnDate = 0;
 
-        for (const employee of activeSchedule.employees) {
-          const shiftKind = shiftForDate(activeSchedule, day.date);
-          const selection = getSelectionForCell(
-            activeSchedule.id,
-            employee.id,
-            day.date,
-            shiftKind,
-            effectiveAssignments,
-            snapshot.timeCodes,
-          );
+        const overtimeClaimKeys = new Set(
+          snapshot.overtimeClaims
+            .filter(
+              (claim) =>
+                claim.scheduleId === activeSchedule.id &&
+                claim.competencyId === competency.id &&
+                claim.date === day.date,
+            )
+            .map((claim) => `${claim.employeeId}:${claim.date}:${claim.competencyId}`),
+        );
 
-          if (selection.competencyId === competency.id) {
-            filledCells += 1;
-            filledOnDate += 1;
+        for (const [key, selection] of Object.entries(effectiveAssignments)) {
+          const parsed = parseAssignmentKey(key);
+
+          if (
+            !parsed ||
+            parsed.scheduleId !== activeSchedule.id ||
+            parsed.date !== day.date ||
+            selection.competencyId !== competency.id ||
+            isOvertimeManagedSelection(selection) ||
+            overtimeClaimKeys.has(`${parsed.employeeId}:${parsed.date}:${selection.competencyId}`)
+          ) {
+            continue;
           }
+
+          filledCells += 1;
+          filledOnDate += 1;
         }
 
         for (const claim of snapshot.overtimeClaims) {
@@ -962,36 +1054,24 @@ export function MonthlyScheduler({
       return map;
     }, {});
   }, [activeSchedule, activeScheduleCompetencies, effectiveAssignments, employeeMap, selectedSetDays, snapshot.overtimeClaims, snapshot.timeCodes]);
-  const unassignedSetCells = useMemo(() => {
-    if (!activeSchedule || selectedSetDays.length === 0) {
-      return [];
-    }
+  const unfilledSetCompetencies = useMemo<UnfilledSetCompetency[]>(
+    () =>
+      activeScheduleCompetencies
+        .map((competency) => {
+          const coverage = competencyCoverage[competency.id];
+          const missingCells = coverage ? Math.max(0, coverage.requiredCells - coverage.filledCells) : 0;
 
-    return activeSchedule.employees.flatMap((employee) =>
-      selectedSetDays.flatMap((day) => {
-        const shiftKind = shiftForDate(activeSchedule, day.date);
-        const selection = getSelectionForCell(
-          activeSchedule.id,
-          employee.id,
-          day.date,
-          shiftKind,
-          effectiveAssignments,
-          snapshot.timeCodes,
-        );
-
-        if (selection.competencyId || selection.timeCodeId) {
-          return [];
-        }
-
-        return [
-          {
-            employeeName: employee.name,
-            date: day.date,
-          },
-        ];
-      }),
-    );
-  }, [activeSchedule, effectiveAssignments, selectedSetDays, snapshot.timeCodes]);
+          return {
+            id: competency.id,
+            code: competency.code,
+            label: competency.label,
+            missingCells,
+            missingDates: coverage?.missingDates ?? [],
+          };
+        })
+        .filter((competency) => competency.missingCells > 0),
+    [activeScheduleCompetencies, competencyCoverage],
+  );
   const fullyBlankSetWorkers = useMemo(() => {
     if (!activeSchedule || selectedSetDays.length === 0) {
       return [];
@@ -1678,31 +1758,13 @@ export function MonthlyScheduler({
     });
   }
 
-  function handleSetCompletion() {
+  function completeSelectedSet(nextIsComplete: boolean) {
     if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
       return;
     }
 
     const startDate = selectedSetDays[0].date;
     const endDate = selectedSetDays[selectedSetDays.length - 1].date;
-    const nextIsComplete = !isSelectedSetComplete;
-
-    if (nextIsComplete && unassignedSetCells.length > 0) {
-      const preview = unassignedSetCells
-        .slice(0, 3)
-        .map((cell) => `${cell.employeeName} on ${formatShortDate(cell.date)}`)
-        .join(", ");
-      const remainingCount = Math.max(0, unassignedSetCells.length - 3);
-      const shouldContinue = window.confirm(
-        `${unassignedSetCells.length} working cell${unassignedSetCells.length === 1 ? " is" : "s are"} still blank in this set${
-          preview ? `, including ${preview}` : ""
-        }${remainingCount > 0 ? `, plus ${remainingCount} more` : ""}. If you continue, those staff will be treated as off and overtime will post as needed. Continue?`,
-      );
-
-      if (!shouldContinue) {
-        return;
-      }
-    }
 
     startSetCompletionTransition(async () => {
       /**
@@ -1786,6 +1848,26 @@ export function MonthlyScheduler({
         }
       });
     });
+  }
+
+  function handleSetCompletion() {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+      return;
+    }
+
+    const nextIsComplete = !isSelectedSetComplete;
+
+    if (nextIsComplete && unfilledSetCompetencies.length > 0) {
+      setIsSetCompletionWarningOpen(true);
+      return;
+    }
+
+    completeSelectedSet(nextIsComplete);
+  }
+
+  function handleConfirmSetCompletionWarning() {
+    setIsSetCompletionWarningOpen(false);
+    completeSelectedSet(true);
   }
 
   function handleAutofillSet() {
@@ -2301,6 +2383,19 @@ export function MonthlyScheduler({
         </section>
       </div>
 
+      {isSetCompletionWarningOpen && activeSchedule && selectedSetDays.length > 0 ? (
+        <SetCompletionWarningModal
+          scheduleName={activeSchedule.name}
+          dateRange={`${formatShortDate(selectedSetDays[0].date)}-${formatShortDate(
+            selectedSetDays[selectedSetDays.length - 1].date,
+          )}`}
+          unfilledCompetencies={unfilledSetCompetencies}
+          onCancel={() => setIsSetCompletionWarningOpen(false)}
+          onConfirm={handleConfirmSetCompletionWarning}
+          isSubmitting={isUpdatingSetCompletion}
+        />
+      ) : null}
+
       {canEdit && !isScheduleLocked ? (
         <ScheduleAssignmentModal
           selectedEmployeeName={editorEmployee?.name ?? null}
@@ -2470,6 +2565,8 @@ function EmployeeRow({
           : getScheduleCellComment({
               notes: selection.notes,
               employeeName: employee.name,
+              employeeId: employee.sourceEmployeeId,
+              scheduleId: schedule.id,
               employeeMap,
             });
 
