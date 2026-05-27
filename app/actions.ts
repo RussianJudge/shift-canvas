@@ -58,6 +58,26 @@ import { getSupabaseAdminClient } from "@/lib/supabase";
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
 type ActionScope = { companyId: string; siteId: string; businessAreaId: string };
 type ScopedDatabaseRow = { company_id: string; site_id: string; business_area_id: string };
+type StaffingAssignment = {
+  scheduleId: string;
+  date: string;
+  competencyId: string | null;
+  notes?: string | null;
+};
+type StaffingOvertimeClaim = {
+  scheduleId: string | null;
+  date: string;
+  competencyId: string | null;
+};
+type StaffingSchedule = {
+  id: string;
+  competencyIds: string[];
+};
+type StaffingCompetency = {
+  id: string;
+  code: string;
+  requiredStaff: number;
+};
 
 /**
  * Main server action layer for the app.
@@ -173,6 +193,72 @@ function canAccessScope(
     session.siteId === scope.siteId &&
     session.businessAreaId === scope.businessAreaId
   );
+}
+
+function isOvertimeGeneratedAssignment(notes: string | null | undefined) {
+  return notes?.startsWith("OT|") ?? false;
+}
+
+function findBestMutualCoverageCompetency({
+  schedule,
+  employeeCompetencyIds,
+  date,
+  competencies,
+  assignments,
+  overtimeClaims,
+  pendingFillCounts,
+}: {
+  schedule: StaffingSchedule;
+  employeeCompetencyIds: string[];
+  date: string;
+  competencies: StaffingCompetency[];
+  assignments: StaffingAssignment[];
+  overtimeClaims: StaffingOvertimeClaim[];
+  pendingFillCounts: Map<string, number>;
+}) {
+  const candidates = competencies
+    .filter(
+      (competency) =>
+        schedule.competencyIds.includes(competency.id) &&
+        employeeCompetencyIds.includes(competency.id),
+    )
+    .map((competency) => {
+      const fillKey = `${schedule.id}:${date}:${competency.id}`;
+      const filledCount =
+        assignments.reduce(
+          (count, assignment) =>
+            count +
+            Number(
+              assignment.scheduleId === schedule.id &&
+                assignment.date === date &&
+                assignment.competencyId === competency.id &&
+                !isOvertimeGeneratedAssignment(assignment.notes),
+            ),
+          0,
+        ) + (pendingFillCounts.get(fillKey) ?? 0);
+      const openSlots = Math.max(0, competency.requiredStaff - filledCount);
+      const attachedOvertimeClaims = overtimeClaims.filter(
+        (claim) =>
+          claim.scheduleId === schedule.id &&
+          claim.date === date &&
+          claim.competencyId === competency.id,
+      ).length;
+
+      return {
+        competency,
+        attachedOvertimeClaims,
+        openSlots,
+      };
+    })
+    .filter((entry) => entry.openSlots > 0)
+    .sort(
+      (left, right) =>
+        right.attachedOvertimeClaims - left.attachedOvertimeClaims ||
+        right.openSlots - left.openSlots ||
+        left.competency.code.localeCompare(right.competency.code),
+    );
+
+  return candidates[0]?.competency.id ?? null;
 }
 
 /**
@@ -410,7 +496,6 @@ async function removeStaleOvertimeClaims(
       assignmentWindow: "month",
       completedSetWindow: "extended",
     });
-    const assignmentIndex = buildAssignmentIndex(snapshot.assignments);
     const monthDays = getMonthDays(month);
     const completedDateKeys = snapshot.completedSets.reduce<Set<string>>((set, completedSet) => {
       for (const day of monthDays) {
@@ -457,10 +542,17 @@ async function removeStaleOvertimeClaims(
             return [];
           }
 
-          const regularFilled = schedule.employees.reduce((count, employee) => {
-            const selection = assignmentIndex[createAssignmentKey(schedule.id, employee.id, day.date)];
-            return count + Number(selection?.competencyId === competency.id);
-          }, 0);
+          const regularFilled = snapshot.assignments.reduce(
+            (count, assignment) =>
+              count +
+              Number(
+                assignment.scheduleId === schedule.id &&
+                  assignment.date === day.date &&
+                  assignment.competencyId === competency.id &&
+                  !isOvertimeGeneratedAssignment(assignment.notes),
+              ),
+            0,
+          );
           const allowedClaims = Math.max(0, competency.requiredStaff - regularFilled);
 
           return claims.slice(allowedClaims);
@@ -2165,10 +2257,10 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
     };
   }
 
-  if (session.role !== "admin" && session.employeeId !== input.employeeId) {
+  if (session.role === "worker" && session.employeeId !== input.employeeId) {
     return {
       ok: false,
-      message: "Only admins can post mutuals on behalf of other workers.",
+      message: "Only admins or leaders can post mutuals on behalf of other workers.",
     };
   }
 
@@ -2360,10 +2452,12 @@ async function canApproveMutualForSchedule(
 
 async function applyAcceptedMutualToSchedule({
   supabase,
+  session,
   posting,
   application,
 }: {
   supabase: SupabaseAdminClient;
+  session: NonNullable<Awaited<ReturnType<typeof getAppSession>>>;
   posting: MutualPostingRecord;
   application: MutualApplicationRecord;
 }) {
@@ -2464,6 +2558,50 @@ async function applyAcceptedMutualToSchedule({
       .map((row) => [createAssignmentKey(row.schedule_id ?? "", row.employee_id, row.assignment_date), row]),
   );
 
+  const mutualMonths = Array.from(new Set(allMutualDates.map((date) => date.slice(0, 7))));
+  const coverageSnapshots = await Promise.all(
+    mutualMonths.map((month) =>
+      getScheduleReferenceSnapshot(month, session, {
+        includeEmployeeCompetencies: true,
+        includeCompetencies: true,
+        includeTimeCodes: false,
+        includeSubSchedules: false,
+        includeAssignments: true,
+        includeOvertimeClaims: true,
+        assignmentWindow: "month",
+      }),
+    ),
+  );
+  const coverageSchedules = new Map(
+    coverageSnapshots.flatMap((snapshot) => snapshot.schedules).map((schedule) => [schedule.id, schedule]),
+  );
+  const coverageEmployees = getEmployeeMap(Array.from(coverageSchedules.values()));
+  const coverageCompetencies = Array.from(
+    new Map(
+      coverageSnapshots
+        .flatMap((snapshot) => snapshot.competencies)
+        .map((competency) => [competency.id, competency]),
+    ).values(),
+  );
+  const coverageAssignments = Array.from(
+    new Map(
+      coverageSnapshots
+        .flatMap((snapshot) => snapshot.assignments)
+        .map((assignment) => [
+          createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date),
+          assignment,
+        ]),
+    ).values(),
+  );
+  const coverageOvertimeClaims = Array.from(
+    new Map(
+      coverageSnapshots
+        .flatMap((snapshot) => snapshot.overtimeClaims)
+        .map((claim) => [claim.id, claim]),
+    ).values(),
+  );
+  const pendingFillCounts = new Map<string, number>();
+
   const mutualRows: MutualAssignmentRow[] = buildAcceptedMutualAssignmentRows({
     postingId: posting.id,
     mutualTimeCodeId,
@@ -2484,6 +2622,39 @@ async function applyAcceptedMutualToSchedule({
     };
   });
 
+  for (const row of mutualRows) {
+    const employee = coverageEmployees[row.employee_id];
+
+    if (!employee || employee.scheduleId === row.schedule_id) {
+      continue;
+    }
+
+    const schedule = coverageSchedules.get(row.schedule_id);
+
+    if (!schedule) {
+      continue;
+    }
+
+    const competencyId = findBestMutualCoverageCompetency({
+      schedule,
+      employeeCompetencyIds: employee.competencyIds,
+      date: row.assignment_date,
+      competencies: coverageCompetencies,
+      assignments: coverageAssignments,
+      overtimeClaims: coverageOvertimeClaims,
+      pendingFillCounts,
+    });
+
+    if (!competencyId) {
+      continue;
+    }
+
+    row.competency_id = competencyId;
+    row.time_code_id = null;
+    const fillKey = `${row.schedule_id}:${row.assignment_date}:${competencyId}`;
+    pendingFillCounts.set(fillKey, (pendingFillCounts.get(fillKey) ?? 0) + 1);
+  }
+
   const { error: mutualRowsError } = await supabase.from("schedule_assignments").upsert(mutualRows, {
     onConflict: "schedule_id,employee_id,assignment_date",
   });
@@ -2495,8 +2666,37 @@ async function applyAcceptedMutualToSchedule({
     };
   }
 
+  const forcedRanges = Object.values(
+    mutualRows
+      .reduce<Record<string, { scheduleId: string; dates: string[] }>>((map, row) => {
+        map[row.schedule_id] ??= {
+          scheduleId: row.schedule_id,
+          dates: [],
+        };
+        map[row.schedule_id].dates.push(row.assignment_date);
+        return map;
+      }, {}),
+  ).map((range) => {
+    const dates = range.dates.sort();
+
+    return {
+      scheduleId: range.scheduleId,
+      startDate: dates[0],
+      endDate: dates[dates.length - 1],
+    };
+  });
+  const cleanupResult = await removeStaleOvertimeClaims(supabase, mutualMonths, session, forcedRanges);
+
+  if (!cleanupResult.ok) {
+    return {
+      ok: false,
+      message: `Mutual rows were applied, but overtime cleanup failed: ${cleanupResult.message}`,
+    };
+  }
+
   return {
     ok: true,
+    removedOvertimeClaims: cleanupResult.removedClaims,
     message: "Mutual schedule rows applied.",
   };
 }
@@ -2969,10 +3169,12 @@ export async function approveMutualPosting(input: ApproveMutualPostingInput) {
     input.side === "owner"
       ? Boolean(posting.applicant_leader_approved_at)
       : Boolean(posting.owner_leader_approved_at);
+  let removedOvertimeClaims = 0;
 
   if (bothApprovedAfterThisAction) {
     const applyResult = await applyAcceptedMutualToSchedule({
       supabase,
+      session,
       posting,
       application,
     });
@@ -2980,6 +3182,8 @@ export async function approveMutualPosting(input: ApproveMutualPostingInput) {
     if (!applyResult.ok) {
       return applyResult;
     }
+
+    removedOvertimeClaims = applyResult.removedOvertimeClaims ?? 0;
   }
 
   const { error: approvalError } = await supabase
@@ -3003,10 +3207,14 @@ export async function approveMutualPosting(input: ApproveMutualPostingInput) {
   if (bothApprovedAfterThisAction) {
     revalidatePath("/schedule");
     revalidatePath("/schedule/print");
+    revalidatePath("/overtime");
 
     return {
       ok: true,
-      message: "Both leaders approved. The mutual is now live on the schedule.",
+      message:
+        removedOvertimeClaims > 0
+          ? `Both leaders approved. The mutual is now live on the schedule, and ${removedOvertimeClaims} overtime claim${removedOvertimeClaims === 1 ? " was" : "s were"} removed.`
+          : "Both leaders approved. The mutual is now live on the schedule.",
     };
   }
 

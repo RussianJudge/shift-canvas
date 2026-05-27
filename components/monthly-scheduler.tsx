@@ -2419,6 +2419,7 @@ function EmployeeRow({
           (!overtimeDateSet || overtimeDateSet.has(day.date)) &&
           (!mutualDateSet || mutualDateSet.has(day.date));
         const isLockedCell = completedSetDates.has(day.date);
+        const showLockedCell = isBorrowedCellVisible && isLockedCell;
         const projectedAssignment =
           projectedAssignmentIndex[createAssignmentKey(schedule.id, employee.sourceEmployeeId, day.date)] ?? null;
         const isProjectedCell = Boolean(projectedAssignment);
@@ -2479,8 +2480,8 @@ function EmployeeRow({
               day.isWeekend ? "shift-cell--weekend" : ""
             } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
               activeColorToken ? "shift-cell--coded" : ""
-            } ${isLockedCell ? "shift-cell--locked" : ""} ${
-              isLockedCell && activeColorToken ? "shift-cell--locked-coded" : ""
+            } ${showLockedCell ? "shift-cell--locked" : ""} ${
+              showLockedCell && activeColorToken ? "shift-cell--locked-coded" : ""
             } ${isSelected ? "shift-cell--selected" : ""} ${
               isInDragRange ? "shift-cell--range" : ""
             } ${highlightedMissingDates.has(day.date) && setDates.has(day.date) ? "shift-cell--missing-column" : ""} ${

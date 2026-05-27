@@ -383,7 +383,7 @@ export function MutualsPanel({
   snapshot: MutualsSnapshot;
   viewer: AppSession;
 }) {
-  const canPostForOthers = viewer.role === "admin";
+  const canPostForOthers = viewer.role === "admin" || viewer.role === "leader";
   /**
    * The server provides the initial month snapshot, then the panel owns later
    * month switches so the postings board can refresh without remounting the
