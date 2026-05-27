@@ -451,6 +451,81 @@ function NightShiftTurnaroundModal({
   );
 }
 
+function DeleteOvertimePostingModal({
+  posting,
+  onCancel,
+  onConfirm,
+  isSubmitting,
+}: {
+  posting: OvertimePosting;
+  onCancel: () => void;
+  onConfirm: () => void;
+  isSubmitting: boolean;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const claimCount = posting.claimedEmployeeIds.length;
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Delete overtime posting?</h2>
+            <p className="assignment-modal__context">
+              {claimCount > 0
+                ? `Delete this posting and release ${claimCount} claim${claimCount === 1 ? "" : "s"}? This will remove the posting and clear the related overtime assignments.`
+                : "Delete this posting? This will remove it from the overtime board."}
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Close
+          </button>
+        </div>
+
+        <div className="overtime-eligibility-modal__summary">
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Schedule</span>
+            <strong>
+              {posting.targetMode === "main" ? `Main schedule · Shift ${posting.scheduleName}` : posting.scheduleName}
+            </strong>
+          </div>
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Assignment</span>
+            <strong>
+              {posting.competencyCode} · {posting.competencyLabel}
+            </strong>
+          </div>
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Dates</span>
+            <strong>
+              {formatShortDate(posting.dates[0])} - {formatShortDate(posting.dates[posting.dates.length - 1])}
+            </strong>
+          </div>
+          <div className="overtime-eligibility-modal__summary-row">
+            <span className="assignment-modal__label">Claims</span>
+            <strong>
+              {claimCount > 0 ? posting.claimedByNames.join(", ") : "No claims"}
+            </strong>
+          </div>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Keep posting
+          </button>
+          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+            {isSubmitting ? "Deleting..." : "Delete posting"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 /** Modal used by leaders/admins to author a manual overtime posting. */
 function ManualOvertimePostingModal({
   snapshot,
@@ -708,6 +783,7 @@ export function OvertimePanel({
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [eligibilityReportPostingId, setEligibilityReportPostingId] = useState<string | null>(null);
   const [turnaroundConfirmationPostingId, setTurnaroundConfirmationPostingId] = useState<string | null>(null);
+  const [deletePostingId, setDeletePostingId] = useState<string | null>(null);
   const currentPostingMonth = useMemo(() => getCurrentMonthKey("America/Edmonton"), []);
   const manualAvailableMonths = useMemo(
     () => Array.from({ length: 13 }, (_, index) => shiftMonthKey(currentPostingMonth, index)),
@@ -1352,6 +1428,10 @@ export function OvertimePanel({
     () => postings.find((posting) => posting.id === turnaroundConfirmationPostingId) ?? null,
     [postings, turnaroundConfirmationPostingId],
   );
+  const selectedDeletePosting = useMemo(
+    () => postings.find((posting) => posting.id === deletePostingId) ?? null,
+    [deletePostingId, postings],
+  );
   const eligibleEmployeesForReport = useMemo(
     () =>
       selectedEligibilityReportPosting
@@ -1380,6 +1460,12 @@ export function OvertimePanel({
       setTurnaroundConfirmationPostingId(null);
     }
   }, [selectedTurnaroundConfirmationPosting, turnaroundConfirmationPostingId]);
+
+  useEffect(() => {
+    if (deletePostingId && !selectedDeletePosting) {
+      setDeletePostingId(null);
+    }
+  }, [deletePostingId, selectedDeletePosting]);
 
   function submitClaim(posting: OvertimePosting, confirmedNightShiftTurnaround = false) {
     if (!claimingEmployeeId) {
@@ -1495,20 +1581,14 @@ export function OvertimePanel({
   }
 
   function handleDeleteManualPosting(posting: OvertimePosting) {
-    const manualPostingId = posting.manualPostingId;
+    setDeletePostingId(posting.id);
+  }
+
+  function confirmDeleteManualPosting() {
+    const manualPostingId = selectedDeletePosting?.manualPostingId;
 
     if (!manualPostingId) {
-      return;
-    }
-
-    const claimCount = posting.claimedEmployeeIds.length;
-    const shouldDelete = window.confirm(
-      claimCount > 0
-        ? `Delete this posting and release ${claimCount} claim${claimCount === 1 ? "" : "s"}? This will remove the posting and clear the related overtime assignments.`
-        : "Delete this posting? This will remove it from the overtime board.",
-    );
-
-    if (!shouldDelete) {
+      setDeletePostingId(null);
       return;
     }
 
@@ -1520,6 +1600,7 @@ export function OvertimePanel({
       setStatusMessage(result.message);
 
       if (result.ok) {
+        setDeletePostingId(null);
         router.refresh();
       }
     });
@@ -1902,6 +1983,15 @@ export function OvertimePanel({
           onCancel={() => setTurnaroundConfirmationPostingId(null)}
           onConfirm={handleConfirmTurnaroundClaim}
           isSubmitting={isClaiming}
+        />
+      ) : null}
+
+      {selectedDeletePosting ? (
+        <DeleteOvertimePostingModal
+          posting={selectedDeletePosting}
+          onCancel={() => setDeletePostingId(null)}
+          onConfirm={confirmDeleteManualPosting}
+          isSubmitting={isManagingManual}
         />
       ) : null}
     </section>

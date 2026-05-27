@@ -62,6 +62,7 @@ type StaffingAssignment = {
   scheduleId: string;
   date: string;
   competencyId: string | null;
+  timeCodeId?: string | null;
   notes?: string | null;
 };
 type StaffingOvertimeClaim = {
@@ -197,6 +198,25 @@ function canAccessScope(
 
 function isOvertimeGeneratedAssignment(notes: string | null | undefined) {
   return notes?.startsWith("OT|") ?? false;
+}
+
+function isMutualGeneratedAssignment(notes: string | null | undefined) {
+  return notes?.startsWith("MUT|") ?? false;
+}
+
+function doesAssignmentFillManualPosting(
+  assignment: StaffingAssignment,
+  posting: {
+    scheduleId: string | null;
+    competencyId: string | null;
+    timeCodeId?: string | null;
+  },
+) {
+  return (
+    assignment.scheduleId === posting.scheduleId &&
+    ((posting.competencyId && assignment.competencyId === posting.competencyId) ||
+      (posting.timeCodeId && assignment.timeCodeId === posting.timeCodeId))
+  );
 }
 
 function findBestMutualCoverageCompetency({
@@ -482,6 +502,7 @@ async function removeStaleOvertimeClaims(
 ) {
   const uniqueMonths = Array.from(new Set(months.filter(Boolean)));
   let removedClaims = 0;
+  let removedManualPostings = 0;
 
   for (const month of uniqueMonths) {
     const snapshot = await getScheduleReferenceSnapshot(month, session, {
@@ -492,6 +513,7 @@ async function removeStaleOvertimeClaims(
       includeAssignments: true,
       includeSubScheduleAssignments: true,
       includeOvertimeClaims: true,
+      includeManualOvertimePostings: true,
       includeCompletedSets: true,
       assignmentWindow: "month",
       completedSetWindow: "extended",
@@ -515,7 +537,7 @@ async function removeStaleOvertimeClaims(
       },
       {},
     );
-    const claimsToRemove = snapshot.schedules.flatMap((schedule) =>
+    const staleClaimsToRemove = snapshot.schedules.flatMap((schedule) =>
       monthDays.flatMap((day) => {
         if (shiftForDate(schedule, day.date) === "OFF") {
           return [];
@@ -559,8 +581,46 @@ async function removeStaleOvertimeClaims(
         });
       }),
     );
+    const manualPostingsToDelete = snapshot.manualOvertimePostings.filter((posting) => {
+      if (!posting.scheduleId || posting.dates.length === 0) {
+        return false;
+      }
 
-    if (claimsToRemove.length === 0) {
+      return posting.dates.every((date) => {
+        const isForceEvaluated = forcedRanges.some(
+          (range) =>
+            range.scheduleId === posting.scheduleId &&
+            date >= range.startDate &&
+            date <= range.endDate,
+        );
+
+        if (!isForceEvaluated && !completedDateKeys.has(`${posting.scheduleId}:${date}`)) {
+          return false;
+        }
+
+        const mutualFilledSlots = snapshot.assignments.reduce(
+          (count, assignment) =>
+            count +
+            Number(
+              assignment.date === date &&
+                isMutualGeneratedAssignment(assignment.notes) &&
+                doesAssignmentFillManualPosting(assignment, posting),
+            ),
+          0,
+        );
+
+        return mutualFilledSlots >= posting.slotCount;
+      });
+    });
+    const manualPostingIdsToDelete = new Set(manualPostingsToDelete.map((posting) => posting.id));
+    const manualPostingClaimsToRemove = snapshot.overtimeClaims.filter(
+      (claim) => claim.manualPostingId && manualPostingIdsToDelete.has(claim.manualPostingId),
+    );
+    const claimsToRemove = Array.from(
+      new Map([...staleClaimsToRemove, ...manualPostingClaimsToRemove].map((claim) => [claim.id, claim])).values(),
+    );
+
+    if (claimsToRemove.length === 0 && manualPostingsToDelete.length === 0) {
       continue;
     }
 
@@ -572,63 +632,87 @@ async function removeStaleOvertimeClaims(
         Boolean(claim.competencyId),
     );
 
-    const restoreResult = await restoreSwappedAssignmentsForClaims(
-      supabase,
-      restorableMainScheduleClaims.map((claim) => ({
-        scheduleId: claim.scheduleId,
-        employeeId: claim.employeeId,
-        competencyId: claim.competencyId,
-        date: claim.date,
-      })),
-    );
+    if (claimsToRemove.length > 0) {
+      const restoreResult = await restoreSwappedAssignmentsForClaims(
+        supabase,
+        restorableMainScheduleClaims.map((claim) => ({
+          scheduleId: claim.scheduleId,
+          employeeId: claim.employeeId,
+          competencyId: claim.competencyId,
+          date: claim.date,
+        })),
+      );
 
-    if (!restoreResult.ok) {
-      return {
-        ok: false as const,
-        message: restoreResult.message,
-        removedClaims,
-      };
+      if (!restoreResult.ok) {
+        return {
+          ok: false as const,
+          message: restoreResult.message,
+          removedClaims,
+          removedManualPostings,
+        };
+      }
+
+      const claimIds = claimsToRemove.map((claim) => claim.id);
+      const { error: claimDeleteError } = await supabase.from("overtime_claims").delete().in("id", claimIds);
+
+      if (claimDeleteError) {
+        return {
+          ok: false as const,
+          message: `Assignments saved, but overtime cleanup failed: ${claimDeleteError.message}`,
+          removedClaims,
+          removedManualPostings,
+        };
+      }
+
+      const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
+        supabase,
+        mainScheduleClaimsToRemove
+          .filter((claim): claim is (typeof mainScheduleClaimsToRemove)[number] & { competencyId: string } =>
+            Boolean(claim.competencyId ?? claim.timeCodeId),
+          )
+          .map((claim) => ({
+            scheduleId: claim.scheduleId,
+            employeeId: claim.employeeId,
+            competencyId: claim.competencyId ?? claim.timeCodeId ?? "",
+            date: claim.date,
+          })),
+      );
+
+      if (!clearAssignmentsResult.ok) {
+        return {
+          ok: false as const,
+          message: `Assignments saved, but overtime cleanup failed: ${clearAssignmentsResult.message}`,
+          removedClaims,
+          removedManualPostings,
+        };
+      }
+
+      removedClaims += claimsToRemove.length;
     }
 
-    const claimIds = claimsToRemove.map((claim) => claim.id);
-    const { error: claimDeleteError } = await supabase.from("overtime_claims").delete().in("id", claimIds);
+    if (manualPostingsToDelete.length > 0) {
+      const { error: postingDeleteError } = await supabase
+        .from("manual_overtime_postings")
+        .delete()
+        .in("id", Array.from(manualPostingIdsToDelete));
 
-    if (claimDeleteError) {
-      return {
-        ok: false as const,
-        message: `Assignments saved, but overtime cleanup failed: ${claimDeleteError.message}`,
-        removedClaims,
-      };
+      if (postingDeleteError) {
+        return {
+          ok: false as const,
+          message: `Assignments saved, but overtime posting cleanup failed: ${postingDeleteError.message}`,
+          removedClaims,
+          removedManualPostings,
+        };
+      }
+
+      removedManualPostings += manualPostingsToDelete.length;
     }
-
-    const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
-      supabase,
-      mainScheduleClaimsToRemove
-        .filter((claim): claim is (typeof mainScheduleClaimsToRemove)[number] & { competencyId: string } =>
-          Boolean(claim.competencyId ?? claim.timeCodeId),
-        )
-        .map((claim) => ({
-        scheduleId: claim.scheduleId,
-        employeeId: claim.employeeId,
-        competencyId: claim.competencyId ?? claim.timeCodeId ?? "",
-        date: claim.date,
-      })),
-    );
-
-    if (!clearAssignmentsResult.ok) {
-      return {
-        ok: false as const,
-        message: `Assignments saved, but overtime cleanup failed: ${clearAssignmentsResult.message}`,
-        removedClaims,
-      };
-    }
-
-    removedClaims += claimsToRemove.length;
   }
 
   return {
     ok: true as const,
     removedClaims,
+    removedManualPostings,
   };
 }
 
