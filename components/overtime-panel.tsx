@@ -30,6 +30,7 @@ import type { AppSession, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/t
 
 type OvertimeTargetMode = "main" | "sub";
 type OvertimeTargetKey = "all" | "main" | `sub:${string}`;
+type OvertimeAvailabilityFilter = "all" | "available";
 
 /**
  * Overtime board for packaging claimable work into one operational queue.
@@ -700,6 +701,7 @@ export function OvertimePanel({
   );
   const [selectedTargetKey, setSelectedTargetKey] = useState<OvertimeTargetKey | "">(buildInitialTargetKey(snapshot));
   const [selectedAssignmentFilter, setSelectedAssignmentFilter] = useState("all");
+  const [availabilityFilter, setAvailabilityFilter] = useState<OvertimeAvailabilityFilter>("all");
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
@@ -1305,9 +1307,13 @@ export function OvertimePanel({
           return false;
         }
 
+        if (availabilityFilter === "available" && posting.openShifts === 0) {
+          return false;
+        }
+
         return true;
       }),
-    [postings, selectedAssignmentFilter, selectedSubScheduleFilter, selectedTargetMode],
+    [availabilityFilter, postings, selectedAssignmentFilter, selectedSubScheduleFilter, selectedTargetMode],
   );
   const groupedPostings = useMemo(
     () =>
@@ -1630,6 +1636,17 @@ export function OvertimePanel({
           </select>
         </label>
 
+        <label className="field">
+          <span>Availability</span>
+          <select
+            value={availabilityFilter}
+            onChange={(event) => setAvailabilityFilter(event.target.value as OvertimeAvailabilityFilter)}
+          >
+            <option value="all">All postings</option>
+            <option value="available">Available only</option>
+          </select>
+        </label>
+
         {canManageManualPostings ? (
           <div className="toolbar-actions">
             <button type="button" className="ghost-button" onClick={() => setIsManualModalOpen(true)}>
@@ -1659,15 +1676,7 @@ export function OvertimePanel({
 
                 return getClaimStatus(claimingEmployee, posting, snapshot, assignmentIndex).canClaim;
               }) ?? null;
-            const selectedPosting =
-              (selectedPostingCandidate &&
-              (selectedPostingCandidate.claimedEmployeeIds.includes(claimingEmployeeId) ||
-                getClaimStatus(claimingEmployee, selectedPostingCandidate, snapshot, assignmentIndex).canClaim)
-                ? selectedPostingCandidate
-                : null) ??
-              preferredClaimablePosting ??
-              selectedPostingCandidate ??
-              visiblePostings[0];
+            const selectedPosting = selectedPostingCandidate ?? preferredClaimablePosting ?? visiblePostings[0];
             const claimStatus = selectedPosting
               ? getClaimStatus(claimingEmployee, selectedPosting, snapshot, assignmentIndex)
               : { canClaim: false, reason: "No overtime posting selected." };
@@ -1705,7 +1714,7 @@ export function OvertimePanel({
                         type="button"
                         className={`overtime-option-pill legend-pill legend-pill--${posting.colorToken.toLowerCase()} ${
                           selectedPosting?.id === posting.id ? "overtime-option-pill--active" : ""
-                        } ${posting.openShifts === 0 ? "overtime-option-pill--claimed" : ""}`}
+                        }`}
                         onClick={() =>
                           setSelectedPostingByGroup((current) => ({
                             ...current,
