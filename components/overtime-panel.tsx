@@ -214,6 +214,32 @@ function getCellSelection(
   };
 }
 
+function countScheduleAssignmentsForTarget({
+  assignments,
+  scheduleId,
+  date,
+  competencyId,
+  timeCodeId = null,
+}: {
+  assignments: SchedulerSnapshot["assignments"];
+  scheduleId: string;
+  date: string;
+  competencyId: string | null;
+  timeCodeId?: string | null;
+}) {
+  return assignments.reduce(
+    (count, assignment) =>
+      count +
+      Number(
+        assignment.scheduleId === scheduleId &&
+          assignment.date === date &&
+          ((competencyId && assignment.competencyId === competencyId) ||
+            (timeCodeId && assignment.timeCodeId === timeCodeId)),
+      ),
+    0,
+  );
+}
+
 function buildInitialTargetKey(snapshot: SchedulerSnapshot): OvertimeTargetKey | "" {
   if (snapshot.schedules.length > 0 || snapshot.subSchedules.length > 0) {
     return "all";
@@ -992,28 +1018,12 @@ export function OvertimePanel({
 
           for (const competency of scheduleCompetencies) {
             const missingSlotsByDate = setDates.map((date) => {
-              let filledCount = 0;
-
-              for (const employee of schedule.employees) {
-                const selection = getCellSelection(employee, schedule.id, date, assignmentIndex);
-
-                if (selection.competencyId === competency.id) {
-                  filledCount += 1;
-                }
-              }
-
-              for (const claim of snapshot.overtimeClaims) {
-                const claimEmployee = employeeMap[claim.employeeId];
-
-                if (
-                  claim.scheduleId === schedule.id &&
-                  claim.competencyId === competency.id &&
-                  claim.date === date &&
-                  claimEmployee?.scheduleId !== schedule.id
-                ) {
-                  filledCount += 1;
-                }
-              }
+              const filledCount = countScheduleAssignmentsForTarget({
+                assignments: snapshot.assignments,
+                scheduleId: schedule.id,
+                date,
+                competencyId: competency.id,
+              });
 
               return Math.max(0, competency.requiredStaff - filledCount);
             });
@@ -1259,32 +1269,13 @@ export function OvertimePanel({
 
       const filledCells = manualPosting.dates.reduce((count, date) => {
         if (schedule) {
-          let filledCount = 0;
-
-          for (const employee of schedule.employees) {
-            const selection = getCellSelection(employee, schedule.id, date, assignmentIndex);
-
-            if (
-              (competency && selection.competencyId === competency.id) ||
-              (timeCode && selection.timeCodeId === timeCode.id)
-            ) {
-              filledCount += 1;
-            }
-          }
-
-          for (const claim of snapshot.overtimeClaims) {
-            const claimEmployee = employeeMap[claim.employeeId];
-
-            if (
-              claim.scheduleId === schedule.id &&
-              ((competency && claim.competencyId === competency.id) ||
-                (timeCode && claim.timeCodeId === timeCode.id)) &&
-              claim.date === date &&
-              claimEmployee?.scheduleId !== schedule.id
-            ) {
-              filledCount += 1;
-            }
-          }
+          const filledCount = countScheduleAssignmentsForTarget({
+            assignments: snapshot.assignments,
+            scheduleId: schedule.id,
+            date,
+            competencyId: competency?.id ?? null,
+            timeCodeId: timeCode?.id ?? null,
+          });
 
           return count + filledCount;
         }
