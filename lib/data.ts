@@ -1354,6 +1354,7 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     includeSubScheduleAssignments: true,
     includeProjectedAssignments: true,
     includeOvertimeClaims: true,
+    includeManualOvertimePostings: true,
     includeCompletedSets: true,
     assignmentWindow: "extended",
     completedSetWindow: "extended",
@@ -1367,6 +1368,7 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     assignments: snapshot.assignments,
     projectedAssignments: snapshot.projectedAssignments,
     overtimeClaims: snapshot.overtimeClaims,
+    manualOvertimePostings: snapshot.manualOvertimePostings,
     completedSets: snapshot.completedSets,
   };
 });
@@ -1472,9 +1474,10 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
 /**
  * Loads only the data the sub-schedule builder actually consumes.
  *
- * This intentionally skips base schedule assignments, overtime, manual OT
- * postings, and completed-set state because the overlay builder does not use
- * them.
+ * This intentionally skips base schedule assignments and completed-set state
+ * because the overlay builder does not use them. Manual OT postings and claims
+ * are loaded so open sub-schedule postings can render as "Overtime Available"
+ * rows until they are claimed.
  */
 export async function getSubSchedulesSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
@@ -1485,7 +1488,16 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
   }
 
   const { monthStart, monthEnd } = getMonthBounds(month);
-  const [scheduleReference, competenciesResult, timeCodesResult, subSchedulesResult, subScheduleCompetenciesResult, subScheduleAssignmentsResult] =
+  const [
+    scheduleReference,
+    competenciesResult,
+    timeCodesResult,
+    subSchedulesResult,
+    subScheduleCompetenciesResult,
+    subScheduleAssignmentsResult,
+    overtimeClaimsResult,
+    manualOvertimePostingsResult,
+  ] =
     await Promise.all([
       getScopedSchedulesWithEmployees(session, { includeEmployeeCompetencies: true }),
       applySessionScope(
@@ -1523,6 +1535,24 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
           .order("employee_id")
           .order("sub_schedule_id"),
       ),
+      fetchAllRows<OvertimeClaimRow>(
+        applySessionScope(
+          supabase
+            .from("overtime_claims")
+            .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+          session,
+        )
+          .gte("assignment_date", monthStart)
+          .lte("assignment_date", monthEnd)
+          .order("assignment_date")
+          .order("id"),
+      ),
+      applySessionScope(
+        supabase
+          .from("manual_overtime_postings")
+          .select("id, schedule_id, sub_schedule_id, competency_id, time_code_id, slot_count, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
+        session,
+      ).eq("month_key", month),
     ]);
 
   logSnapshotQueryErrors("Sub-schedules snapshot", [
@@ -1532,6 +1562,8 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
     ["sub_schedules", subSchedulesResult.error],
     ["sub_schedule_competencies", subScheduleCompetenciesResult.error],
     ["sub_schedule_assignments", subScheduleAssignmentsResult.error],
+    ["overtime_claims", overtimeClaimsResult.error],
+    ["manual_overtime_postings", manualOvertimePostingsResult.error],
   ]);
 
   return emptySnapshot(month, {
@@ -1544,6 +1576,10 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
     ),
     subScheduleAssignments: mapSubScheduleAssignments(
       (subScheduleAssignmentsResult.data as SubScheduleAssignmentRow[] | null) ?? [],
+    ),
+    overtimeClaims: mapOvertimeClaims((overtimeClaimsResult.data as OvertimeClaimRow[] | null) ?? []),
+    manualOvertimePostings: mapManualOvertimePostings(
+      (manualOvertimePostingsResult.data as ManualOvertimePostingRow[] | null) ?? [],
     ),
   });
 }

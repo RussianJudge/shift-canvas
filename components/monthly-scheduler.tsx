@@ -16,6 +16,8 @@ import {
 import {
   buildAssignmentIndex,
   createAssignmentKey,
+  createSetRangeKey,
+  createSetRangeKeyFromEntry,
   formatMonthLabel,
   getCompetencyMap,
   getCompletedSetDatesForMonth,
@@ -81,6 +83,10 @@ type DisplayEmployee = {
   overtimeDates?: string[];
   overtimeCompetencyByDate?: Record<string, string | null>;
   mutualDates?: string[];
+  isOvertimePlaceholder?: boolean;
+  placeholderSelectionsByDate?: Record<string, AssignmentSelection>;
+  placeholderShiftKindByDate?: Record<string, Exclude<ShiftKind, "OFF">>;
+  placeholderTitleByDate?: Record<string, string>;
 };
 
 type CoverageSummary = {
@@ -118,6 +124,120 @@ const ScheduleAssignmentModal = dynamic(
     import("@/components/schedule-assignment-modal").then((module) => module.ScheduleAssignmentModal),
   { ssr: false },
 );
+
+function countScheduleAssignmentsForTarget({
+  assignments,
+  scheduleId,
+  date,
+  competencyId,
+  timeCodeId = null,
+}: {
+  assignments: SchedulePageSnapshot["assignments"];
+  scheduleId: string;
+  date: string;
+  competencyId: string | null;
+  timeCodeId?: string | null;
+}) {
+  return assignments.reduce(
+    (count, assignment) =>
+      count +
+      Number(
+        assignment.scheduleId === scheduleId &&
+          assignment.date === date &&
+          ((competencyId && assignment.competencyId === competencyId) ||
+            (timeCodeId && assignment.timeCodeId === timeCodeId)),
+      ),
+    0,
+  );
+}
+
+function getWorkedSetsForOvertimePlaceholders(
+  schedule: Schedule,
+  monthDays: Array<{ date: string }>,
+  extendedMonthDays: Array<{ date: string }>,
+) {
+  const sets: Array<{
+    dates: string[];
+    segments: Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>;
+  }> = [];
+  const processedKeys = new Set<string>();
+
+  for (const day of monthDays) {
+    if (shiftForDate(schedule, day.date) === "OFF") {
+      continue;
+    }
+
+    const setDays = getWorkedSetDays(schedule, extendedMonthDays, day.date);
+
+    if (setDays.length === 0) {
+      continue;
+    }
+
+    const setKey = `${setDays[0].date}:${setDays[setDays.length - 1].date}`;
+
+    if (processedKeys.has(setKey)) {
+      continue;
+    }
+
+    processedKeys.add(setKey);
+
+    sets.push({
+      dates: setDays.map((setDay) => setDay.date),
+      segments: setDays.reduce<Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>>(
+        (segments, setDay) => {
+          const shiftKind = shiftForDate(schedule, setDay.date);
+
+          if (shiftKind === "OFF") {
+            return segments;
+          }
+
+          const currentSegment = segments[segments.length - 1];
+
+          if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
+            segments.push({
+              shiftKind,
+              dates: [setDay.date],
+            });
+            return segments;
+          }
+
+          currentSegment.dates.push(setDay.date);
+          return segments;
+        },
+        [],
+      ),
+    });
+  }
+
+  return sets;
+}
+
+function createOvertimePlaceholderRow({
+  rowId,
+  dates,
+  selection,
+  shiftKind,
+  title,
+}: {
+  rowId: string;
+  dates: string[];
+  selection: AssignmentSelection;
+  shiftKind: Exclude<ShiftKind, "OFF">;
+  title: string;
+}): DisplayEmployee {
+  return {
+    rowId,
+    sourceEmployeeId: rowId,
+    name: "Overtime Available",
+    role: title,
+    competencyIds: selection.competencyId ? [selection.competencyId] : [],
+    overtimeDates: dates,
+    isOvertimePlaceholder: true,
+    placeholderSelectionsByDate: Object.fromEntries(dates.map((date) => [date, selection])),
+    placeholderShiftKindByDate: Object.fromEntries(dates.map((date) => [date, shiftKind])),
+    placeholderTitleByDate: Object.fromEntries(dates.map((date) => [date, title])),
+  };
+}
 
 function SetCompletionWarningModal({
   scheduleName,
@@ -310,7 +430,108 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  const rows = [...baseRows, ...borrowedRows, ...mutualRows];
+  const competencyMap = getCompetencyMap(snapshot.competencies);
+  const timeCodeMap = getTimeCodeMap(snapshot.timeCodes);
+  const monthDays = getMonthDays(currentMonth);
+  const extendedMonthDays = getExtendedMonthDays(currentMonth);
+  const completedSetRangeKeys = new Set(snapshot.completedSets.map(createSetRangeKeyFromEntry));
+  const overtimePlaceholderRows: DisplayEmployee[] = [];
+
+  for (const workedSet of getWorkedSetsForOvertimePlaceholders(schedule, monthDays, extendedMonthDays)) {
+    const setKey = createSetRangeKey(
+      schedule.id,
+      workedSet.dates[0],
+      workedSet.dates[workedSet.dates.length - 1],
+    );
+
+    if (!completedSetRangeKeys.has(setKey)) {
+      continue;
+    }
+
+    for (const segment of workedSet.segments) {
+      if (segment.dates[0]?.slice(0, 7) !== currentMonth) {
+        continue;
+      }
+
+      const scheduleCompetencies = snapshot.competencies.filter((competency) =>
+        schedule.competencyIds.includes(competency.id),
+      );
+
+      for (const competency of scheduleCompetencies) {
+        const missingSlotsByDate = segment.dates.map((date) => {
+          const filledCount = countScheduleAssignmentsForTarget({
+            assignments: snapshot.assignments,
+            scheduleId: schedule.id,
+            date,
+            competencyId: competency.id,
+          });
+
+          return Math.max(0, competency.requiredStaff - filledCount);
+        });
+        const maxMissing = Math.max(0, ...missingSlotsByDate);
+
+        for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
+          const postingDates = segment.dates.filter((_, index) => missingSlotsByDate[index] > slotIndex);
+
+          if (postingDates.length === 0) {
+            continue;
+          }
+
+          overtimePlaceholderRows.push(
+            createOvertimePlaceholderRow({
+              rowId: `ot-open:auto:${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
+              dates: postingDates,
+              selection: {
+                competencyId: competency.id,
+                timeCodeId: null,
+                notes: null,
+              },
+              shiftKind: segment.shiftKind,
+              title: `${competency.code} overtime posting`,
+            }),
+          );
+        }
+      }
+    }
+  }
+
+  for (const posting of snapshot.manualOvertimePostings) {
+    if (posting.scheduleId !== schedule.id || posting.dates.length === 0) {
+      continue;
+    }
+
+    const competency = posting.competencyId ? competencyMap[posting.competencyId] : null;
+    const timeCode = posting.timeCodeId ? timeCodeMap[posting.timeCodeId] : null;
+
+    if (!competency && !timeCode) {
+      continue;
+    }
+
+    const claimedEmployeeIds = new Set(
+      snapshot.overtimeClaims
+        .filter((claim) => claim.manualPostingId === posting.id)
+        .map((claim) => claim.employeeId),
+    );
+    const openSlots = Math.max(0, posting.slotCount - claimedEmployeeIds.size);
+
+    for (let slotIndex = 0; slotIndex < openSlots; slotIndex += 1) {
+      overtimePlaceholderRows.push(
+        createOvertimePlaceholderRow({
+          rowId: `ot-open:manual:${posting.id}:${slotIndex}`,
+          dates: posting.dates,
+          selection: {
+            competencyId: posting.competencyId,
+            timeCodeId: posting.timeCodeId ?? null,
+            notes: null,
+          },
+          shiftKind: posting.shiftKind,
+          title: `${competency?.code ?? timeCode?.code ?? "Overtime"} posting`,
+        }),
+      );
+    }
+  }
+
+  const rows = [...baseRows, ...borrowedRows, ...mutualRows, ...overtimePlaceholderRows];
   const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
   const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
 
@@ -2502,6 +2723,7 @@ function EmployeeRow({
           onClick={() => onPinToggle(employee.sourceEmployeeId)}
           aria-pressed={isPinned}
           title={isPinned ? "Unpin employee" : "Pin employee to top"}
+          disabled={employee.isOvertimePlaceholder}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M9 3h6l-1 5 4 4v2h-5v7l-1-1-1 1v-7H6v-2l4-4-1-5Z" />
@@ -2518,8 +2740,12 @@ function EmployeeRow({
         const projectedAssignment =
           projectedAssignmentIndex[createAssignmentKey(schedule.id, employee.sourceEmployeeId, day.date)] ?? null;
         const isProjectedCell = Boolean(projectedAssignment);
-        const shiftKind = isBorrowedCellVisible ? shiftForDate(schedule, day.date) : "OFF";
-        const selection = isBorrowedCellVisible
+        const shiftKind = isBorrowedCellVisible
+          ? employee.placeholderShiftKindByDate?.[day.date] ?? shiftForDate(schedule, day.date)
+          : "OFF";
+        const selection = employee.placeholderSelectionsByDate?.[day.date]
+          ? employee.placeholderSelectionsByDate[day.date]
+          : isBorrowedCellVisible
           ? getSelectionForCell(
               schedule.id,
               employee.sourceEmployeeId,
@@ -2562,13 +2788,15 @@ function EmployeeRow({
           activeCompetency?.id === selectedCoverageCompetencyId;
         const cellTitle = isProjectedCell
           ? `${projectedAssignment?.subScheduleName ?? "Sub-schedule"} manages this cell`
-          : getScheduleCellComment({
-              notes: selection.notes,
-              employeeName: employee.name,
-              employeeId: employee.sourceEmployeeId,
-              scheduleId: schedule.id,
-              employeeMap,
-            });
+          : employee.placeholderTitleByDate?.[day.date]
+            ? employee.placeholderTitleByDate[day.date]
+            : getScheduleCellComment({
+                notes: selection.notes,
+                employeeName: employee.name,
+                employeeId: employee.sourceEmployeeId,
+                scheduleId: schedule.id,
+                employeeMap,
+              });
 
         return (
           <div
@@ -2579,20 +2807,36 @@ function EmployeeRow({
               activeColorToken ? "shift-cell--coded" : ""
             } ${showLockedCell ? "shift-cell--locked" : ""} ${
               showLockedCell && activeColorToken ? "shift-cell--locked-coded" : ""
-            } ${isSelected ? "shift-cell--selected" : ""} ${
+            } ${employee.isOvertimePlaceholder ? "shift-cell--overtime-available" : ""} ${
+              isSelected ? "shift-cell--selected" : ""
+            } ${
               isInDragRange ? "shift-cell--range" : ""
             } ${highlightedMissingDates.has(day.date) && setDates.has(day.date) ? "shift-cell--missing-column" : ""} ${
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
             } ${hasCellNote ? "shift-cell--has-note" : ""} ${isProjectedCell ? "shift-cell--projected" : ""}`}
             onPointerDown={(event) => {
-              if (event.button !== 0 || !canEdit || !isBorrowedCellVisible || isLockedCell || isProjectedCell) {
+              if (
+                event.button !== 0 ||
+                !canEdit ||
+                !isBorrowedCellVisible ||
+                isLockedCell ||
+                isProjectedCell ||
+                employee.isOvertimePlaceholder
+              ) {
                 return;
               }
 
               onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, effectiveSelection);
             }}
             onPointerEnter={(event) => {
-              if (canEdit && isBorrowedCellVisible && !isLockedCell && dragRange && event.buttons === 1) {
+              if (
+                canEdit &&
+                isBorrowedCellVisible &&
+                !isLockedCell &&
+                !employee.isOvertimePlaceholder &&
+                dragRange &&
+                event.buttons === 1
+              ) {
                 onDragHover(employee.sourceEmployeeId, dayIndex);
               }
             }}
@@ -2603,13 +2847,13 @@ function EmployeeRow({
                 activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
               }`}
               onClick={() => {
-                if (!canEdit || !isBorrowedCellVisible || isLockedCell) {
+                if (!canEdit || !isBorrowedCellVisible || isLockedCell || employee.isOvertimePlaceholder) {
                   return;
                 }
 
                 onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date });
               }}
-              disabled={!canEdit || !isBorrowedCellVisible || isLockedCell}
+              disabled={!canEdit || !isBorrowedCellVisible || isLockedCell || employee.isOvertimePlaceholder}
               aria-label={`${employee.name} ${day.date} assignment`}
               title={cellTitle}
             >

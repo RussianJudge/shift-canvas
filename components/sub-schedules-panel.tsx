@@ -43,6 +43,16 @@ type SubScheduleCellSelection = {
   notes: string | null;
 };
 
+type SubScheduleRowEntry =
+  | { kind: "employee"; employeeId: string }
+  | {
+      kind: "overtime";
+      rowId: string;
+      dates: string[];
+      selection: SubScheduleCellSelection;
+      title: string;
+    };
+
 type EditorCell = {
   employeeId: string;
   date: string;
@@ -459,6 +469,50 @@ export function SubSchedulesPanel({
         return leftName.localeCompare(rightName);
       }),
     [addedEmployeeIds, assignedEmployeeIds, employeeMap],
+  );
+  const overtimeAvailableRows = useMemo<SubScheduleRowEntry[]>(() => {
+    if (!activeSubSchedule) {
+      return [];
+    }
+
+    return snapshot.manualOvertimePostings.flatMap<SubScheduleRowEntry>((posting) => {
+      if (posting.subScheduleId !== activeSubSchedule.id || posting.dates.length === 0) {
+        return [];
+      }
+
+      const competency = posting.competencyId ? competencyMap[posting.competencyId] : null;
+      const timeCode = posting.timeCodeId ? timeCodeMap[posting.timeCodeId] : null;
+
+      if (!competency && !timeCode) {
+        return [];
+      }
+
+      const claimedEmployeeIds = new Set(
+        snapshot.overtimeClaims
+          .filter((claim) => claim.manualPostingId === posting.id)
+          .map((claim) => claim.employeeId),
+      );
+      const openSlots = Math.max(0, posting.slotCount - claimedEmployeeIds.size);
+
+      return Array.from({ length: openSlots }, (_, slotIndex) => ({
+        kind: "overtime" as const,
+        rowId: `ot-open:${posting.id}:${slotIndex}`,
+        dates: posting.dates,
+        selection: {
+          competencyId: posting.competencyId,
+          timeCodeId: posting.timeCodeId ?? null,
+          notes: null,
+        },
+        title: `${competency?.code ?? timeCode?.code ?? "Overtime"} posting`,
+      }));
+    });
+  }, [activeSubSchedule, competencyMap, snapshot.manualOvertimePostings, snapshot.overtimeClaims, timeCodeMap]);
+  const rowEntries = useMemo<SubScheduleRowEntry[]>(
+    () => [
+      ...rowEmployeeIds.map((employeeId) => ({ kind: "employee" as const, employeeId })),
+      ...overtimeAvailableRows,
+    ],
+    [overtimeAvailableRows, rowEmployeeIds],
   );
   const availableEmployeesToAdd = useMemo(
     () => employees.filter((employee) => !rowEmployeeIds.includes(employee.id)),
@@ -901,7 +955,7 @@ export function SubSchedulesPanel({
                   </div>
                 ))}
 
-                {rowEmployeeIds.length === 0 ? (
+                {rowEntries.length === 0 ? (
                   <div
                     className="empty-state sticky-column"
                     style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
@@ -910,8 +964,49 @@ export function SubSchedulesPanel({
                     <span>Add a worker to start building this sub-schedule.</span>
                   </div>
                 ) : (
-                  rowEmployeeIds.flatMap((employeeId) => {
-                    const employee = employeeMap[employeeId];
+                  rowEntries.flatMap((rowEntry) => {
+                    if (rowEntry.kind === "overtime") {
+                      const visibleDateSet = new Set(rowEntry.dates);
+                      const competency = rowEntry.selection.competencyId ? competencyMap[rowEntry.selection.competencyId] : null;
+                      const timeCode = rowEntry.selection.timeCodeId ? timeCodeMap[rowEntry.selection.timeCodeId] : null;
+                      const colorToken = timeCode?.colorToken ?? competency?.colorToken ?? "";
+
+                      return [
+                        <div key={`sub-row-${rowEntry.rowId}`} className="employee-cell sticky-column">
+                          <div className="employee-cell__main">
+                            <strong>Overtime Available</strong>
+                            <span>{rowEntry.title}</span>
+                          </div>
+                        </div>,
+                        ...monthDays.map((day) => {
+                          const isVisible = visibleDateSet.has(day.date);
+
+                          return (
+                            <div
+                              key={`sub-cell-${rowEntry.rowId}-${day.date}`}
+                              className={`shift-cell shift-cell--${isVisible ? "day" : "off"} ${
+                                day.isWeekend ? "shift-cell--weekend" : ""
+                              } ${isVisible && colorToken ? `legend-pill--${colorToken.toLowerCase()}` : ""} ${
+                                isVisible && colorToken ? "shift-cell--coded" : ""
+                              } ${isVisible ? "shift-cell--overtime-available" : ""}`}
+                            >
+                              <button
+                                type="button"
+                                className={`shift-cell-button ${
+                                  isVisible && colorToken ? `legend-pill--${colorToken.toLowerCase()}` : ""
+                                }`}
+                                disabled
+                                title={isVisible ? rowEntry.title : undefined}
+                              >
+                                {isVisible ? getCellCode(rowEntry.selection, competencyMap, timeCodeMap) : ""}
+                              </button>
+                            </div>
+                          );
+                        }),
+                      ];
+                    }
+
+                    const employee = employeeMap[rowEntry.employeeId];
                     const homeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
 
                     if (!employee || !homeSchedule) {
@@ -919,7 +1014,7 @@ export function SubSchedulesPanel({
                     }
 
                     return [
-                      <div key={`sub-row-${employeeId}`} className="employee-cell sticky-column">
+                      <div key={`sub-row-${rowEntry.employeeId}`} className="employee-cell sticky-column">
                         <div className="employee-cell__main">
                           <strong>{employee.name}</strong>
                           <span>{homeSchedule.name}</span>

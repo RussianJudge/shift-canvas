@@ -215,6 +215,7 @@ export interface SchedulePageSnapshot
     | "assignments"
     | "projectedAssignments"
     | "overtimeClaims"
+    | "manualOvertimePostings"
     | "completedSets"
   > {}
 
