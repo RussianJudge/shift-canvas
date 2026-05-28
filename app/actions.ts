@@ -79,6 +79,13 @@ type StaffingCompetency = {
   code: string;
   requiredStaff: number;
 };
+type RemovedOvertimeClaimNotification = {
+  employeeId: string;
+  scheduleName: string;
+  assignmentLabel: string;
+  date: string;
+  scope: ActionScope;
+};
 
 /**
  * Main server action layer for the app.
@@ -217,6 +224,40 @@ function doesAssignmentFillManualPosting(
     ((posting.competencyId && assignment.competencyId === posting.competencyId) ||
       (posting.timeCodeId && assignment.timeCodeId === posting.timeCodeId))
   );
+}
+
+function createNotificationId() {
+  return `notification-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function createOvertimeRemovedNotifications(
+  supabase: SupabaseAdminClient,
+  notifications: RemovedOvertimeClaimNotification[],
+) {
+  if (notifications.length === 0) {
+    return { ok: true as const };
+  }
+
+  const rows = notifications.map((notification) => ({
+    id: createNotificationId(),
+    recipient_employee_id: notification.employeeId,
+    type: "overtime_removed",
+    title: "Overtime no longer needed",
+    body: `${notification.scheduleName} ${notification.assignmentLabel} overtime on ${notification.date} is no longer needed because the posting was filled or changed.`,
+    href: `/overtime?month=${notification.date.slice(0, 7)}`,
+    ...toDatabaseScope(notification.scope),
+  }));
+
+  const { error } = await supabase.from("notifications").insert(rows);
+
+  if (error) {
+    return {
+      ok: false as const,
+      message: `Could not create overtime notification: ${error.message}`,
+    };
+  }
+
+  return { ok: true as const };
 }
 
 function findBestMutualCoverageCompetency({
@@ -508,7 +549,7 @@ async function removeStaleOvertimeClaims(
     const snapshot = await getScheduleReferenceSnapshot(month, session, {
       includeEmployeeCompetencies: false,
       includeCompetencies: true,
-      includeTimeCodes: false,
+      includeTimeCodes: true,
       includeSubSchedules: false,
       includeAssignments: true,
       includeSubScheduleAssignments: true,
@@ -633,6 +674,35 @@ async function removeStaleOvertimeClaims(
     );
 
     if (claimsToRemove.length > 0) {
+      const notificationRows = claimsToRemove.map<RemovedOvertimeClaimNotification>((claim) => {
+        const schedule = claim.scheduleId
+          ? snapshot.schedules.find((entry) => entry.id === claim.scheduleId)
+          : null;
+        const competency = claim.competencyId
+          ? snapshot.competencies.find((entry) => entry.id === claim.competencyId)
+          : null;
+        const timeCode = claim.timeCodeId
+          ? snapshot.timeCodes.find((entry) => entry.id === claim.timeCodeId)
+          : null;
+
+        return {
+          employeeId: claim.employeeId,
+          scheduleName: schedule?.name ? `Shift ${schedule.name}` : "Your",
+          assignmentLabel: competency?.code ?? timeCode?.code ?? "posting",
+          date: claim.date,
+          scope: {
+            companyId: claim.companyId ?? "",
+            siteId: claim.siteId ?? "",
+            businessAreaId: claim.businessAreaId ?? "",
+          },
+        };
+      }).filter((notification) => notification.scope.companyId && notification.scope.siteId && notification.scope.businessAreaId);
+      const notificationResult = await createOvertimeRemovedNotifications(supabase, notificationRows);
+
+      if (!notificationResult.ok) {
+        console.error(notificationResult.message);
+      }
+
       const restoreResult = await restoreSwappedAssignmentsForClaims(
         supabase,
         restorableMainScheduleClaims.map((claim) => ({
@@ -688,6 +758,7 @@ async function removeStaleOvertimeClaims(
       }
 
       removedClaims += claimsToRemove.length;
+      revalidatePath("/notifications");
     }
 
     if (manualPostingsToDelete.length > 0) {
@@ -1575,6 +1646,21 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
   }
 
   if ((count ?? 0) > 0) {
+    const notificationResult = await createOvertimeRemovedNotifications(
+      supabase,
+      claimRows.map((claim) => ({
+        employeeId: claim.employee_id,
+        scheduleName: "Your",
+        assignmentLabel: "posting",
+        date: claim.assignment_date,
+        scope: scopeFromRow(posting),
+      })),
+    );
+
+    if (!notificationResult.ok) {
+      console.error(notificationResult.message);
+    }
+
     const { error: claimDeleteError } = await supabase
       .from("overtime_claims")
       .delete()
@@ -1598,6 +1684,7 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
   }
 
   revalidatePath("/overtime");
+  revalidatePath("/notifications");
   if ((posting as { sub_schedule_id?: string | null }).sub_schedule_id) {
     revalidatePath("/sub-schedules");
   }

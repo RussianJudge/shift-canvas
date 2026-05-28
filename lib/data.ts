@@ -16,6 +16,7 @@ import {
 import { getSupabaseAdminClient } from "@/lib/supabase";
 import type {
   AppSession,
+  AppNotification,
   CompletedSet,
   Competency,
   Employee,
@@ -183,6 +184,20 @@ type OvertimeClaimRow = {
   time_code_id: string | null;
   assignment_date: string;
   manual_posting_id: string | null;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+type NotificationRow = {
+  id: string;
+  recipient_employee_id: string;
+  type: string;
+  title: string;
+  body: string;
+  href: string | null;
+  read_at: string | null;
+  created_at: string;
   company_id: string;
   site_id: string;
   business_area_id: string;
@@ -662,6 +677,22 @@ function mapOvertimeClaims(rows: OvertimeClaimRow[]) {
     timeCodeId: row.time_code_id,
     date: row.assignment_date,
     manualPostingId: row.manual_posting_id,
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
+  }));
+}
+
+function mapNotifications(rows: NotificationRow[]) {
+  return rows.map<AppNotification>((row) => ({
+    id: row.id,
+    recipientEmployeeId: row.recipient_employee_id,
+    type: row.type,
+    title: row.title,
+    body: row.body,
+    href: row.href,
+    readAt: row.read_at,
+    createdAt: row.created_at,
     companyId: row.company_id,
     siteId: row.site_id,
     businessAreaId: row.business_area_id,
@@ -2124,4 +2155,41 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
     schedules: scheduleReference?.schedules ?? [],
     postings,
   };
+}
+
+export async function getNotificationsForViewer(
+  session: AppSession,
+  options: { unreadOnly?: boolean; limit?: number } = {},
+) {
+  const supabase = getDataClient();
+
+  if (!supabase || !session.employeeId) {
+    return [];
+  }
+
+  const { unreadOnly = false, limit = 20 } = options;
+  let query = applySessionScope(
+    supabase
+      .from("notifications")
+      .select(
+        "id, recipient_employee_id, type, title, body, href, read_at, created_at, company_id, site_id, business_area_id",
+      )
+      .eq("recipient_employee_id", session.employeeId)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+    session,
+  );
+
+  if (unreadOnly) {
+    query = query.is("read_at", null);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Notifications failed to load:", error.message);
+    return [];
+  }
+
+  return mapNotifications((data as NotificationRow[] | null) ?? []);
 }

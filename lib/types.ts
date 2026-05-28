@@ -170,6 +170,17 @@ export interface CompletedSet extends OrganizationScope {
   endDate: string;
 }
 
+export interface AppNotification extends OrganizationScope {
+  id: string;
+  recipientEmployeeId: string;
+  type: string;
+  title: string;
+  body: string;
+  href: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
 export interface AppSession extends OrganizationContext, AdminViewScope {
   email: string;
   role: AppRole;
