@@ -515,6 +515,53 @@ async function requireActionRole(allowedRoles: AppRole[]) {
   return session;
 }
 
+export async function deleteNotification(formData: FormData) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+  const notificationId = String(formData.get("notificationId") ?? "");
+
+  if (!session?.employeeId || isBlank(notificationId)) {
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return;
+  }
+
+  await supabase
+    .from("notifications")
+    .delete()
+    .eq("id", notificationId)
+    .eq("recipient_employee_id", session.employeeId);
+
+  revalidatePath("/notifications");
+}
+
+export async function markNotificationViewed(formData: FormData) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+  const notificationId = String(formData.get("notificationId") ?? "");
+
+  if (!session?.employeeId || isBlank(notificationId)) {
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return;
+  }
+
+  await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("id", notificationId)
+    .eq("recipient_employee_id", session.employeeId)
+    .is("read_at", null);
+
+  revalidatePath("/notifications");
+}
+
 /** Removes blanks, de-duplicates dates, and sorts them into stable order. */
 function uniqueSortedDates(dates: string[]) {
   return Array.from(new Set(dates.filter(Boolean))).sort();

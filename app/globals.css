@@ -445,6 +445,44 @@ button.workspace-nav-link {
   padding: 1rem;
 }
 
+.notifications-page-list__item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.notifications-page-list__content {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.notifications-page-list__view-form {
+  min-width: 0;
+}
+
+.notifications-page-list__item form:not(.notifications-page-list__view-form) {
+  display: inline-flex;
+  justify-self: end;
+}
+
+.workspace-notification-item--read {
+  opacity: 0.72;
+}
+
+.notifications-page-list__content:hover strong {
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
 .workspace-content {
   padding: 1.25rem;
   min-width: 0;
@@ -1020,6 +1058,52 @@ button.workspace-nav-link {
 .ghost-button--active {
   background: color-mix(in srgb, var(--team-accent) 12%, white);
   border-color: color-mix(in srgb, var(--team-accent) 38%, white);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.icon-button:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.9);
+  border-color: color-mix(in srgb, var(--team-accent) 30%, var(--line));
+}
+
+.icon-button svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.notification-delete-button {
+  width: 2.35rem;
+  height: 2.35rem;
+  color: #9f2f1d;
+}
+
+.notification-delete-button:hover {
+  background: rgba(255, 241, 232, 0.9);
+  border-color: rgba(159, 47, 29, 0.28);
 }
 
 .summary-row {
