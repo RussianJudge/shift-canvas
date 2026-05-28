@@ -15,6 +15,17 @@ const PREFETCHABLE_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics"])
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
 const prefetchedWorkspaceRoutes = new Set<string>();
 
+function isNotification(value: unknown): value is AppNotification {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    "title" in value &&
+    "body" in value &&
+    "createdAt" in value
+  );
+}
+
 function getCurrentMonthKey(now = new Date()) {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   return `${now.getFullYear()}-${month}`;
@@ -318,6 +329,38 @@ export function WorkspaceShell({
   useEffect(() => {
     setNotifications(initialNotifications);
   }, [initialNotifications]);
+
+  useEffect(() => {
+    if (!isNotificationsOpen) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    fetch("/api/notifications?unread=1&limit=5", {
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { notifications?: unknown[] } | null) => {
+        if (!payload?.notifications) {
+          return;
+        }
+
+        setNotifications(payload.notifications.filter(isNotification));
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error("Could not refresh notifications", error);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [isNotificationsOpen]);
 
   useEffect(() => {
     if (!isNotificationsOpen) {

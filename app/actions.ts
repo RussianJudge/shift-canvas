@@ -1593,6 +1593,7 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
   const subScheduleClaims = claimRows.filter(
     (claim): claim is typeof claim & { sub_schedule_id: string } => Boolean(claim.sub_schedule_id),
   );
+  let notificationWarning = "";
 
   if (mainScheduleClaims.length > 0) {
     const restoreResult = await restoreSwappedAssignmentsForClaims(supabase, mainScheduleClaims);
@@ -1659,6 +1660,7 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
 
     if (!notificationResult.ok) {
       console.error(notificationResult.message);
+      notificationWarning = ` Notification was not sent: ${notificationResult.message}`;
     }
 
     const { error: claimDeleteError } = await supabase
@@ -1693,7 +1695,7 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
     ok: true,
     message:
       (count ?? 0) > 0
-        ? `Manual overtime posting deleted and released ${count} claim${count === 1 ? "" : "s"}.`
+        ? `Manual overtime posting deleted and released ${count} claim${count === 1 ? "" : "s"}.${notificationWarning}`
         : "Manual overtime posting deleted.",
   };
 }
