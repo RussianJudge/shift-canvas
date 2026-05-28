@@ -134,6 +134,17 @@ select {
   border-top: 1px solid var(--line);
 }
 
+.workspace-sidebar-bottom {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: auto;
+}
+
+.workspace-sidebar-bottom .workspace-notifications,
+.workspace-sidebar-bottom .workspace-session {
+  margin-top: 0;
+}
+
 .workspace-session__meta {
   display: grid;
   gap: 0.2rem;
@@ -157,7 +168,6 @@ select {
 .workspace-admin-scope {
   display: grid;
   gap: 0.7rem;
-  margin-top: -0.6rem;
   padding: 0.7rem;
   min-width: 0;
   border-radius: 1rem;
@@ -415,6 +425,15 @@ button.workspace-nav-link {
   text-decoration: none;
 }
 
+.workspace-notifications-popover__footer {
+  justify-content: flex-end;
+}
+
+.workspace-notifications-popover__settings {
+  width: 2.35rem;
+  height: 2.35rem;
+}
+
 .workspace-notifications-popover__list {
   display: grid;
   gap: 0.55rem;
@@ -448,6 +467,13 @@ button.workspace-nav-link {
 .notifications-page-list__item {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+}
+
+.notifications-page-list__item:not(.workspace-notification-item--read) {
+  border-color: color-mix(in srgb, var(--team-accent) 62%, var(--line));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--team-accent) 18%, transparent),
+    0 12px 28px color-mix(in srgb, var(--team-accent) 12%, transparent);
 }
 
 .notifications-page-list__content {

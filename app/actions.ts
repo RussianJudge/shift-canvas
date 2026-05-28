@@ -538,7 +538,7 @@ export async function deleteNotification(formData: FormData) {
   revalidatePath("/notifications");
 }
 
-export async function markNotificationViewed(formData: FormData) {
+export async function markNotificationRead(formData: FormData) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
   const notificationId = String(formData.get("notificationId") ?? "");
 

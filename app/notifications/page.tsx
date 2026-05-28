@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { deleteNotification, markNotificationViewed } from "@/app/actions";
+import { deleteNotification, markNotificationRead } from "@/app/actions";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getNotificationsForViewer } from "@/lib/data";
@@ -53,17 +53,17 @@ export default async function NotificationsPage() {
                   notification.readAt ? "workspace-notification-item--read" : ""
                 }`}
               >
-                <form action={markNotificationViewed} className="notifications-page-list__view-form">
+                <form action={markNotificationRead} className="notifications-page-list__view-form">
                   <input type="hidden" name="notificationId" value={notification.id} />
                   <button
                     type="submit"
                     className="notifications-page-list__content"
-                    aria-label={`Mark notification viewed: ${notification.title}`}
+                    aria-label={`Mark notification read: ${notification.title}`}
                   >
                     <strong>{notification.title}</strong>
                     <span>{notification.body}</span>
                     <small>
-                      {notification.readAt ? "Viewed" : "Unread"} · {notification.createdAt.slice(0, 10)}
+                      {notification.readAt ? "Read" : "Unread"} · {notification.createdAt.slice(0, 10)}
                     </small>
                   </button>
                 </form>

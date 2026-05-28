@@ -250,6 +250,16 @@ function NotificationsIcon() {
   );
 }
 
+/** Gear icon used for notification settings. */
+function NotificationSettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8.25a3.75 3.75 0 1 1 0 7.5a3.75 3.75 0 0 1 0-7.5Z" />
+      <path d="M19.5 12a7.46 7.46 0 0 0-.15-1.5l2.1-1.62l-2-3.46l-2.48 1a7.6 7.6 0 0 0-2.6-1.5L14 2.25h-4l-.38 2.67a7.6 7.6 0 0 0-2.6 1.5l-2.48-1l-2 3.46l2.1 1.62a7.4 7.4 0 0 0 0 3l-2.1 1.62l2 3.46l2.48-1a7.6 7.6 0 0 0 2.6 1.5l.38 2.67h4l.38-2.67a7.6 7.6 0 0 0 2.6-1.5l2.48 1l2-3.46l-2.1-1.62c.1-.49.15-.99.15-1.5Z" />
+    </svg>
+  );
+}
+
 /** Responsive shell with a collapsible toolbar and role-scoped nav. */
 export function WorkspaceShell({
   children,
@@ -273,7 +283,7 @@ export function WorkspaceShell({
   const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(initialAdminScope);
-  const [isAdminScopeCollapsed, setIsAdminScopeCollapsed] = useState(false);
+  const [isAdminScopeCollapsed, setIsAdminScopeCollapsed] = useState(true);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
   const [isUpdatingScope, startScopeTransition] = useTransition();
@@ -525,115 +535,6 @@ export function WorkspaceShell({
             ) : null}
           </div>
 
-          {viewer.role === "admin" && adminScope ? (
-            <section
-              className={`workspace-admin-scope ${
-                isAdminScopeCollapsed ? "workspace-admin-scope--collapsed" : ""
-              }`}
-              aria-label="Admin view scope"
-            >
-              <button
-                type="button"
-                className="workspace-admin-scope__toggle"
-                onClick={() => setIsAdminScopeCollapsed((current) => !current)}
-                aria-expanded={!isAdminScopeCollapsed}
-              >
-                <span className="workspace-admin-scope__heading">
-                  <strong>Viewing Context</strong>
-                  <span>{adminScope.companyName}</span>
-                </span>
-                <span className="workspace-admin-scope__chevron" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M6 9l6 6l6-6" />
-                  </svg>
-                </span>
-              </button>
-
-              {!isAdminScopeCollapsed ? (
-                <div className="workspace-admin-scope__fields">
-                  <label className="field workspace-admin-scope__field">
-                    <span>Site</span>
-                    <select
-                      value={adminScope.activeSiteId ?? ""}
-                      onChange={(event) => {
-                        const nextSiteId = event.target.value || null;
-
-                        startScopeTransition(async () => {
-                          const result = await setAdminViewingScope({
-                            siteId: nextSiteId,
-                            businessAreaId: null,
-                          });
-
-                          if (!result.ok) {
-                            return;
-                          }
-
-                          setAdminScope((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  activeSiteId: nextSiteId,
-                                  activeBusinessAreaId: null,
-                                }
-                              : current,
-                          );
-                          router.refresh();
-                        });
-                      }}
-                      disabled={isUpdatingScope}
-                    >
-                      <option value="">All sites</option>
-                      {adminScope.sites.map((site) => (
-                        <option key={site.id} value={site.id}>
-                          {site.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="field workspace-admin-scope__field">
-                    <span>Business Area</span>
-                    <select
-                      value={adminScope.activeBusinessAreaId ?? ""}
-                      onChange={(event) => {
-                        const nextBusinessAreaId = event.target.value || null;
-
-                        startScopeTransition(async () => {
-                          const result = await setAdminViewingScope({
-                            siteId: adminScope.activeSiteId ?? null,
-                            businessAreaId: nextBusinessAreaId,
-                          });
-
-                          if (!result.ok) {
-                            return;
-                          }
-
-                          setAdminScope((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  activeBusinessAreaId: nextBusinessAreaId,
-                                }
-                              : current,
-                          );
-                          router.refresh();
-                        });
-                      }}
-                      disabled={isUpdatingScope || !adminScope.activeSiteId}
-                    >
-                      <option value="">{adminScope.activeSiteId ? "All business areas" : "Select a site first"}</option>
-                      {filteredBusinessAreas.map((businessArea) => (
-                        <option key={businessArea.id} value={businessArea.id}>
-                          {businessArea.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
           <nav id="workspace-primary-navigation" className="workspace-nav" aria-label="Primary">
             {navItems.map((item) => {
               const { navigationHref, prefetchHref } = resolveWorkspaceRouteTargets({
@@ -658,72 +559,189 @@ export function WorkspaceShell({
             })}
           </nav>
 
-          <div className="workspace-notifications" ref={notificationPopoverRef}>
-            <button
-              type="button"
-              className={`workspace-nav-link workspace-notifications__button ${
-                isNotificationsOpen ? "workspace-nav-link--active" : ""
-              }`}
-              onClick={() => setIsNotificationsOpen((current) => !current)}
-              aria-expanded={isNotificationsOpen}
-              aria-haspopup="dialog"
-            >
-              <span className="workspace-nav-icon">
-                <NotificationsIcon />
-              </span>
-              <strong>Notifications</strong>
-              {notifications.length > 0 ? (
-                <span className="workspace-notifications__badge">{notifications.length}</span>
-              ) : null}
-            </button>
+          <div className="workspace-sidebar-bottom">
+            <div className="workspace-notifications" ref={notificationPopoverRef}>
+              <button
+                type="button"
+                className={`workspace-nav-link workspace-notifications__button ${
+                  isNotificationsOpen ? "workspace-nav-link--active" : ""
+                }`}
+                onClick={() => setIsNotificationsOpen((current) => !current)}
+                aria-expanded={isNotificationsOpen}
+                aria-haspopup="dialog"
+              >
+                <span className="workspace-nav-icon">
+                  <NotificationsIcon />
+                </span>
+                <strong>Notifications</strong>
+                {notifications.length > 0 ? (
+                  <span className="workspace-notifications__badge">{notifications.length}</span>
+                ) : null}
+              </button>
 
-            {isNotificationsOpen ? (
-              <section className="workspace-notifications-popover" role="dialog" aria-label="Notifications">
-                <div className="workspace-notifications-popover__header">
-                  <div>
-                    <strong>Notifications</strong>
-                    <span>{notifications.length} unread</span>
-                  </div>
-                  <Link href="/notifications" onClick={() => setIsNotificationsOpen(false)}>
-                    View all
-                  </Link>
-                </div>
-
-                <div className="workspace-notifications-popover__list">
-                  {notifications.length > 0 ? (
-                    notifications.map((notification) => (
-                      <article key={notification.id} className="workspace-notification-item">
-                        <strong>{notification.title}</strong>
-                        <span>{notification.body}</span>
-                        <small>{notification.createdAt.slice(0, 10)}</small>
-                      </article>
-                    ))
-                  ) : (
-                    <div className="workspace-notifications-empty">
-                      <strong>No notifications yet</strong>
-                      <span>Schedule alerts, overtime updates, and mutual approvals will appear here.</span>
+              {isNotificationsOpen ? (
+                <section className="workspace-notifications-popover" role="dialog" aria-label="Notifications">
+                  <div className="workspace-notifications-popover__header">
+                    <div>
+                      <strong>Notifications</strong>
+                      <span>{notifications.length} unread</span>
                     </div>
-                  )}
-                </div>
+                    <Link href="/notifications" onClick={() => setIsNotificationsOpen(false)}>
+                      View all
+                    </Link>
+                  </div>
 
-                <div className="workspace-notifications-popover__footer">
-                  <Link href="/notifications/settings" onClick={() => setIsNotificationsOpen(false)}>
-                    Settings
-                  </Link>
-                </div>
+                  <div className="workspace-notifications-popover__list">
+                    {notifications.length > 0 ? (
+                      notifications.map((notification) => (
+                        <article key={notification.id} className="workspace-notification-item">
+                          <strong>{notification.title}</strong>
+                          <span>{notification.body}</span>
+                          <small>{notification.createdAt.slice(0, 10)}</small>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="workspace-notifications-empty">
+                        <strong>No notifications yet</strong>
+                        <span>Schedule alerts, overtime updates, and mutual approvals will appear here.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="workspace-notifications-popover__footer">
+                    <Link
+                      href="/notifications/settings"
+                      className="icon-button workspace-notifications-popover__settings"
+                      aria-label="Notification settings"
+                      title="Notification settings"
+                      onClick={() => setIsNotificationsOpen(false)}
+                    >
+                      <NotificationSettingsIcon />
+                    </Link>
+                  </div>
+                </section>
+              ) : null}
+            </div>
+
+            {viewer.role === "admin" && adminScope ? (
+              <section
+                className={`workspace-admin-scope ${
+                  isAdminScopeCollapsed ? "workspace-admin-scope--collapsed" : ""
+                }`}
+                aria-label="Admin view scope"
+              >
+                <button
+                  type="button"
+                  className="workspace-admin-scope__toggle"
+                  onClick={() => setIsAdminScopeCollapsed((current) => !current)}
+                  aria-expanded={!isAdminScopeCollapsed}
+                >
+                  <span className="workspace-admin-scope__heading">
+                    <strong>Viewing Context</strong>
+                    <span>{adminScope.companyName}</span>
+                  </span>
+                  <span className="workspace-admin-scope__chevron" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M6 9l6 6l6-6" />
+                    </svg>
+                  </span>
+                </button>
+
+                {!isAdminScopeCollapsed ? (
+                  <div className="workspace-admin-scope__fields">
+                    <label className="field workspace-admin-scope__field">
+                      <span>Site</span>
+                      <select
+                        value={adminScope.activeSiteId ?? ""}
+                        onChange={(event) => {
+                          const nextSiteId = event.target.value || null;
+
+                          startScopeTransition(async () => {
+                            const result = await setAdminViewingScope({
+                              siteId: nextSiteId,
+                              businessAreaId: null,
+                            });
+
+                            if (!result.ok) {
+                              return;
+                            }
+
+                            setAdminScope((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    activeSiteId: nextSiteId,
+                                    activeBusinessAreaId: null,
+                                  }
+                                : current,
+                            );
+                            router.refresh();
+                          });
+                        }}
+                        disabled={isUpdatingScope}
+                      >
+                        <option value="">All sites</option>
+                        {adminScope.sites.map((site) => (
+                          <option key={site.id} value={site.id}>
+                            {site.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field workspace-admin-scope__field">
+                      <span>Business Area</span>
+                      <select
+                        value={adminScope.activeBusinessAreaId ?? ""}
+                        onChange={(event) => {
+                          const nextBusinessAreaId = event.target.value || null;
+
+                          startScopeTransition(async () => {
+                            const result = await setAdminViewingScope({
+                              siteId: adminScope.activeSiteId ?? null,
+                              businessAreaId: nextBusinessAreaId,
+                            });
+
+                            if (!result.ok) {
+                              return;
+                            }
+
+                            setAdminScope((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    activeBusinessAreaId: nextBusinessAreaId,
+                                  }
+                                : current,
+                            );
+                            router.refresh();
+                          });
+                        }}
+                        disabled={isUpdatingScope || !adminScope.activeSiteId}
+                      >
+                        <option value="">{adminScope.activeSiteId ? "All business areas" : "Select a site first"}</option>
+                        {filteredBusinessAreas.map((businessArea) => (
+                          <option key={businessArea.id} value={businessArea.id}>
+                            {businessArea.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
               </section>
             ) : null}
-          </div>
 
-          <form action={signOut} className="workspace-session">
-            <div className="workspace-session__meta">
-              <strong>{viewer.displayName}</strong>
-              <span>{viewer.role}</span>
-            </div>
-            <button type="submit" className="ghost-button workspace-session__signout">
-              Sign out
-            </button>
-          </form>
+            <form action={signOut} className="workspace-session">
+              <div className="workspace-session__meta">
+                <strong>{viewer.displayName}</strong>
+                <span>{viewer.role}</span>
+              </div>
+              <button type="submit" className="ghost-button workspace-session__signout">
+                Sign out
+              </button>
+            </form>
+          </div>
         </aside>
 
         {isMobileSidebarMode && isMobileSidebarOpen ? (
