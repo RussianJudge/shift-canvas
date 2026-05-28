@@ -193,6 +193,7 @@ export interface AppSession extends OrganizationContext, AdminViewScope {
 export interface SchedulerSnapshot {
   month: string;
   schedules: Schedule[];
+  unassignedEmployees?: Employee[];
   productionUnits: ProductionUnit[];
   competencies: Competency[];
   timeCodes: TimeCode[];
@@ -319,7 +320,7 @@ export interface PersonnelUpdate {
   lastName: string;
   email: string;
   role: string;
-  scheduleId: string;
+  scheduleId: string | null;
   competencyIds: string[];
 }
 
