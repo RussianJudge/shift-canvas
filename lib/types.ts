@@ -217,7 +217,7 @@ export interface ScheduleOvertimePlaceholderRow {
   detail: string;
 }
 
-export interface SchedulePageSnapshot
+export interface ScheduleGridSnapshot
   extends Pick<
     SchedulerSnapshot,
     | "month"
@@ -225,12 +225,19 @@ export interface SchedulePageSnapshot
     | "competencies"
     | "timeCodes"
     | "assignments"
+  > {}
+
+export interface ScheduleAuxSnapshot
+  extends Pick<
+    SchedulerSnapshot,
     | "projectedAssignments"
     | "overtimeClaims"
     | "completedSets"
   > {
   overtimePlaceholderRows: ScheduleOvertimePlaceholderRow[];
 }
+
+export interface SchedulePageSnapshot extends ScheduleGridSnapshot, ScheduleAuxSnapshot {}
 
 export interface MutualsSnapshot {
   month: string;

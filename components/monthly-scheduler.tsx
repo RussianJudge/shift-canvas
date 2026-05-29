@@ -1,7 +1,17 @@
 "use client";
 
-import type { CSSProperties } from "react";
-import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  startTransition,
+} from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -35,6 +45,8 @@ import type {
   Competency,
   Employee,
   SaveAssignmentsInput,
+  ScheduleAuxSnapshot,
+  ScheduleGridSnapshot,
   Schedule,
   SchedulePageSnapshot,
   ShiftKind,
@@ -71,6 +83,31 @@ type DragRange = {
   currentIndex: number;
   selection: AssignmentSelection;
 };
+type ScheduleAuxContextValue = {
+  applyAuxSnapshot: (auxSnapshot: ScheduleAuxSnapshot) => void;
+};
+
+const ScheduleAuxContext = createContext<ScheduleAuxContextValue | null>(null);
+
+function withEmptyScheduleAux(snapshot: ScheduleGridSnapshot): SchedulePageSnapshot {
+  return {
+    ...snapshot,
+    projectedAssignments: [],
+    overtimeClaims: [],
+    completedSets: [],
+    overtimePlaceholderRows: [],
+  };
+}
+
+export function ScheduleAuxHydrator({ auxSnapshot }: { auxSnapshot: ScheduleAuxSnapshot }) {
+  const context = useContext(ScheduleAuxContext);
+
+  useEffect(() => {
+    context?.applyAuxSnapshot(auxSnapshot);
+  }, [auxSnapshot, context]);
+
+  return null;
+}
 
 type DisplayEmployee = {
   rowId: string;
@@ -895,19 +932,22 @@ export function MonthlyScheduler({
   canSwitchSchedule,
   forcedScheduleId,
   initialSelectedScheduleId,
+  children,
 }: {
-  initialSnapshot: SchedulePageSnapshot;
+  initialSnapshot: ScheduleGridSnapshot;
   initialPinnedEmployeesBySchedule: Record<string, string[]>;
   canEdit: boolean;
   canManageSetBuilder: boolean;
   canSwitchSchedule: boolean;
   forcedScheduleId: string | null;
   initialSelectedScheduleId?: string | null;
+  children?: ReactNode;
 }) {
   // `baselineAssignments` tracks the last server-confirmed state. `draftAssignments`
   // layers in local edits and set actions until auto-save confirms them or the user reverts.
   const router = useRouter();
-  const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [snapshot, setSnapshot] = useState<SchedulePageSnapshot>(() => withEmptyScheduleAux(initialSnapshot));
+  const [isAuxLoaded, setIsAuxLoaded] = useState(false);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
     forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
       ? forcedScheduleId
@@ -942,6 +982,8 @@ export function MonthlyScheduler({
   const [isSavingPins, startPinSaveTransition] = useTransition();
   const isSaving = isSavingTransition || activeSaveCount > 0;
   const isScheduleLocked = isSaving || isUpdatingSetCompletion;
+  const isScheduleDetailsLoading = !isAuxLoaded;
+  const isScheduleActionLocked = isScheduleLocked || isScheduleDetailsLoading;
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const latestAutoSaveTokenRef = useRef(0);
   const baselineAssignmentsRef = useRef(baselineAssignments);
@@ -952,6 +994,18 @@ export function MonthlyScheduler({
   const scheduleBodyScrollRef = useRef<HTMLElement | null>(null);
   const scheduleGridRef = useRef<HTMLDivElement | null>(null);
   const [scheduleScrollProxyWidth, setScheduleScrollProxyWidth] = useState(0);
+  const scheduleAuxContextValue = useMemo<ScheduleAuxContextValue>(
+    () => ({
+      applyAuxSnapshot(auxSnapshot) {
+        setSnapshot((current) => ({
+          ...current,
+          ...auxSnapshot,
+        }));
+        setIsAuxLoaded(true);
+      },
+    }),
+    [],
+  );
   const currentMonth = snapshot.month;
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
@@ -1395,7 +1449,8 @@ export function MonthlyScheduler({
       : {};
     const mergedBaselineAssignments = applyAssignmentDelta(nextAssignments, locallyConfirmedDelta);
 
-    setSnapshot(initialSnapshot);
+    setSnapshot(withEmptyScheduleAux(initialSnapshot));
+    setIsAuxLoaded(false);
     setSelectedScheduleId((current) =>
       forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
         ? forcedScheduleId
@@ -1624,7 +1679,7 @@ export function MonthlyScheduler({
   }, []);
 
   function handleAssignmentChange(employeeId: string, date: string, selection: AssignmentSelection) {
-    if (isScheduleLocked) {
+    if (isScheduleActionLocked) {
       return;
     }
 
@@ -1689,7 +1744,7 @@ export function MonthlyScheduler({
     dayIndex: number,
     selection: AssignmentSelection,
   ) {
-    if (isScheduleLocked) {
+    if (isScheduleActionLocked) {
       return;
     }
 
@@ -1707,7 +1762,7 @@ export function MonthlyScheduler({
   }
 
   function handleDragHover(employeeId: string, dayIndex: number) {
-    if (isScheduleLocked) {
+    if (isScheduleActionLocked) {
       return;
     }
 
@@ -1733,7 +1788,7 @@ export function MonthlyScheduler({
   }
 
   function saveBulkAssignmentUpdates(updates: StoredAssignment[], successMessage: string) {
-    if (!canEdit || isScheduleLocked || updates.length === 0) {
+    if (!canEdit || isScheduleActionLocked || updates.length === 0) {
       return;
     }
 
@@ -1806,7 +1861,7 @@ export function MonthlyScheduler({
   }
 
   function completeSelectedSet(nextIsComplete: boolean) {
-    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+    if (isScheduleActionLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
       return;
     }
 
@@ -1898,7 +1953,7 @@ export function MonthlyScheduler({
   }
 
   function handleSetCompletion() {
-    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
+    if (isScheduleActionLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0) {
       return;
     }
 
@@ -1918,7 +1973,7 @@ export function MonthlyScheduler({
   }
 
   function handleAutofillSet() {
-    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
+    if (isScheduleActionLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
     }
 
@@ -1951,7 +2006,7 @@ export function MonthlyScheduler({
   }
 
   function handleCopySet() {
-    if (isScheduleLocked || !canManageSetBuilder || selectedSetDays.length === 0 || !isSelectedSetComplete) {
+    if (isScheduleActionLocked || !canManageSetBuilder || selectedSetDays.length === 0 || !isSelectedSetComplete) {
       return;
     }
 
@@ -1981,7 +2036,7 @@ export function MonthlyScheduler({
   }
 
   function handlePasteSet() {
-    if (isScheduleLocked || !canEdit || !canManageSetBuilder || !copiedSetTemplate || !canPasteSet) {
+    if (isScheduleActionLocked || !canEdit || !canManageSetBuilder || !copiedSetTemplate || !canPasteSet) {
       return;
     }
 
@@ -2024,7 +2079,7 @@ export function MonthlyScheduler({
   }
 
   function handleCopyColumn() {
-    if (isScheduleLocked || !canManageSetBuilder || !selectedColumnDate) {
+    if (isScheduleActionLocked || !canManageSetBuilder || !selectedColumnDate) {
       return;
     }
 
@@ -2051,7 +2106,7 @@ export function MonthlyScheduler({
   }
 
   function handlePasteColumn() {
-    if (isScheduleLocked || !canEdit || !canManageSetBuilder || !copiedColumnTemplate || !selectedColumnDate || !canPasteColumn) {
+    if (isScheduleActionLocked || !canEdit || !canManageSetBuilder || !copiedColumnTemplate || !selectedColumnDate || !canPasteColumn) {
       return;
     }
 
@@ -2086,7 +2141,7 @@ export function MonthlyScheduler({
   }
 
   function handleClearSet() {
-    if (isScheduleLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
+    if (isScheduleActionLocked || !canEdit || !canManageSetBuilder || selectedSetDays.length === 0 || isSelectedSetComplete) {
       return;
     }
 
@@ -2120,10 +2175,11 @@ export function MonthlyScheduler({
   }
 
   return (
-    <section
-      className="panel-frame"
-      style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
-    >
+    <ScheduleAuxContext.Provider value={scheduleAuxContextValue}>
+      <section
+        className="panel-frame"
+        style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
+      >
       <div className="panel-heading panel-heading--split">
         <div className="month-pager month-pager--title">
           <button
@@ -2191,7 +2247,8 @@ export function MonthlyScheduler({
         </label>
         <div className="toolbar-status-wrap">
           {isMonthLoading ? <p className="toolbar-status">Loading month...</p> : null}
-          {!isMonthLoading && statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+          {!isMonthLoading && isScheduleDetailsLoading ? <p className="toolbar-status">Loading schedule details...</p> : null}
+          {!isMonthLoading && !isScheduleDetailsLoading && statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
         </div>
       </div>
 
@@ -2204,7 +2261,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleCopyColumn}
-                  disabled={isScheduleLocked || !selectedColumnDate}
+                  disabled={isScheduleActionLocked || !selectedColumnDate}
                 >
                   Copy column
                 </button>
@@ -2212,7 +2269,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handlePasteColumn}
-                  disabled={isScheduleLocked || !canPasteColumn}
+                  disabled={isScheduleActionLocked || !canPasteColumn}
                 >
                   Paste column
                 </button>
@@ -2220,7 +2277,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleCopySet}
-                  disabled={isScheduleLocked || selectedSetDays.length === 0 || !isSelectedSetComplete}
+                  disabled={isScheduleActionLocked || selectedSetDays.length === 0 || !isSelectedSetComplete}
                 >
                   Copy set
                 </button>
@@ -2228,7 +2285,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handlePasteSet}
-                  disabled={isScheduleLocked || !canPasteSet}
+                  disabled={isScheduleActionLocked || !canPasteSet}
                 >
                   Paste set
                 </button>
@@ -2236,7 +2293,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleClearSet}
-                  disabled={isScheduleLocked || selectedSetDays.length === 0 || isSelectedSetComplete}
+                  disabled={isScheduleActionLocked || selectedSetDays.length === 0 || isSelectedSetComplete}
                 >
                   Clear set
                 </button>
@@ -2245,7 +2302,7 @@ export function MonthlyScheduler({
                   className="ghost-button"
                   onClick={handleAutofillSet}
                   disabled={
-                    isScheduleLocked ||
+                    isScheduleActionLocked ||
                     selectedSetDays.length === 0 ||
                     isSelectedSetComplete ||
                     fullyBlankSetWorkers.length === 0
@@ -2257,7 +2314,7 @@ export function MonthlyScheduler({
                   type="button"
                   className={`ghost-button ${isSelectedSetComplete ? "ghost-button--active" : ""}`}
                   onClick={handleSetCompletion}
-                  disabled={isScheduleLocked || selectedSetDays.length === 0}
+                  disabled={isScheduleActionLocked || selectedSetDays.length === 0}
                 >
                   {isUpdatingSetCompletion
                     ? isSelectedSetComplete
@@ -2296,7 +2353,7 @@ export function MonthlyScheduler({
                       selectedSetDays.length === 0 ? "set-builder-pill--disabled" : ""
                     } ${selectedCoverageCompetencyId === competency.id ? "set-builder-pill--active" : ""}`}
                     title={`${competency.label} · ${coverage?.filledCells ?? 0}/${coverage?.requiredCells ?? 0} cells filled in this set`}
-                    disabled={isScheduleLocked || selectedSetDays.length === 0}
+                    disabled={isScheduleActionLocked || selectedSetDays.length === 0}
                   >
                     <strong>{getCompactCode(competency.code)}</strong>
                     <span>{formatStaffCount(coverage?.assignedPeople ?? 0)}/{coverage?.requiredStaff ?? competency.requiredStaff}</span>
@@ -2345,7 +2402,7 @@ export function MonthlyScheduler({
                     } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
                     title={`${day.dayName} ${day.date}`}
                     onClick={
-                      canManageSetBuilder && !isScheduleLocked
+                      canManageSetBuilder && !isScheduleActionLocked
                         ? () => {
                             setSelectedSetAnchorDate(day.date);
                             setSelectedCoverageCompetencyId(null);
@@ -2393,12 +2450,12 @@ export function MonthlyScheduler({
                       highlightedMissingDates={highlightedMissingDates}
                       selectedCoverageCompetencyId={selectedCoverageCompetencyId}
                       selectedSetDays={selectedSetDays}
-                      canEdit={canEdit && !isScheduleLocked}
+                      canEdit={canEdit && !isScheduleActionLocked}
                       onPinToggle={handlePinToggle}
                       onCellPointerDown={handleCellPointerDown}
                       onDragHover={handleDragHover}
                       onCellClick={(cell) => {
-                        if (!canEdit || isScheduleLocked) {
+                        if (!canEdit || isScheduleActionLocked) {
                           return;
                         }
 
@@ -2453,7 +2510,7 @@ export function MonthlyScheduler({
         />
       ) : null}
 
-      {canEdit && !isScheduleLocked ? (
+      {canEdit && !isScheduleActionLocked ? (
         <ScheduleAssignmentModal
           selectedEmployeeName={editorEmployee?.name ?? null}
           selectedDate={editorCell?.date ?? null}
@@ -2484,7 +2541,9 @@ export function MonthlyScheduler({
           onClose={() => setEditorCell(null)}
         />
       ) : null}
-    </section>
+        {children}
+      </section>
+    </ScheduleAuxContext.Provider>
   );
 }
 

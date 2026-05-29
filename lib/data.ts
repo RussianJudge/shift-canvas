@@ -35,6 +35,8 @@ import type {
   ProductionUnit,
   Schedule,
   ScheduleOvertimePlaceholderRow,
+  ScheduleAuxSnapshot,
+  ScheduleGridSnapshot,
   SchedulePageSnapshot,
   SchedulerSnapshot,
   ShiftKind,
@@ -1676,10 +1678,32 @@ export async function getMetricsSnapshot(month: string, session?: AppSession | n
   });
 }
 
-export const getSchedulePageSnapshot = cache(async function getSchedulePageSnapshot(
+export const getScheduleGridSnapshot = cache(async function getScheduleGridSnapshot(
   month: string,
   session?: AppSession | null,
-): Promise<SchedulePageSnapshot> {
+): Promise<ScheduleGridSnapshot> {
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: true,
+    includeCompetencies: true,
+    includeTimeCodes: true,
+    includeSubSchedules: false,
+    includeAssignments: true,
+    assignmentWindow: "schedule-page",
+  });
+
+  return {
+    month: snapshot.month,
+    schedules: snapshot.schedules,
+    competencies: snapshot.competencies,
+    timeCodes: snapshot.timeCodes,
+    assignments: snapshot.assignments,
+  };
+});
+
+export const getScheduleAuxSnapshot = cache(async function getScheduleAuxSnapshot(
+  month: string,
+  session?: AppSession | null,
+): Promise<ScheduleAuxSnapshot> {
   const snapshot = await getScheduleReferenceSnapshot(month, session, {
     includeEmployeeCompetencies: true,
     includeCompetencies: true,
@@ -1696,11 +1720,6 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
   });
 
   return {
-    month: snapshot.month,
-    schedules: snapshot.schedules,
-    competencies: snapshot.competencies,
-    timeCodes: snapshot.timeCodes,
-    assignments: snapshot.assignments,
     projectedAssignments: snapshot.projectedAssignments,
     overtimeClaims: snapshot.overtimeClaims,
     completedSets: snapshot.completedSets,
@@ -1714,6 +1733,21 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
       manualOvertimePostings: snapshot.manualOvertimePostings,
       completedSets: snapshot.completedSets,
     }),
+  };
+});
+
+export const getSchedulePageSnapshot = cache(async function getSchedulePageSnapshot(
+  month: string,
+  session?: AppSession | null,
+): Promise<SchedulePageSnapshot> {
+  const [gridSnapshot, auxSnapshot] = await Promise.all([
+    getScheduleGridSnapshot(month, session),
+    getScheduleAuxSnapshot(month, session),
+  ]);
+
+  return {
+    ...gridSnapshot,
+    ...auxSnapshot,
   };
 });
 

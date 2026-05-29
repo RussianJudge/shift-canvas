@@ -1,12 +1,13 @@
 import { Suspense } from "react";
 
-import { MonthlyScheduler } from "@/components/monthly-scheduler";
+import { MonthlyScheduler, ScheduleAuxHydrator } from "@/components/monthly-scheduler";
 import { ScheduleRouteLoading } from "@/components/route-loading";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { canManageWorkspace, requireAppSession } from "@/lib/auth";
-import { getSchedulePageSnapshot, getUserSchedulePins } from "@/lib/data";
+import { getScheduleAuxSnapshot, getScheduleGridSnapshot, getUserSchedulePins } from "@/lib/data";
 import { scopeScheduleSnapshot } from "@/lib/role-scopes";
 import { getCurrentMonthKey } from "@/lib/scheduling";
+import type { ScheduleAuxSnapshot } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,18 @@ function isMonthKey(value: string | undefined) {
 }
 
 /** Streams the expensive month snapshot after the workspace shell is already visible. */
+async function ScheduleAuxStream({
+  snapshotPromise,
+  session,
+}: {
+  snapshotPromise: Promise<ScheduleAuxSnapshot>;
+  session: Awaited<ReturnType<typeof requireAppSession>>;
+}) {
+  const auxSnapshot = await snapshotPromise;
+
+  return <ScheduleAuxHydrator auxSnapshot={scopeScheduleSnapshot(auxSnapshot, session)} />;
+}
+
 async function ScheduleBoard({
   session,
   month,
@@ -24,8 +37,9 @@ async function ScheduleBoard({
   month: string;
   initialSelectedScheduleId: string | null;
 }) {
+  const auxSnapshotPromise = getScheduleAuxSnapshot(month, session);
   const [snapshot, initialPinnedEmployeesBySchedule] = await Promise.all([
-    getSchedulePageSnapshot(month, session),
+    getScheduleGridSnapshot(month, session),
     getUserSchedulePins(session.email),
   ]);
 
@@ -38,7 +52,11 @@ async function ScheduleBoard({
       canSwitchSchedule={true}
       forcedScheduleId={null}
       initialSelectedScheduleId={initialSelectedScheduleId}
-    />
+    >
+      <Suspense fallback={null}>
+        <ScheduleAuxStream snapshotPromise={auxSnapshotPromise} session={session} />
+      </Suspense>
+    </MonthlyScheduler>
   );
 }
 
