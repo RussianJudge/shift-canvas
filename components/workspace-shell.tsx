@@ -11,7 +11,7 @@ import type { AppNotification, AppSession } from "@/lib/types";
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
 const PREFETCH_DELAY_MS = 200;
-const PREFETCHABLE_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics"]);
+const PREFETCHABLE_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals"]);
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
 const prefetchedWorkspaceRoutes = new Set<string>();
 

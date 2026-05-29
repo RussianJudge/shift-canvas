@@ -6,7 +6,13 @@ import {
   type EmployeeNameParts,
 } from "@/lib/employee-names";
 import {
+  createSetRangeKey,
+  createSetRangeKeyFromEntry,
   getEmployeeMap,
+  getExtendedMonthDays,
+  getMonthDays,
+  getWorkedSetDays,
+  shiftForDate,
   shiftMonthKey,
 } from "@/lib/scheduling";
 import {
@@ -27,8 +33,10 @@ import type {
   OvertimeClaim,
   ProductionUnit,
   Schedule,
+  ScheduleOvertimePlaceholderRow,
   SchedulePageSnapshot,
   SchedulerSnapshot,
+  ShiftKind,
   StoredAssignment,
   SubSchedule,
   SubScheduleAssignment,
@@ -519,6 +527,43 @@ function getExtendedMonthBounds(month: string) {
   };
 }
 
+/**
+ * Schedule page reads should follow calendar best practice: load the visible
+ * range plus only the tiny boundary buffer required for cross-month worked sets.
+ */
+function getSchedulePageAssignmentBounds(month: string, schedules: Schedule[]) {
+  const bounds = getMonthBounds(month);
+  const monthDays = getMonthDays(month);
+  const extendedMonthDays = getExtendedMonthDays(month);
+
+  for (const schedule of schedules) {
+    const firstWorkedDay = monthDays.find((day) => shiftForDate(schedule, day.date) !== "OFF");
+    const lastWorkedDay = monthDays.findLast((day) => shiftForDate(schedule, day.date) !== "OFF");
+    const boundaryAnchors = [firstWorkedDay?.date, lastWorkedDay?.date].filter((date): date is string => Boolean(date));
+
+    for (const anchorDate of boundaryAnchors) {
+      const setDays = getWorkedSetDays(schedule, extendedMonthDays, anchorDate);
+
+      if (setDays.length === 0) {
+        continue;
+      }
+
+      const setStart = setDays[0].date;
+      const setEnd = setDays[setDays.length - 1].date;
+
+      if (setStart < bounds.monthStart) {
+        bounds.monthStart = setStart;
+      }
+
+      if (setEnd > bounds.monthEnd) {
+        bounds.monthEnd = setEnd;
+      }
+    }
+  }
+
+  return bounds;
+}
+
 function mapProductionUnits(rows: ProductionUnitRow[]) {
   return rows.map<ProductionUnit>((row) => ({
     id: row.id,
@@ -748,6 +793,251 @@ function mapCompletedSets(rows: CompletedSetRow[]) {
     siteId: row.site_id,
     businessAreaId: row.business_area_id,
   }));
+}
+
+function createAssignmentTargetCountKey(
+  scheduleId: string,
+  date: string,
+  targetKind: "competency" | "timeCode",
+  targetId: string,
+) {
+  return `${scheduleId}:${date}:${targetKind}:${targetId}`;
+}
+
+function incrementAssignmentTargetCount(counts: Map<string, number>, key: string) {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+function buildAssignmentTargetCounts(assignments: StoredAssignment[]) {
+  const counts = new Map<string, number>();
+
+  for (const assignment of assignments) {
+    if (assignment.competencyId) {
+      incrementAssignmentTargetCount(
+        counts,
+        createAssignmentTargetCountKey(assignment.scheduleId, assignment.date, "competency", assignment.competencyId),
+      );
+    }
+
+    if (assignment.timeCodeId) {
+      incrementAssignmentTargetCount(
+        counts,
+        createAssignmentTargetCountKey(assignment.scheduleId, assignment.date, "timeCode", assignment.timeCodeId),
+      );
+    }
+  }
+
+  return counts;
+}
+
+function getAssignmentTargetCount({
+  assignmentTargetCounts,
+  scheduleId,
+  date,
+  competencyId,
+  timeCodeId = null,
+}: {
+  assignmentTargetCounts: Map<string, number>;
+  scheduleId: string;
+  date: string;
+  competencyId: string | null;
+  timeCodeId?: string | null;
+}) {
+  if (competencyId) {
+    return assignmentTargetCounts.get(createAssignmentTargetCountKey(scheduleId, date, "competency", competencyId)) ?? 0;
+  }
+
+  if (timeCodeId) {
+    return assignmentTargetCounts.get(createAssignmentTargetCountKey(scheduleId, date, "timeCode", timeCodeId)) ?? 0;
+  }
+
+  return 0;
+}
+
+function getWorkedSetsForOvertimePlaceholders(
+  schedule: Schedule,
+  monthDays: Array<{ date: string }>,
+  extendedMonthDays: Array<{ date: string }>,
+) {
+  const sets: Array<{
+    dates: string[];
+    segments: Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>;
+  }> = [];
+  const processedKeys = new Set<string>();
+
+  for (const day of monthDays) {
+    if (shiftForDate(schedule, day.date) === "OFF") {
+      continue;
+    }
+
+    const setDays = getWorkedSetDays(schedule, extendedMonthDays, day.date);
+
+    if (setDays.length === 0) {
+      continue;
+    }
+
+    const setKey = `${setDays[0].date}:${setDays[setDays.length - 1].date}`;
+
+    if (processedKeys.has(setKey)) {
+      continue;
+    }
+
+    processedKeys.add(setKey);
+
+    sets.push({
+      dates: setDays.map((setDay) => setDay.date),
+      segments: setDays.reduce<Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>>(
+        (segments, setDay) => {
+          const shiftKind = shiftForDate(schedule, setDay.date);
+
+          if (shiftKind === "OFF") {
+            return segments;
+          }
+
+          const currentSegment = segments[segments.length - 1];
+
+          if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
+            segments.push({
+              shiftKind,
+              dates: [setDay.date],
+            });
+            return segments;
+          }
+
+          currentSegment.dates.push(setDay.date);
+          return segments;
+        },
+        [],
+      ),
+    });
+  }
+
+  return sets;
+}
+
+function buildScheduleOvertimePlaceholderRows({
+  month,
+  schedules,
+  competencies,
+  timeCodes,
+  assignments,
+  overtimeClaims,
+  manualOvertimePostings,
+  completedSets,
+}: Pick<
+  SchedulerSnapshot,
+  | "month"
+  | "schedules"
+  | "competencies"
+  | "timeCodes"
+  | "assignments"
+  | "overtimeClaims"
+  | "manualOvertimePostings"
+  | "completedSets"
+>): ScheduleOvertimePlaceholderRow[] {
+  const rows: ScheduleOvertimePlaceholderRow[] = [];
+  const competencyMap = new Map(competencies.map((competency) => [competency.id, competency]));
+  const timeCodeMap = new Map(timeCodes.map((timeCode) => [timeCode.id, timeCode]));
+  const monthDays = getMonthDays(month);
+  const extendedMonthDays = getExtendedMonthDays(month);
+  const completedSetRangeKeys = new Set(completedSets.map(createSetRangeKeyFromEntry));
+  const assignmentTargetCounts = buildAssignmentTargetCounts(assignments);
+  const claimsByManualPostingId = overtimeClaims.reduce<Record<string, Set<string>>>((map, claim) => {
+    if (!claim.manualPostingId) {
+      return map;
+    }
+
+    map[claim.manualPostingId] ??= new Set<string>();
+    map[claim.manualPostingId].add(claim.employeeId);
+    return map;
+  }, {});
+
+  for (const schedule of schedules) {
+    const scheduleCompetencies = schedule.competencyIds
+      .map((competencyId) => competencyMap.get(competencyId))
+      .filter((competency): competency is Competency => Boolean(competency));
+
+    for (const workedSet of getWorkedSetsForOvertimePlaceholders(schedule, monthDays, extendedMonthDays)) {
+      const setKey = createSetRangeKey(
+        schedule.id,
+        workedSet.dates[0],
+        workedSet.dates[workedSet.dates.length - 1],
+      );
+
+      if (!completedSetRangeKeys.has(setKey)) {
+        continue;
+      }
+
+      for (const segment of workedSet.segments) {
+        if (segment.dates[0]?.slice(0, 7) !== month) {
+          continue;
+        }
+
+        for (const competency of scheduleCompetencies) {
+          const missingSlotsByDate = segment.dates.map((date) => {
+            const filledCount = getAssignmentTargetCount({
+              assignmentTargetCounts,
+              scheduleId: schedule.id,
+              date,
+              competencyId: competency.id,
+            });
+
+            return Math.max(0, competency.requiredStaff - filledCount);
+          });
+          const maxMissing = Math.max(0, ...missingSlotsByDate);
+
+          for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
+            const postingDates = segment.dates.filter((_, index) => missingSlotsByDate[index] > slotIndex);
+
+            if (postingDates.length === 0) {
+              continue;
+            }
+
+            rows.push({
+              rowId: `ot-open:auto:${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
+              scheduleId: schedule.id,
+              dates: postingDates,
+              competencyId: competency.id,
+              timeCodeId: null,
+              shiftKind: segment.shiftKind,
+              label: competency.code,
+              detail: `${competency.code} overtime posting`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  for (const posting of manualOvertimePostings) {
+    if (!posting.scheduleId || posting.dates.length === 0) {
+      continue;
+    }
+
+    const competency = posting.competencyId ? competencyMap.get(posting.competencyId) : null;
+    const timeCode = posting.timeCodeId ? timeCodeMap.get(posting.timeCodeId) : null;
+
+    if (!competency && !timeCode) {
+      continue;
+    }
+
+    const openSlots = Math.max(0, posting.slotCount - (claimsByManualPostingId[posting.id]?.size ?? 0));
+
+    for (let slotIndex = 0; slotIndex < openSlots; slotIndex += 1) {
+      rows.push({
+        rowId: `ot-open:manual:${posting.id}:${slotIndex}`,
+        scheduleId: posting.scheduleId,
+        dates: posting.dates,
+        competencyId: posting.competencyId,
+        timeCodeId: posting.timeCodeId ?? null,
+        shiftKind: posting.shiftKind,
+        label: competency?.code ?? timeCode?.code ?? "Overtime",
+        detail: `${competency?.code ?? timeCode?.code ?? "Overtime"} posting`,
+      });
+    }
+  }
+
+  return rows;
 }
 
 /**
@@ -1134,7 +1424,7 @@ type ScheduleReferenceSnapshotOptions = {
   includeManualOvertimePostings?: boolean;
   includeCompletedSets?: boolean;
   includeProjectedAssignments?: boolean;
-  assignmentWindow?: "month" | "extended";
+  assignmentWindow?: "month" | "extended" | "schedule-page";
   completedSetWindow?: "month" | "extended";
 };
 
@@ -1177,8 +1467,12 @@ export async function getScheduleReferenceSnapshot(
     return emptySnapshot(month);
   }
 
-  const { monthStart, monthEnd, windowMonths } =
-    assignmentWindow === "extended" ? getExtendedMonthBounds(month) : { ...getMonthBounds(month), windowMonths: [month] };
+  const { monthStart, monthEnd } =
+    assignmentWindow === "extended"
+      ? getExtendedMonthBounds(month)
+      : assignmentWindow === "schedule-page"
+        ? getSchedulePageAssignmentBounds(month, scheduleReference.schedules)
+        : getMonthBounds(month);
   const completedMonths =
     completedSetWindow === "extended" ? getExtendedMonthBounds(month).windowMonths : [month];
   const visibleEmployeeIds = scheduleReference.employeeRows.map((employee) => employee.id);
@@ -1380,7 +1674,7 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     includeOvertimeClaims: true,
     includeManualOvertimePostings: true,
     includeCompletedSets: true,
-    assignmentWindow: "extended",
+    assignmentWindow: "schedule-page",
     completedSetWindow: "extended",
   });
 
@@ -1392,8 +1686,17 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     assignments: snapshot.assignments,
     projectedAssignments: snapshot.projectedAssignments,
     overtimeClaims: snapshot.overtimeClaims,
-    manualOvertimePostings: snapshot.manualOvertimePostings,
     completedSets: snapshot.completedSets,
+    overtimePlaceholderRows: buildScheduleOvertimePlaceholderRows({
+      month: snapshot.month,
+      schedules: snapshot.schedules,
+      competencies: snapshot.competencies,
+      timeCodes: snapshot.timeCodes,
+      assignments: snapshot.assignments,
+      overtimeClaims: snapshot.overtimeClaims,
+      manualOvertimePostings: snapshot.manualOvertimePostings,
+      completedSets: snapshot.completedSets,
+    }),
   };
 });
 

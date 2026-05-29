@@ -206,6 +206,17 @@ export interface SchedulerSnapshot {
   subScheduleAssignments: SubScheduleAssignment[];
 }
 
+export interface ScheduleOvertimePlaceholderRow {
+  rowId: string;
+  scheduleId: string;
+  dates: string[];
+  competencyId: string | null;
+  timeCodeId: string | null;
+  shiftKind: Exclude<ShiftKind, "OFF">;
+  label: string;
+  detail: string;
+}
+
 export interface SchedulePageSnapshot
   extends Pick<
     SchedulerSnapshot,
@@ -216,9 +227,10 @@ export interface SchedulePageSnapshot
     | "assignments"
     | "projectedAssignments"
     | "overtimeClaims"
-    | "manualOvertimePostings"
     | "completedSets"
-  > {}
+  > {
+  overtimePlaceholderRows: ScheduleOvertimePlaceholderRow[];
+}
 
 export interface MutualsSnapshot {
   month: string;

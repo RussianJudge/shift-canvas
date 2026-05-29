@@ -16,8 +16,6 @@ import {
 import {
   buildAssignmentIndex,
   createAssignmentKey,
-  createSetRangeKey,
-  createSetRangeKeyFromEntry,
   formatMonthLabel,
   getCompetencyMap,
   getCompletedSetDatesForMonth,
@@ -124,93 +122,6 @@ const ScheduleAssignmentModal = dynamic(
     import("@/components/schedule-assignment-modal").then((module) => module.ScheduleAssignmentModal),
   { ssr: false },
 );
-
-function countScheduleAssignmentsForTarget({
-  assignments,
-  scheduleId,
-  date,
-  competencyId,
-  timeCodeId = null,
-}: {
-  assignments: SchedulePageSnapshot["assignments"];
-  scheduleId: string;
-  date: string;
-  competencyId: string | null;
-  timeCodeId?: string | null;
-}) {
-  return assignments.reduce(
-    (count, assignment) =>
-      count +
-      Number(
-        assignment.scheduleId === scheduleId &&
-          assignment.date === date &&
-          ((competencyId && assignment.competencyId === competencyId) ||
-            (timeCodeId && assignment.timeCodeId === timeCodeId)),
-      ),
-    0,
-  );
-}
-
-function getWorkedSetsForOvertimePlaceholders(
-  schedule: Schedule,
-  monthDays: Array<{ date: string }>,
-  extendedMonthDays: Array<{ date: string }>,
-) {
-  const sets: Array<{
-    dates: string[];
-    segments: Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>;
-  }> = [];
-  const processedKeys = new Set<string>();
-
-  for (const day of monthDays) {
-    if (shiftForDate(schedule, day.date) === "OFF") {
-      continue;
-    }
-
-    const setDays = getWorkedSetDays(schedule, extendedMonthDays, day.date);
-
-    if (setDays.length === 0) {
-      continue;
-    }
-
-    const setKey = `${setDays[0].date}:${setDays[setDays.length - 1].date}`;
-
-    if (processedKeys.has(setKey)) {
-      continue;
-    }
-
-    processedKeys.add(setKey);
-
-    sets.push({
-      dates: setDays.map((setDay) => setDay.date),
-      segments: setDays.reduce<Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>>(
-        (segments, setDay) => {
-          const shiftKind = shiftForDate(schedule, setDay.date);
-
-          if (shiftKind === "OFF") {
-            return segments;
-          }
-
-          const currentSegment = segments[segments.length - 1];
-
-          if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
-            segments.push({
-              shiftKind,
-              dates: [setDay.date],
-            });
-            return segments;
-          }
-
-          currentSegment.dates.push(setDay.date);
-          return segments;
-        },
-        [],
-      ),
-    });
-  }
-
-  return sets;
-}
 
 function createOvertimePlaceholderRow({
   rowId,
@@ -430,106 +341,21 @@ function buildDisplayEmployeesForSchedule({
       }, {}),
   ).sort((left, right) => left.name.localeCompare(right.name));
 
-  const competencyMap = getCompetencyMap(snapshot.competencies);
-  const timeCodeMap = getTimeCodeMap(snapshot.timeCodes);
-  const monthDays = getMonthDays(currentMonth);
-  const extendedMonthDays = getExtendedMonthDays(currentMonth);
-  const completedSetRangeKeys = new Set(snapshot.completedSets.map(createSetRangeKeyFromEntry));
-  const overtimePlaceholderRows: DisplayEmployee[] = [];
-
-  for (const workedSet of getWorkedSetsForOvertimePlaceholders(schedule, monthDays, extendedMonthDays)) {
-    const setKey = createSetRangeKey(
-      schedule.id,
-      workedSet.dates[0],
-      workedSet.dates[workedSet.dates.length - 1],
+  const overtimePlaceholderRows = snapshot.overtimePlaceholderRows
+    .filter((row) => row.scheduleId === schedule.id)
+    .map((row) =>
+      createOvertimePlaceholderRow({
+        rowId: row.rowId,
+        dates: row.dates,
+        selection: {
+          competencyId: row.competencyId,
+          timeCodeId: row.timeCodeId,
+          notes: null,
+        },
+        shiftKind: row.shiftKind,
+        title: row.detail,
+      }),
     );
-
-    if (!completedSetRangeKeys.has(setKey)) {
-      continue;
-    }
-
-    for (const segment of workedSet.segments) {
-      if (segment.dates[0]?.slice(0, 7) !== currentMonth) {
-        continue;
-      }
-
-      const scheduleCompetencies = snapshot.competencies.filter((competency) =>
-        schedule.competencyIds.includes(competency.id),
-      );
-
-      for (const competency of scheduleCompetencies) {
-        const missingSlotsByDate = segment.dates.map((date) => {
-          const filledCount = countScheduleAssignmentsForTarget({
-            assignments: snapshot.assignments,
-            scheduleId: schedule.id,
-            date,
-            competencyId: competency.id,
-          });
-
-          return Math.max(0, competency.requiredStaff - filledCount);
-        });
-        const maxMissing = Math.max(0, ...missingSlotsByDate);
-
-        for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
-          const postingDates = segment.dates.filter((_, index) => missingSlotsByDate[index] > slotIndex);
-
-          if (postingDates.length === 0) {
-            continue;
-          }
-
-          overtimePlaceholderRows.push(
-            createOvertimePlaceholderRow({
-              rowId: `ot-open:auto:${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
-              dates: postingDates,
-              selection: {
-                competencyId: competency.id,
-                timeCodeId: null,
-                notes: null,
-              },
-              shiftKind: segment.shiftKind,
-              title: `${competency.code} overtime posting`,
-            }),
-          );
-        }
-      }
-    }
-  }
-
-  for (const posting of snapshot.manualOvertimePostings) {
-    if (posting.scheduleId !== schedule.id || posting.dates.length === 0) {
-      continue;
-    }
-
-    const competency = posting.competencyId ? competencyMap[posting.competencyId] : null;
-    const timeCode = posting.timeCodeId ? timeCodeMap[posting.timeCodeId] : null;
-
-    if (!competency && !timeCode) {
-      continue;
-    }
-
-    const claimedEmployeeIds = new Set(
-      snapshot.overtimeClaims
-        .filter((claim) => claim.manualPostingId === posting.id)
-        .map((claim) => claim.employeeId),
-    );
-    const openSlots = Math.max(0, posting.slotCount - claimedEmployeeIds.size);
-
-    for (let slotIndex = 0; slotIndex < openSlots; slotIndex += 1) {
-      overtimePlaceholderRows.push(
-        createOvertimePlaceholderRow({
-          rowId: `ot-open:manual:${posting.id}:${slotIndex}`,
-          dates: posting.dates,
-          selection: {
-            competencyId: posting.competencyId,
-            timeCodeId: posting.timeCodeId ?? null,
-            notes: null,
-          },
-          shiftKind: posting.shiftKind,
-          title: `${competency?.code ?? timeCode?.code ?? "Overtime"} posting`,
-        }),
-      );
-    }
-  }
 
   const rows = [...baseRows, ...borrowedRows, ...mutualRows, ...overtimePlaceholderRows];
   const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
