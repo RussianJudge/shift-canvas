@@ -19,13 +19,15 @@ function isMonthKey(value: string | undefined) {
 async function ScheduleAuxStream({
   snapshotPromise,
   session,
+  auxSnapshotKey,
 }: {
   snapshotPromise: Promise<ScheduleAuxSnapshot>;
   session: Awaited<ReturnType<typeof requireAppSession>>;
+  auxSnapshotKey: string;
 }) {
   const auxSnapshot = await snapshotPromise;
 
-  return <ScheduleAuxHydrator auxSnapshot={scopeScheduleSnapshot(auxSnapshot, session)} />;
+  return <ScheduleAuxHydrator auxSnapshot={scopeScheduleSnapshot(auxSnapshot, session)} auxSnapshotKey={auxSnapshotKey} />;
 }
 
 async function ScheduleBoard({
@@ -38,6 +40,7 @@ async function ScheduleBoard({
   initialSelectedScheduleId: string | null;
 }) {
   const auxSnapshotPromise = getScheduleAuxSnapshot(month, session);
+  const auxSnapshotKey = `${month}:${Date.now()}`;
   const [snapshot, initialPinnedEmployeesBySchedule] = await Promise.all([
     getScheduleGridSnapshot(month, session),
     getUserSchedulePins(session.email),
@@ -52,9 +55,10 @@ async function ScheduleBoard({
       canSwitchSchedule={true}
       forcedScheduleId={null}
       initialSelectedScheduleId={initialSelectedScheduleId}
+      auxSnapshotKey={auxSnapshotKey}
     >
       <Suspense fallback={null}>
-        <ScheduleAuxStream snapshotPromise={auxSnapshotPromise} session={session} />
+        <ScheduleAuxStream snapshotPromise={auxSnapshotPromise} session={session} auxSnapshotKey={auxSnapshotKey} />
       </Suspense>
     </MonthlyScheduler>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import type { MouseEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -70,7 +71,7 @@ type NavLinkProps = {
   icon: React.ReactNode;
   onIntentPrefetchStart: (href: string | null) => void;
   onIntentPrefetchCancel: (href: string | null) => void;
-  onNavigate: () => void;
+  onNavigate: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
   prefetchHref: string | null;
 };
 
@@ -99,7 +100,7 @@ function NavLink({
       onFocus={() => onIntentPrefetchStart(prefetchHref)}
       onMouseLeave={() => onIntentPrefetchCancel(prefetchHref)}
       onBlur={() => onIntentPrefetchCancel(prefetchHref)}
-      onClick={onNavigate}
+      onClick={(event) => onNavigate(event, href)}
     >
       <span className="workspace-nav-icon">{icon}</span>
       <strong>{label}</strong>
@@ -497,12 +498,15 @@ export function WorkspaceShell({
     delete pendingTimers[href];
   };
 
-  const handleNavLinkNavigate = () => {
+  const handleNavLinkNavigate = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
     if (!isMobileSidebarMode) {
       return;
     }
 
+    event.preventDefault();
     setIsMobileSidebarOpen(false);
+    setIsNotificationsOpen(false);
+    router.push(href);
   };
 
   return (

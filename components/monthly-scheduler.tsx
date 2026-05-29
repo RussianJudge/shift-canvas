@@ -2,8 +2,6 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import {
-  createContext,
-  useContext,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -83,11 +81,13 @@ type DragRange = {
   currentIndex: number;
   selection: AssignmentSelection;
 };
-type ScheduleAuxContextValue = {
-  applyAuxSnapshot: (auxSnapshot: ScheduleAuxSnapshot) => void;
+type ScheduleAuxHydrationPayload = {
+  key: string;
+  snapshot: ScheduleAuxSnapshot;
 };
 
-const ScheduleAuxContext = createContext<ScheduleAuxContextValue | null>(null);
+const SCHEDULE_AUX_HYDRATED_EVENT = "shift-canvas:schedule-aux-hydrated";
+const scheduleAuxSnapshotCache = new Map<string, ScheduleAuxSnapshot>();
 
 function withEmptyScheduleAux(snapshot: ScheduleGridSnapshot): SchedulePageSnapshot {
   return {
@@ -99,12 +99,24 @@ function withEmptyScheduleAux(snapshot: ScheduleGridSnapshot): SchedulePageSnaps
   };
 }
 
-export function ScheduleAuxHydrator({ auxSnapshot }: { auxSnapshot: ScheduleAuxSnapshot }) {
-  const context = useContext(ScheduleAuxContext);
-
+export function ScheduleAuxHydrator({
+  auxSnapshot,
+  auxSnapshotKey,
+}: {
+  auxSnapshot: ScheduleAuxSnapshot;
+  auxSnapshotKey: string;
+}) {
   useEffect(() => {
-    context?.applyAuxSnapshot(auxSnapshot);
-  }, [auxSnapshot, context]);
+    scheduleAuxSnapshotCache.set(auxSnapshotKey, auxSnapshot);
+    window.dispatchEvent(
+      new CustomEvent<ScheduleAuxHydrationPayload>(SCHEDULE_AUX_HYDRATED_EVENT, {
+        detail: {
+          key: auxSnapshotKey,
+          snapshot: auxSnapshot,
+        },
+      }),
+    );
+  }, [auxSnapshot, auxSnapshotKey]);
 
   return null;
 }
@@ -932,6 +944,7 @@ export function MonthlyScheduler({
   canSwitchSchedule,
   forcedScheduleId,
   initialSelectedScheduleId,
+  auxSnapshotKey,
   children,
 }: {
   initialSnapshot: ScheduleGridSnapshot;
@@ -941,6 +954,7 @@ export function MonthlyScheduler({
   canSwitchSchedule: boolean;
   forcedScheduleId: string | null;
   initialSelectedScheduleId?: string | null;
+  auxSnapshotKey: string;
   children?: ReactNode;
 }) {
   // `baselineAssignments` tracks the last server-confirmed state. `draftAssignments`
@@ -994,18 +1008,6 @@ export function MonthlyScheduler({
   const scheduleBodyScrollRef = useRef<HTMLElement | null>(null);
   const scheduleGridRef = useRef<HTMLDivElement | null>(null);
   const [scheduleScrollProxyWidth, setScheduleScrollProxyWidth] = useState(0);
-  const scheduleAuxContextValue = useMemo<ScheduleAuxContextValue>(
-    () => ({
-      applyAuxSnapshot(auxSnapshot) {
-        setSnapshot((current) => ({
-          ...current,
-          ...auxSnapshot,
-        }));
-        setIsAuxLoaded(true);
-      },
-    }),
-    [],
-  );
   const currentMonth = snapshot.month;
 
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
@@ -1437,6 +1439,42 @@ export function MonthlyScheduler({
     }
   }
 
+  function applyAuxSnapshot(auxSnapshot: ScheduleAuxSnapshot) {
+    setSnapshot((current) => {
+      if (current.month !== auxSnapshot.month) {
+        return current;
+      }
+
+      return {
+        ...current,
+        ...auxSnapshot,
+      };
+    });
+    setIsAuxLoaded(true);
+  }
+
+  useEffect(() => {
+    const cachedSnapshot = scheduleAuxSnapshotCache.get(auxSnapshotKey);
+
+    if (cachedSnapshot) {
+      applyAuxSnapshot(cachedSnapshot);
+    }
+
+    function handleAuxSnapshotHydrated(event: Event) {
+      const payload = (event as CustomEvent<ScheduleAuxHydrationPayload>).detail;
+
+      if (payload?.key !== auxSnapshotKey) {
+        return;
+      }
+
+      applyAuxSnapshot(payload.snapshot);
+    }
+
+    window.addEventListener(SCHEDULE_AUX_HYDRATED_EVENT, handleAuxSnapshotHydrated);
+
+    return () => window.removeEventListener(SCHEDULE_AUX_HYDRATED_EVENT, handleAuxSnapshotHydrated);
+  }, [auxSnapshotKey]);
+
   useEffect(() => {
     const nextAssignments = buildAssignmentIndex(initialSnapshot.assignments);
     const currentBaselineAssignments = baselineAssignmentsRef.current;
@@ -1451,6 +1489,12 @@ export function MonthlyScheduler({
 
     setSnapshot(withEmptyScheduleAux(initialSnapshot));
     setIsAuxLoaded(false);
+    const cachedSnapshot = scheduleAuxSnapshotCache.get(auxSnapshotKey);
+
+    if (cachedSnapshot) {
+      applyAuxSnapshot(cachedSnapshot);
+    }
+
     setSelectedScheduleId((current) =>
       forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
         ? forcedScheduleId
@@ -1477,7 +1521,7 @@ export function MonthlyScheduler({
      * visibility/completion effects below decide whether that cell is still
      * valid in the refreshed month data.
      */
-  }, [forcedScheduleId, initialSnapshot]);
+  }, [auxSnapshotKey, forcedScheduleId, initialSnapshot]);
 
   useEffect(() => {
     if (!selectedCell) {
@@ -2175,11 +2219,10 @@ export function MonthlyScheduler({
   }
 
   return (
-    <ScheduleAuxContext.Provider value={scheduleAuxContextValue}>
-      <section
-        className="panel-frame"
-        style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
-      >
+    <section
+      className="panel-frame"
+      style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
+    >
       <div className="panel-heading panel-heading--split">
         <div className="month-pager month-pager--title">
           <button
@@ -2552,9 +2595,8 @@ export function MonthlyScheduler({
           onClose={() => setEditorCell(null)}
         />
       ) : null}
-        {children}
-      </section>
-    </ScheduleAuxContext.Provider>
+      {children}
+    </section>
   );
 }
 

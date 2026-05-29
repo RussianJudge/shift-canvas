@@ -1720,6 +1720,7 @@ export const getScheduleAuxSnapshot = cache(async function getScheduleAuxSnapsho
   });
 
   return {
+    month: snapshot.month,
     projectedAssignments: snapshot.projectedAssignments,
     overtimeClaims: snapshot.overtimeClaims,
     completedSets: snapshot.completedSets,

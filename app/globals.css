@@ -21,6 +21,7 @@ html {
     radial-gradient(circle at top left, rgba(249, 115, 22, 0.2), transparent 30%),
     radial-gradient(circle at top right, rgba(37, 99, 235, 0.16), transparent 28%),
     linear-gradient(180deg, #f6f1e8 0%, #efe5d5 100%);
+  min-height: 100%;
 }
 
 body {
@@ -41,6 +42,11 @@ select {
 }
 
 .shell {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100svh;
   height: 100dvh;
   overflow: hidden;
   padding: 0;
@@ -48,8 +54,8 @@ select {
 
 .workspace-frame {
   max-width: 100%;
-  height: 100dvh;
-  min-height: 100dvh;
+  height: 100%;
+  min-height: 100%;
   border: 0;
   border-radius: 0;
   background:
@@ -74,7 +80,7 @@ select {
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(255, 252, 248, 0.95), rgba(245, 236, 223, 0.85));
-  height: 100dvh;
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -301,14 +307,14 @@ select {
 
 .workspace-nav {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.3rem;
 }
 
 .workspace-nav-link {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.9rem 1rem;
+  gap: 0.6rem;
+  padding: 0.62rem 0.8rem;
   border-radius: 1rem;
   color: inherit;
   text-decoration: none;
@@ -346,7 +352,7 @@ button.workspace-nav-link {
 }
 
 .workspace-nav-link strong {
-  font-size: 0.98rem;
+  font-size: 0.92rem;
 }
 
 .workspace-nav-link--active {
@@ -516,7 +522,7 @@ button.workspace-nav-link {
 }
 
 .workspace-content {
-  height: 100dvh;
+  height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 1.25rem;
@@ -3495,8 +3501,8 @@ button.workspace-nav-link {
   }
 
   .workspace-frame {
-    height: 100dvh;
-    min-height: 100dvh;
+    height: 100%;
+    min-height: 100%;
     border-radius: 0;
     grid-template-columns: 13rem minmax(0, 1fr);
   }
@@ -3513,7 +3519,7 @@ button.workspace-nav-link {
     border-right: 1px solid var(--line);
     border-bottom: 0;
     gap: 1.1rem;
-    height: 100dvh;
+    height: 100%;
     min-height: 0;
   }
 
@@ -4063,8 +4069,8 @@ button.workspace-nav-link {
 @media (max-width: 600px) {
   .workspace-frame,
   .workspace-frame--collapsed {
-    height: 100dvh;
-    min-height: 100dvh;
+    height: 100%;
+    min-height: 100%;
     grid-template-columns: minmax(0, 1fr);
     position: relative;
   }
@@ -4091,7 +4097,7 @@ button.workspace-nav-link {
     inset: 0 auto 0 0;
     z-index: 30;
     width: min(18rem, calc(100vw - 1.5rem));
-    height: 100dvh;
+    height: 100%;
     min-height: 0;
     border-right: 1px solid var(--line);
     border-bottom: 0;
@@ -4121,13 +4127,13 @@ button.workspace-nav-link {
     grid-auto-columns: auto;
     overflow: visible;
     padding-bottom: 0;
-    gap: 0.4rem;
+    gap: 0.25rem;
   }
 
   .workspace-nav-link {
     justify-content: flex-start;
-    min-height: 2.6rem;
-    padding: 0.75rem 0.85rem;
+    min-height: 2.25rem;
+    padding: 0.55rem 0.7rem;
   }
 
   .metrics-section__title {

@@ -230,6 +230,7 @@ export interface ScheduleGridSnapshot
 export interface ScheduleAuxSnapshot
   extends Pick<
     SchedulerSnapshot,
+    | "month"
     | "projectedAssignments"
     | "overtimeClaims"
     | "completedSets"
