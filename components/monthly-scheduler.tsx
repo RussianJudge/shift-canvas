@@ -2125,16 +2125,26 @@ export function MonthlyScheduler({
       style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
     >
       <div className="panel-heading panel-heading--split">
-        <h1 className="panel-title">{formatMonthDateRange(monthDays)}</h1>
+        <div className="month-pager month-pager--title">
+          <button
+            type="button"
+            className="ghost-button month-pager__button"
+            onClick={() => handleMonthChange(-1)}
+            aria-label="Previous month"
+          >
+            ‹
+          </button>
+          <h1 className="panel-title month-pager__label">{formatMonthDateRange(monthDays)}</h1>
+          <button
+            type="button"
+            className="ghost-button month-pager__button"
+            onClick={() => handleMonthChange(1)}
+            aria-label="Next month"
+          >
+            ›
+          </button>
+        </div>
         <div className="planner-actions">
-          <div className="planner-actions__row planner-actions__row--nav">
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
-              Previous month
-            </button>
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
-              Next month
-            </button>
-          </div>
           <div className="planner-actions__row planner-actions__row--save">
             <button type="button" className="ghost-button" onClick={handlePrintSchedules}>
               Print schedules

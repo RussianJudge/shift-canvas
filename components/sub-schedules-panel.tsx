@@ -735,18 +735,24 @@ export function SubSchedulesPanel({
     <section className="panel-frame">
       <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Sub-Schedules</h1>
-        <div className="metrics-month-nav">
-          <div className="metrics-month-nav__current">
-            <strong>{formatMonthLabel(snapshot.month)}</strong>
-          </div>
-          <div className="metrics-month-nav__actions">
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
-              Prev month
-            </button>
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
-              Next month
-            </button>
-          </div>
+        <div className="metrics-month-nav month-pager">
+          <button
+            type="button"
+            className="ghost-button month-pager__button"
+            onClick={() => handleMonthChange(-1)}
+            aria-label="Previous month"
+          >
+            ‹
+          </button>
+          <strong className="month-pager__label">{formatMonthLabel(snapshot.month)}</strong>
+          <button
+            type="button"
+            className="ghost-button month-pager__button"
+            onClick={() => handleMonthChange(1)}
+            aria-label="Next month"
+          >
+            ›
+          </button>
         </div>
       </div>
 

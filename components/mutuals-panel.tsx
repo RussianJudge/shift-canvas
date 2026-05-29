@@ -651,26 +651,26 @@ export function MutualsPanel({
         <h1 className="panel-title">Mutuals</h1>
         <div className="field field--static mutuals-topbar__year">
           <span>Year</span>
-          <div className="mutuals-month-nav">
-            <strong>{formatYearLabel(viewMonth)}</strong>
-            <div className="mutuals-month-nav__buttons">
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, -12))}
-                disabled={isMonthLoading}
-              >
-                Prev year
-              </button>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, 12))}
-                disabled={isMonthLoading}
-              >
-                Next year
-              </button>
-            </div>
+          <div className="mutuals-month-nav month-pager">
+            <button
+              type="button"
+              className="ghost-button month-pager__button"
+              onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, -12))}
+              disabled={isMonthLoading}
+              aria-label="Previous year"
+            >
+              ‹
+            </button>
+            <strong className="month-pager__label">{formatYearLabel(viewMonth)}</strong>
+            <button
+              type="button"
+              className="ghost-button month-pager__button"
+              onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, 12))}
+              disabled={isMonthLoading}
+              aria-label="Next year"
+            >
+              ›
+            </button>
           </div>
         </div>
       </div>

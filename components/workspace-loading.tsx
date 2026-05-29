@@ -33,14 +33,10 @@ export function LoadingPanelFrame({
 
 export function LoadingMonthNav({ monthLabel }: { monthLabel: string }) {
   return (
-    <div className="metrics-month-nav" aria-hidden="true">
-      <div className="metrics-month-nav__current">
-        <strong>{monthLabel}</strong>
-      </div>
-      <div className="metrics-month-nav__actions">
-        <span className="loading-block loading-block--button" />
-        <span className="loading-block loading-block--button" />
-      </div>
+    <div className="metrics-month-nav month-pager" aria-hidden="true">
+      <span className="loading-block loading-block--button month-pager__button" />
+      <strong className="month-pager__label">{monthLabel}</strong>
+      <span className="loading-block loading-block--button month-pager__button" />
     </div>
   );
 }

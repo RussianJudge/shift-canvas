@@ -604,6 +604,12 @@ function ManualOvertimePostingModal({
       : null;
   const targetMode: OvertimeTargetMode = selectedSubSchedule ? "sub" : "main";
   const availableSubSchedules = snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived);
+  const selectedMonthIndex = availableMonths.indexOf(selectedMonth);
+  const previousMonth = selectedMonthIndex > 0 ? availableMonths[selectedMonthIndex - 1] : null;
+  const nextMonth =
+    selectedMonthIndex >= 0 && selectedMonthIndex < availableMonths.length - 1
+      ? availableMonths[selectedMonthIndex + 1]
+      : null;
   const availableAssignments =
     targetMode === "main"
       ? [
@@ -669,13 +675,38 @@ function ManualOvertimePostingModal({
         <div className="metrics-transfer-grid">
           <label className="field">
             <span>Month</span>
-            <select value={selectedMonth} onChange={(event) => onMonthChange(event.target.value)}>
-              {availableMonths.map((month) => (
-                <option key={month} value={month}>
-                  {formatMonthLabel(month)}
-                </option>
-              ))}
-            </select>
+            <div className="month-pager month-pager--field">
+              <button
+                type="button"
+                className="ghost-button month-pager__button"
+                onClick={() => previousMonth && onMonthChange(previousMonth)}
+                disabled={!previousMonth}
+                aria-label="Previous month"
+              >
+                ‹
+              </button>
+              <select
+                className="month-pager__select"
+                value={selectedMonth}
+                onChange={(event) => onMonthChange(event.target.value)}
+                aria-label="Posting month"
+              >
+                {availableMonths.map((month) => (
+                  <option key={month} value={month}>
+                    {formatMonthLabel(month)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="ghost-button month-pager__button"
+                onClick={() => nextMonth && onMonthChange(nextMonth)}
+                disabled={!nextMonth}
+                aria-label="Next month"
+              >
+                ›
+              </button>
+            </div>
           </label>
 
           <label className="field">
@@ -1597,6 +1628,14 @@ export function OvertimePanel({
     });
   }
 
+  const selectedSnapshotMonthIndex = availableMonths.indexOf(snapshot.month);
+  const previousSnapshotMonth =
+    selectedSnapshotMonthIndex > 0 ? availableMonths[selectedSnapshotMonthIndex - 1] : null;
+  const nextSnapshotMonth =
+    selectedSnapshotMonthIndex >= 0 && selectedSnapshotMonthIndex < availableMonths.length - 1
+      ? availableMonths[selectedSnapshotMonthIndex + 1]
+      : null;
+
   return (
     <section className="panel-frame">
       <div className="panel-heading panel-heading--simple">
@@ -1607,20 +1646,38 @@ export function OvertimePanel({
         {availableMonths.length > 0 ? (
           <label className="field">
             <span>Month</span>
-            <select
-              value={snapshot.month}
-              onChange={(event) => router.push(`/overtime?month=${event.target.value}`)}
-            >
-              {availableMonths.map((month) => (
-                <option key={month} value={month}>
-                  {new Intl.DateTimeFormat("en-US", {
-                    month: "long",
-                    year: "numeric",
-                    timeZone: "UTC",
-                  }).format(new Date(`${month}-01T00:00:00Z`))}
-                </option>
-              ))}
-            </select>
+            <div className="month-pager month-pager--field">
+              <button
+                type="button"
+                className="ghost-button month-pager__button"
+                onClick={() => previousSnapshotMonth && router.push(`/overtime?month=${previousSnapshotMonth}`)}
+                disabled={!previousSnapshotMonth}
+                aria-label="Previous month"
+              >
+                ‹
+              </button>
+              <select
+                className="month-pager__select"
+                value={snapshot.month}
+                onChange={(event) => router.push(`/overtime?month=${event.target.value}`)}
+                aria-label="Overtime month"
+              >
+                {availableMonths.map((month) => (
+                  <option key={month} value={month}>
+                    {formatMonthLabel(month)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="ghost-button month-pager__button"
+                onClick={() => nextSnapshotMonth && router.push(`/overtime?month=${nextSnapshotMonth}`)}
+                disabled={!nextSnapshotMonth}
+                aria-label="Next month"
+              >
+                ›
+              </button>
+            </div>
           </label>
         ) : (
           <div className="field field--static">
