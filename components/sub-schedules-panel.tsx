@@ -65,6 +65,24 @@ type DragRange = {
   selection: SubScheduleCellSelection;
 };
 
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7Z" />
+      <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.8 1.8 0 0 0-1.98-.36a1.8 1.8 0 0 0-1.1 1.65V21a2 2 0 0 1-4 0v-.09a1.8 1.8 0 0 0-1.1-1.65a1.8 1.8 0 0 0-1.98.36l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.8 1.8 0 0 0 4.6 15a1.8 1.8 0 0 0-1.65-1.1H3a2 2 0 0 1 0-4h.09A1.8 1.8 0 0 0 4.74 8.8a1.8 1.8 0 0 0-.36-1.98l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.8 1.8 0 0 0 1.98.36A1.8 1.8 0 0 0 10.9 2.7V3a2 2 0 0 1 4 0v-.09a1.8 1.8 0 0 0 1.1 1.65a1.8 1.8 0 0 0 1.98-.36l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.8 1.8 0 0 0-.36 1.98a1.8 1.8 0 0 0 1.65 1.1H21a2 2 0 0 1 0 4h-.09A1.8 1.8 0 0 0 19.4 15Z" />
+    </svg>
+  );
+}
+
 function createSubScheduleCellKey(employeeId: string, date: string) {
   return `${employeeId}:${date}`;
 }
@@ -321,6 +339,122 @@ function SubScheduleCellModal({
   );
 }
 
+function SubScheduleDefinitionModal({
+  title,
+  context,
+  subSchedule,
+  summaryTimeCodes,
+  issues,
+  statusMessage,
+  isSaving,
+  saveLabel,
+  onUpdate,
+  onSave,
+  onRevert,
+  onClose,
+}: {
+  title: string;
+  context: string;
+  subSchedule: EditableSubSchedule;
+  summaryTimeCodes: TimeCode[];
+  issues: string[];
+  statusMessage: string;
+  isSaving: boolean;
+  saveLabel: string;
+  onUpdate: (updater: (subSchedule: EditableSubSchedule) => EditableSubSchedule) => void;
+  onSave: () => void;
+  onRevert?: () => void;
+  onClose: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section
+        className="assignment-modal subschedule-definition-modal"
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">{title}</h2>
+            <p className="assignment-modal__context">{context}</p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
+            Close
+          </button>
+        </div>
+
+        <div className="metrics-transfer-grid">
+          <label className="field">
+            <span>Name</span>
+            <input
+              value={subSchedule.name}
+              onChange={(event) =>
+                onUpdate((current) => ({
+                  ...current,
+                  name: event.target.value,
+                }))
+              }
+            />
+          </label>
+
+          <label className="field">
+            <span>Summary code</span>
+            <select
+              value={subSchedule.summaryTimeCodeId}
+              onChange={(event) =>
+                onUpdate((current) => ({
+                  ...current,
+                  summaryTimeCodeId: event.target.value,
+                }))
+              }
+            >
+              <option value="">Select summary code</option>
+              {summaryTimeCodes.map((timeCode) => (
+                <option key={timeCode.id} value={timeCode.id}>
+                  {timeCode.code} · {timeCode.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="subschedule-status-toggle subschedule-status-toggle--modal">
+            <input
+              type="checkbox"
+              checked={subSchedule.isArchived}
+              onChange={(event) =>
+                onUpdate((current) => ({
+                  ...current,
+                  isArchived: event.target.checked,
+                }))
+              }
+            />
+            <span>{subSchedule.isArchived ? "Archived" : "Active"}</span>
+          </label>
+        </div>
+
+        {issues.length > 0 ? <p className="toolbar-status">{issues[0]}</p> : null}
+        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+
+        <div className="assignment-modal__footer">
+          {onRevert ? (
+            <button type="button" className="ghost-button" onClick={onRevert} disabled={isSaving}>
+              Revert
+            </button>
+          ) : null}
+          <button type="button" className="primary-button" onClick={onSave} disabled={isSaving || issues.length > 0}>
+            {isSaving ? "Saving..." : saveLabel}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 /** Dedicated planner for overlay schedules that project summary codes back home. */
 export function SubSchedulesPanel({
   snapshot,
@@ -366,6 +500,8 @@ export function SubSchedulesPanel({
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
   const [addedEmployeeIds, setAddedEmployeeIds] = useState<string[]>([]);
   const [employeeToAddId, setEmployeeToAddId] = useState("");
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [newSubScheduleDraft, setNewSubScheduleDraft] = useState<EditableSubSchedule | null>(null);
   const [isSavingDefinitions, startDefinitionSaveTransition] = useTransition();
   const [isSavingAssignments, startAssignmentSaveTransition] = useTransition();
 
@@ -381,6 +517,8 @@ export function SubSchedulesPanel({
     });
     setAddedEmployeeIds([]);
     setEmployeeToAddId("");
+    setIsSettingsModalOpen(false);
+    setNewSubScheduleDraft(null);
     setStatusMessage("");
     setAssignmentMessage("");
   }, [initialSubSchedules]);
@@ -555,22 +693,27 @@ export function SubSchedulesPanel({
     );
   }
 
-  function handleAddSubSchedule() {
+  function openNewSubScheduleModal() {
     const defaultSummaryTimeCodeId = projectedSummaryTimeCodes[0]?.id ?? "";
-    const nextSubSchedule: EditableSubSchedule = {
+    setNewSubScheduleDraft({
       id: `sub-schedule-${crypto.randomUUID().slice(0, 8)}`,
-      name: "New sub-schedule",
+      name: "",
       summaryTimeCodeId: defaultSummaryTimeCodeId,
       isArchived: false,
       competencyIds: [],
-    };
-
-    setSubSchedules((current) => [nextSubSchedule, ...current]);
-    setSelectedSubScheduleId(nextSubSchedule.id);
+    });
     setStatusMessage("");
   }
 
-  function handleSaveDefinitions() {
+  function handleSaveDefinitions({ closeOnSuccess = false }: { closeOnSuccess?: boolean } = {}) {
+    if (!hasDefinitionChanges) {
+      setStatusMessage("");
+      if (closeOnSuccess) {
+        setIsSettingsModalOpen(false);
+      }
+      return;
+    }
+
     if (invalidSubScheduleIds.size > 0) {
       setStatusMessage("Fix the highlighted sub-schedules before saving.");
       return;
@@ -585,14 +728,62 @@ export function SubSchedulesPanel({
 
       if (result.ok) {
         setBaselineSubSchedules(cloneSubSchedules(subSchedules));
+        if (closeOnSuccess) {
+          setIsSettingsModalOpen(false);
+        }
         router.refresh();
       }
     });
   }
 
-  function handleRevertDefinitions() {
-    setSubSchedules(cloneSubSchedules(baselineSubSchedules));
-    setStatusMessage("Changes reverted.");
+  function handleRevertActiveSubSchedule() {
+    if (!activeSubSchedule) {
+      return;
+    }
+
+    const baseline = baselineSubSchedules.find((subSchedule) => subSchedule.id === activeSubSchedule.id);
+
+    if (!baseline) {
+      setSubSchedules((current) => current.filter((subSchedule) => subSchedule.id !== activeSubSchedule.id));
+      setSelectedSubScheduleId(
+        baselineSubSchedules.find((subSchedule) => !subSchedule.isArchived)?.id ?? baselineSubSchedules[0]?.id ?? "",
+      );
+      setIsSettingsModalOpen(false);
+      setStatusMessage("New sub-schedule discarded.");
+      return;
+    }
+
+    updateSubSchedule(activeSubSchedule.id, () => ({ ...baseline }));
+    setStatusMessage("Sub-schedule settings reverted.");
+  }
+
+  function handleCreateSubSchedule() {
+    if (!newSubScheduleDraft) {
+      return;
+    }
+
+    const issues = getSubScheduleIssues(newSubScheduleDraft);
+
+    if (issues.length > 0) {
+      setStatusMessage(issues[0]);
+      return;
+    }
+
+    startDefinitionSaveTransition(async () => {
+      const result = await saveSubSchedules({
+        updates: [normalizeSubSchedule(newSubScheduleDraft)],
+      } as SaveSubSchedulesInput);
+
+      setStatusMessage(result.message);
+
+      if (result.ok) {
+        setSubSchedules((current) => [newSubScheduleDraft, ...current]);
+        setBaselineSubSchedules((current) => [newSubScheduleDraft, ...current]);
+        setSelectedSubScheduleId(newSubScheduleDraft.id);
+        setNewSubScheduleDraft(null);
+        router.refresh();
+      }
+    });
   }
 
   function handleMonthChange(delta: number) {
@@ -766,40 +957,16 @@ export function SubSchedulesPanel({
           </div>
         </div>
 
-        <div className="workspace-toolbar workspace-toolbar--actions">
-          <div className="planner-actions">
-            <button type="button" className="ghost-button" onClick={handleAddSubSchedule}>
-              Add sub-schedule
-            </button>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={handleRevertDefinitions}
-              disabled={isSavingDefinitions || !hasDefinitionChanges}
-            >
-              Revert
-            </button>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={handleSaveDefinitions}
-              disabled={isSavingDefinitions || !hasDefinitionChanges || invalidSubScheduleIds.size > 0}
-            >
-              {isSavingDefinitions ? "Saving..." : "Save"}
-            </button>
-          </div>
-          <div className="toolbar-status-wrap">
-            {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
-          </div>
-        </div>
-
         {subSchedules.length === 0 ? (
-          <div className="empty-state">
+          <div className="empty-state empty-state--action">
             <strong>No sub-schedules yet.</strong>
             <span>Add one to start planning outage or event staffing.</span>
+            <button type="button" className="icon-button" onClick={openNewSubScheduleModal} aria-label="Add sub-schedule">
+              <PlusIcon />
+            </button>
           </div>
         ) : activeSubSchedule ? (
-          <div className="workspace-toolbar workspace-toolbar--scheduler">
+          <div className="workspace-toolbar workspace-toolbar--scheduler subschedule-selector-toolbar">
             <label className="field">
               <span>Sub-schedule</span>
               <select
@@ -816,58 +983,30 @@ export function SubSchedulesPanel({
               </select>
             </label>
 
-            <label className="field">
-              <span>Name</span>
-              <input
-                value={activeSubSchedule.name}
-                onChange={(event) =>
-                  updateSubSchedule(activeSubSchedule.id, (current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-              />
-            </label>
-
-            <label className="field">
-              <span>Summary code</span>
-              <select
-                value={activeSubSchedule.summaryTimeCodeId}
-                onChange={(event) =>
-                  updateSubSchedule(activeSubSchedule.id, (current) => ({
-                    ...current,
-                    summaryTimeCodeId: event.target.value,
-                  }))
-                }
+            <div className="subschedule-selector-toolbar__actions">
+              <button type="button" className="icon-button" onClick={openNewSubScheduleModal} aria-label="Add sub-schedule">
+                <PlusIcon />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => {
+                  setStatusMessage("");
+                  setIsSettingsModalOpen(true);
+                }}
+                aria-label="Sub-schedule settings"
               >
-                <option value="">Select summary code</option>
-                {projectedSummaryTimeCodes.map((timeCode) => (
-                  <option key={timeCode.id} value={timeCode.id}>
-                    {timeCode.code} · {timeCode.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="subschedule-status-toggle">
-              <input
-                type="checkbox"
-                checked={activeSubSchedule.isArchived}
-                onChange={(event) =>
-                  updateSubSchedule(activeSubSchedule.id, (current) => ({
-                    ...current,
-                    isArchived: event.target.checked,
-                  }))
-                }
-              />
-              <span>{activeSubSchedule.isArchived ? "Archived" : "Active"}</span>
-            </label>
+                <GearIcon />
+              </button>
+            </div>
 
             <div className="toolbar-status-wrap">
               {activeSubScheduleIssues.length > 0 ? (
                 <p className="toolbar-status">{activeSubScheduleIssues[0]}</p>
               ) : dirtySubScheduleIds.has(activeSubSchedule.id) ? (
-                <p className="toolbar-status">This sub-schedule has unsaved changes.</p>
+                <p className="toolbar-status">This sub-schedule has unsaved settings.</p>
+              ) : statusMessage ? (
+                <p className="toolbar-status">{statusMessage}</p>
               ) : null}
             </div>
           </div>
@@ -1099,6 +1238,39 @@ export function SubSchedulesPanel({
           </div>
         )}
       </section>
+
+      {isSettingsModalOpen && activeSubSchedule ? (
+        <SubScheduleDefinitionModal
+          title="Sub-schedule settings"
+          context="Update the selected sub-schedule definition."
+          subSchedule={activeSubSchedule}
+          summaryTimeCodes={projectedSummaryTimeCodes}
+          issues={activeSubScheduleIssues}
+          statusMessage={statusMessage}
+          isSaving={isSavingDefinitions}
+          saveLabel="Save settings"
+          onUpdate={(updater) => updateSubSchedule(activeSubSchedule.id, updater)}
+          onSave={() => handleSaveDefinitions({ closeOnSuccess: true })}
+          onRevert={handleRevertActiveSubSchedule}
+          onClose={() => setIsSettingsModalOpen(false)}
+        />
+      ) : null}
+
+      {newSubScheduleDraft ? (
+        <SubScheduleDefinitionModal
+          title="Add sub-schedule"
+          context="Create a new sub-schedule definition before staffing it."
+          subSchedule={newSubScheduleDraft}
+          summaryTimeCodes={projectedSummaryTimeCodes}
+          issues={getSubScheduleIssues(newSubScheduleDraft)}
+          statusMessage={statusMessage}
+          isSaving={isSavingDefinitions}
+          saveLabel="Create sub-schedule"
+          onUpdate={(updater) => setNewSubScheduleDraft((current) => (current ? updater(current) : current))}
+          onSave={handleCreateSubSchedule}
+          onClose={() => setNewSubScheduleDraft(null)}
+        />
+      ) : null}
 
       {activeSubSchedule && isPersistedActiveSubSchedule && !activeSubSchedule.isArchived ? (
         <SubScheduleCellModal

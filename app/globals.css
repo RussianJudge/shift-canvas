@@ -2646,6 +2646,30 @@ button.workspace-nav-link {
   font-size: 0.88rem;
 }
 
+.subschedule-status-toggle--modal {
+  align-self: end;
+  min-height: 2.7rem;
+}
+
+.subschedule-definition-modal {
+  max-width: 38rem;
+}
+
+.subschedule-selector-toolbar {
+  grid-template-columns: minmax(14rem, 22rem) auto minmax(0, 1fr);
+  align-items: end;
+}
+
+.subschedule-selector-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.empty-state--action {
+  align-items: center;
+}
+
 .subschedule-builder-section {
   margin-top: 1.5rem;
   padding-top: 0.65rem;
