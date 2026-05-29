@@ -2918,7 +2918,7 @@ button.workspace-nav-link {
 }
 
 .employee-cell strong {
-  font-size: 1rem;
+  font-size: 0.7rem;
   line-height: 1.1;
 }
 
@@ -3938,7 +3938,7 @@ button.workspace-nav-link {
   }
 
   .employee-cell strong {
-    font-size: 0.78rem;
+    font-size: 0.7rem;
   }
 
   .employee-cell span,

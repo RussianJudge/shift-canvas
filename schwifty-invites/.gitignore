@@ -1,0 +1,7 @@
+node_modules/
+.env
+tokens.json
+contacts.csv
+.react-email/
+*.log
+.DS_Store

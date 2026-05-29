@@ -1,0 +1,27 @@
+{
+  "name": "schwifty-invites",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Personalized invite emails for the Schwifty audience via Resend",
+  "scripts": {
+    "send": "tsx --env-file=.env send-invites.ts",
+    "dry-run": "DRY_RUN=true tsx --env-file=.env send-invites.ts",
+    "render-html": "tsx --env-file=.env render-html.ts",
+    "backfill-names": "tsx --env-file=.env backfill-names.ts",
+    "backfill-names:dry": "DRY_RUN=true tsx --env-file=.env backfill-names.ts",
+    "preview": "email dev --dir emails"
+  },
+  "dependencies": {
+    "@react-email/components": "^0.0.32",
+    "react": "^18.3.1",
+    "resend": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@types/react": "^18.3.11",
+    "react-email": "^3.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
