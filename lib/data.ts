@@ -11,6 +11,7 @@ import {
   getEmployeeMap,
   getExtendedMonthDays,
   getMonthDays,
+  getPreviousDate,
   getWorkedSetDays,
   shiftForDate,
   shiftMonthKey,
@@ -559,6 +560,20 @@ function getSchedulePageAssignmentBounds(month: string, schedules: Schedule[]) {
         bounds.monthEnd = setEnd;
       }
     }
+  }
+
+  return bounds;
+}
+
+function getOvertimeBoardAssignmentBounds(month: string, schedules: Schedule[]) {
+  const bounds = getSchedulePageAssignmentBounds(month, schedules);
+  const { monthStart } = getMonthBounds(month);
+  const previousDate = getPreviousDate(monthStart);
+
+  // Claim warnings need the immediate prior day for DAY overtime on the first
+  // of the month, but the board does not need the full previous month.
+  if (previousDate < bounds.monthStart) {
+    bounds.monthStart = previousDate;
   }
 
   return bounds;
@@ -1424,7 +1439,7 @@ type ScheduleReferenceSnapshotOptions = {
   includeManualOvertimePostings?: boolean;
   includeCompletedSets?: boolean;
   includeProjectedAssignments?: boolean;
-  assignmentWindow?: "month" | "extended" | "schedule-page";
+  assignmentWindow?: "month" | "extended" | "schedule-page" | "overtime-board";
   completedSetWindow?: "month" | "extended";
 };
 
@@ -1472,6 +1487,8 @@ export async function getScheduleReferenceSnapshot(
       ? getExtendedMonthBounds(month)
       : assignmentWindow === "schedule-page"
         ? getSchedulePageAssignmentBounds(month, scheduleReference.schedules)
+        : assignmentWindow === "overtime-board"
+          ? getOvertimeBoardAssignmentBounds(month, scheduleReference.schedules)
         : getMonthBounds(month);
   const completedMonths =
     completedSetWindow === "extended" ? getExtendedMonthBounds(month).windowMonths : [month];
@@ -1711,7 +1728,7 @@ export async function getOvertimeBoardSnapshot(month: string, session?: AppSessi
     includeOvertimeClaims: true,
     includeManualOvertimePostings: true,
     includeCompletedSets: true,
-    assignmentWindow: "extended",
+    assignmentWindow: "overtime-board",
     completedSetWindow: "extended",
   });
 }

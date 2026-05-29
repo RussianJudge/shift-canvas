@@ -214,30 +214,67 @@ function getCellSelection(
   };
 }
 
-function countScheduleAssignmentsForTarget({
-  assignments,
-  scheduleId,
-  date,
-  competencyId,
-  timeCodeId = null,
-}: {
-  assignments: SchedulerSnapshot["assignments"];
-  scheduleId: string;
-  date: string;
-  competencyId: string | null;
-  timeCodeId?: string | null;
-}) {
-  return assignments.reduce(
-    (count, assignment) =>
-      count +
-      Number(
-        assignment.scheduleId === scheduleId &&
-          assignment.date === date &&
-          ((competencyId && assignment.competencyId === competencyId) ||
-            (timeCodeId && assignment.timeCodeId === timeCodeId)),
-      ),
-    0,
-  );
+function createTargetCountKey(
+  targetId: string,
+  date: string,
+  competencyId: string | null,
+  timeCodeId: string | null,
+) {
+  return `${targetId}:${date}:${competencyId ? `comp:${competencyId}` : `time:${timeCodeId ?? ""}`}`;
+}
+
+function buildScheduleTargetCounts(assignments: SchedulerSnapshot["assignments"]) {
+  const counts = new Map<string, number>();
+
+  for (const assignment of assignments) {
+    if (!assignment.competencyId && !assignment.timeCodeId) {
+      continue;
+    }
+
+    const key = createTargetCountKey(
+      assignment.scheduleId,
+      assignment.date,
+      assignment.competencyId,
+      assignment.timeCodeId,
+    );
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function buildSubScheduleTargetCounts(assignments: SchedulerSnapshot["subScheduleAssignments"]) {
+  const counts = new Map<string, number>();
+
+  for (const assignment of assignments) {
+    if (!assignment.competencyId && !assignment.timeCodeId) {
+      continue;
+    }
+
+    const key = createTargetCountKey(
+      assignment.subScheduleId,
+      assignment.date,
+      assignment.competencyId,
+      assignment.timeCodeId,
+    );
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function getTargetCount(
+  counts: Map<string, number>,
+  targetId: string,
+  date: string,
+  competencyId: string | null,
+  timeCodeId: string | null = null,
+) {
+  if (!competencyId && !timeCodeId) {
+    return 0;
+  }
+
+  return counts.get(createTargetCountKey(targetId, date, competencyId, timeCodeId)) ?? 0;
 }
 
 function buildInitialTargetKey(snapshot: SchedulerSnapshot): OvertimeTargetKey | "" {
@@ -250,6 +287,68 @@ function buildInitialTargetKey(snapshot: SchedulerSnapshot): OvertimeTargetKey |
   }
 
   return "";
+}
+
+function isValidTargetKey(snapshot: SchedulerSnapshot, targetKey: string | undefined): targetKey is OvertimeTargetKey {
+  if (!targetKey) {
+    return false;
+  }
+
+  if (targetKey === "all") {
+    return snapshot.schedules.length > 0 || snapshot.subSchedules.length > 0;
+  }
+
+  if (targetKey === "main") {
+    return snapshot.schedules.length > 0;
+  }
+
+  return targetKey.startsWith("sub:") && snapshot.subSchedules.some((subSchedule) => `sub:${subSchedule.id}` === targetKey);
+}
+
+function isValidAssignmentFilter(snapshot: SchedulerSnapshot, assignmentFilter: string | undefined) {
+  return (
+    assignmentFilter === "all" ||
+    snapshot.competencies.some((competency) => buildOvertimeAssignmentKey(competency.id, null) === assignmentFilter) ||
+    snapshot.timeCodes.some((timeCode) => buildOvertimeAssignmentKey(null, timeCode.id) === assignmentFilter)
+  );
+}
+
+function getDefaultClaimingEmployeeId(snapshot: SchedulerSnapshot, viewer: AppSession) {
+  if (viewer.role === "worker") {
+    return viewer.employeeId ?? "";
+  }
+
+  return snapshot.schedules
+    .flatMap((schedule) => schedule.employees)
+    .sort((left, right) => left.name.localeCompare(right.name))[0]?.id ?? "";
+}
+
+function resolveInitialClaimingEmployeeId(
+  snapshot: SchedulerSnapshot,
+  viewer: AppSession,
+  claimingEmployeeId: string | undefined,
+) {
+  if (viewer.role === "worker") {
+    return viewer.employeeId ?? "";
+  }
+
+  const employeeExists = snapshot.schedules.some((schedule) =>
+    schedule.employees.some((employee) => employee.id === claimingEmployeeId),
+  );
+
+  return employeeExists ? claimingEmployeeId! : getDefaultClaimingEmployeeId(snapshot, viewer);
+}
+
+function resolveInitialTargetKey(snapshot: SchedulerSnapshot, targetKey: string | undefined) {
+  return isValidTargetKey(snapshot, targetKey) ? targetKey : buildInitialTargetKey(snapshot);
+}
+
+function resolveInitialAssignmentFilter(snapshot: SchedulerSnapshot, assignmentFilter: string | undefined) {
+  return isValidAssignmentFilter(snapshot, assignmentFilter) ? assignmentFilter! : "all";
+}
+
+function resolveInitialAvailabilityFilter(availabilityFilter: string | undefined): OvertimeAvailabilityFilter {
+  return availabilityFilter === "available" ? "available" : "all";
 }
 
 function getClaimStatus(
@@ -787,22 +886,33 @@ export function OvertimePanel({
   snapshot,
   availableMonths,
   viewer,
+  initialFilters,
 }: {
   snapshot: SchedulerSnapshot;
   availableMonths: string[];
   viewer: AppSession;
+  initialFilters?: {
+    targetKey?: string;
+    assignmentFilter?: string;
+    availabilityFilter?: string;
+    claimingEmployeeId?: string;
+  };
 }) {
   // The board is built from snapshot state only; claiming/releasing triggers a
   // server refresh instead of trying to locally simulate every OT side effect.
   const router = useRouter();
-  const [claimingEmployeeId, setClaimingEmployeeId] = useState(
-    viewer.role === "worker"
-      ? viewer.employeeId ?? ""
-      : snapshot.schedules.flatMap((schedule) => schedule.employees).sort((left, right) => left.name.localeCompare(right.name))[0]?.id ?? "",
+  const [claimingEmployeeId, setClaimingEmployeeId] = useState(() =>
+    resolveInitialClaimingEmployeeId(snapshot, viewer, initialFilters?.claimingEmployeeId),
   );
-  const [selectedTargetKey, setSelectedTargetKey] = useState<OvertimeTargetKey | "">(buildInitialTargetKey(snapshot));
-  const [selectedAssignmentFilter, setSelectedAssignmentFilter] = useState("all");
-  const [availabilityFilter, setAvailabilityFilter] = useState<OvertimeAvailabilityFilter>("all");
+  const [selectedTargetKey, setSelectedTargetKey] = useState<OvertimeTargetKey | "">(() =>
+    resolveInitialTargetKey(snapshot, initialFilters?.targetKey),
+  );
+  const [selectedAssignmentFilter, setSelectedAssignmentFilter] = useState(() =>
+    resolveInitialAssignmentFilter(snapshot, initialFilters?.assignmentFilter),
+  );
+  const [availabilityFilter, setAvailabilityFilter] = useState<OvertimeAvailabilityFilter>(() =>
+    resolveInitialAvailabilityFilter(initialFilters?.availabilityFilter),
+  );
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
@@ -837,7 +947,28 @@ export function OvertimePanel({
   const canManageManualPostings = viewer.role !== "worker";
 
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
+  const scheduleMap = useMemo(
+    () => new Map(snapshot.schedules.map((schedule) => [schedule.id, schedule])),
+    [snapshot.schedules],
+  );
+  const subScheduleMap = useMemo(
+    () => new Map(snapshot.subSchedules.map((subSchedule) => [subSchedule.id, subSchedule])),
+    [snapshot.subSchedules],
+  );
+  const competencyMap = useMemo(
+    () => new Map(snapshot.competencies.map((competency) => [competency.id, competency])),
+    [snapshot.competencies],
+  );
+  const timeCodeMap = useMemo(
+    () => new Map(snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode])),
+    [snapshot.timeCodes],
+  );
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
+  const scheduleTargetCounts = useMemo(() => buildScheduleTargetCounts(snapshot.assignments), [snapshot.assignments]);
+  const subScheduleTargetCounts = useMemo(
+    () => buildSubScheduleTargetCounts(snapshot.subScheduleAssignments),
+    [snapshot.subScheduleAssignments],
+  );
   const assignmentMetaIndex = useMemo(
     () =>
       snapshot.assignments.reduce<Record<string, AssignmentMeta>>((map, assignment) => {
@@ -848,6 +979,48 @@ export function OvertimePanel({
       }, {}),
     [snapshot.assignments],
   );
+  const overtimeClaimsByEmployeeId = useMemo(() => {
+    const claimsByEmployeeId = new Map<string, SchedulerSnapshot["overtimeClaims"]>();
+
+    for (const claim of snapshot.overtimeClaims) {
+      const employeeClaims = claimsByEmployeeId.get(claim.employeeId) ?? [];
+      employeeClaims.push(claim);
+      claimsByEmployeeId.set(claim.employeeId, employeeClaims);
+    }
+
+    return claimsByEmployeeId;
+  }, [snapshot.overtimeClaims]);
+  const overtimeClaimsByManualPostingId = useMemo(() => {
+    const claimsByPostingId = new Map<string, SchedulerSnapshot["overtimeClaims"]>();
+
+    for (const claim of snapshot.overtimeClaims) {
+      if (!claim.manualPostingId) {
+        continue;
+      }
+
+      const postingClaims = claimsByPostingId.get(claim.manualPostingId) ?? [];
+      postingClaims.push(claim);
+      claimsByPostingId.set(claim.manualPostingId, postingClaims);
+    }
+
+    return claimsByPostingId;
+  }, [snapshot.overtimeClaims]);
+  const overtimeClaimsByScheduleCompetency = useMemo(() => {
+    const claimsByScheduleCompetency = new Map<string, SchedulerSnapshot["overtimeClaims"]>();
+
+    for (const claim of snapshot.overtimeClaims) {
+      if (!claim.scheduleId || !claim.competencyId) {
+        continue;
+      }
+
+      const key = `${claim.scheduleId}:${claim.competencyId}`;
+      const competencyClaims = claimsByScheduleCompetency.get(key) ?? [];
+      competencyClaims.push(claim);
+      claimsByScheduleCompetency.set(key, competencyClaims);
+    }
+
+    return claimsByScheduleCompetency;
+  }, [snapshot.overtimeClaims]);
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
   const extendedMonthDays = useMemo(() => getExtendedMonthDays(snapshot.month), [snapshot.month]);
   const completedSetRangeKeys = useMemo(
@@ -873,9 +1046,9 @@ export function OvertimePanel({
   const manualSubScheduleId =
     manualTargetKey.startsWith("sub:") ? manualTargetKey.slice("sub:".length) : "";
   const selectedManualSubSchedule =
-    snapshot.subSchedules.find((subSchedule) => subSchedule.id === manualSubScheduleId) ?? null;
+    manualSubScheduleId ? subScheduleMap.get(manualSubScheduleId) ?? null : null;
   const selectedManualSchedule =
-    snapshot.schedules.find((schedule) => schedule.id === manualMainScheduleId) ?? snapshot.schedules[0] ?? null;
+    scheduleMap.get(manualMainScheduleId) ?? snapshot.schedules[0] ?? null;
   const availableManualAssignments = useMemo(
     () =>
       manualTargetMode === "main"
@@ -914,13 +1087,7 @@ export function OvertimePanel({
         ? current
         : buildInitialTargetKey(snapshot),
     );
-    setSelectedAssignmentFilter((current) =>
-      current === "all" ||
-      snapshot.competencies.some((competency) => buildOvertimeAssignmentKey(competency.id, null) === current) ||
-      snapshot.timeCodes.some((timeCode) => buildOvertimeAssignmentKey(null, timeCode.id) === current)
-        ? current
-        : "all",
-    );
+    setSelectedAssignmentFilter((current) => (isValidAssignmentFilter(snapshot, current) ? current : "all"));
     setSelectedPostingByGroup({});
     setStatusMessage("");
     setManualTargetKey((current) =>
@@ -974,12 +1141,6 @@ export function OvertimePanel({
   }, [manualPostingMonth, manualTargetKey]);
 
   useEffect(() => {
-    setSelectedAssignmentFilter("all");
-    setSelectedPostingByGroup({});
-    setStatusMessage("");
-  }, [selectedTargetKey]);
-
-  useEffect(() => {
     setManualAssignmentKey((current) =>
       availableManualAssignments.includes(current)
         ? current
@@ -989,7 +1150,7 @@ export function OvertimePanel({
 
   const postings = useMemo<OvertimePosting[]>(() => {
     const nextPostings: OvertimePosting[] = [];
-    const selectedEmployeeClaims = snapshot.overtimeClaims.filter((claim) => claim.employeeId === claimingEmployeeId);
+    const selectedEmployeeClaims = overtimeClaimsByEmployeeId.get(claimingEmployeeId) ?? [];
 
     for (const schedule of snapshot.schedules) {
       const workedSets = getWorkedSets(schedule, monthDays, extendedMonthDays);
@@ -1011,19 +1172,16 @@ export function OvertimePanel({
           }
 
           const setDates = segment.dates;
+          const setDateSet = new Set(setDates);
+          const setDateIndex = new Map(setDates.map((date, index) => [date, index]));
 
-          const scheduleCompetencies = snapshot.competencies.filter((competency) =>
-            schedule.competencyIds.includes(competency.id),
-          );
+          const scheduleCompetencies = schedule.competencyIds
+            .map((competencyId) => competencyMap.get(competencyId))
+            .filter((competency): competency is SchedulerSnapshot["competencies"][number] => Boolean(competency));
 
           for (const competency of scheduleCompetencies) {
             const missingSlotsByDate = setDates.map((date) => {
-              const filledCount = countScheduleAssignmentsForTarget({
-                assignments: snapshot.assignments,
-                scheduleId: schedule.id,
-                date,
-                competencyId: competency.id,
-              });
+              const filledCount = getTargetCount(scheduleTargetCounts, schedule.id, date, competency.id);
 
               return Math.max(0, competency.requiredStaff - filledCount);
             });
@@ -1038,32 +1196,31 @@ export function OvertimePanel({
                 (claim) =>
                   claim.scheduleId === schedule.id &&
                   claim.competencyId === competency.id &&
-                  setDates.includes(claim.date),
+                  setDateSet.has(claim.date),
               )
               .map((claim) => claim.date)
               .sort();
 
-            const claimDatesByEmployee = snapshot.overtimeClaims.reduce<Record<string, string[]>>((map, claim) => {
-              if (
-                claim.scheduleId === schedule.id &&
-                claim.competencyId === competency.id &&
-                setDates.includes(claim.date)
-              ) {
-                map[claim.employeeId] ??= [];
-                map[claim.employeeId].push(claim.date);
+            const claimDatesByEmployee: Record<string, string[]> = {};
+
+            for (const claim of overtimeClaimsByScheduleCompetency.get(`${schedule.id}:${competency.id}`) ?? []) {
+              if (!setDateSet.has(claim.date)) {
+                continue;
               }
 
-              return map;
-            }, {});
+              claimDatesByEmployee[claim.employeeId] ??= [];
+              claimDatesByEmployee[claim.employeeId].push(claim.date);
+            }
 
             for (const [employeeId, employeeDates] of Object.entries(claimDatesByEmployee)) {
-              const orderedDates = setDates.filter((date) => employeeDates.includes(date));
+              const employeeDateSet = new Set(employeeDates);
+              const orderedDates = setDates.filter((date) => employeeDateSet.has(date));
               const claimEmployee = employeeMap[employeeId];
               const assignmentMeta = orderedDates[0]
                 ? assignmentMetaIndex[createAssignmentKey(schedule.id, employeeId, orderedDates[0])]
                 : undefined;
               const coverageCompetencyId = assignmentMeta?.coverageCompetencyId ?? competency.id;
-              const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
+              const coverageCompetency = competencyMap.get(coverageCompetencyId);
               const swapEmployeeId = assignmentMeta?.swapEmployeeId ?? null;
               const swapEmployee = swapEmployeeId ? employeeMap[swapEmployeeId] : null;
               let currentRun: string[] = [];
@@ -1109,8 +1266,8 @@ export function OvertimePanel({
               for (let index = 0; index < orderedDates.length; index += 1) {
                 const date = orderedDates[index];
                 const previousDate = orderedDates[index - 1];
-                const currentDateIndex = setDates.indexOf(date);
-                const previousDateIndex = previousDate ? setDates.indexOf(previousDate) : -1;
+                const currentDateIndex = setDateIndex.get(date) ?? -1;
+                const previousDateIndex = previousDate ? setDateIndex.get(previousDate) ?? -1 : -1;
 
                 if (previousDate && currentDateIndex !== previousDateIndex + 1) {
                   flushRun();
@@ -1206,7 +1363,7 @@ export function OvertimePanel({
               });
 
               for (const candidate of candidateEntries) {
-                const offeredCompetency = snapshot.competencies.find((entry) => entry.id === candidate.competencyId);
+                const offeredCompetency = competencyMap.get(candidate.competencyId);
 
                 if (!offeredCompetency) {
                   continue;
@@ -1251,16 +1408,16 @@ export function OvertimePanel({
 
     for (const manualPosting of snapshot.manualOvertimePostings) {
       const schedule = manualPosting.scheduleId
-        ? snapshot.schedules.find((entry) => entry.id === manualPosting.scheduleId) ?? null
+        ? scheduleMap.get(manualPosting.scheduleId) ?? null
         : null;
       const subSchedule = manualPosting.subScheduleId
-        ? snapshot.subSchedules.find((entry) => entry.id === manualPosting.subScheduleId) ?? null
+        ? subScheduleMap.get(manualPosting.subScheduleId) ?? null
         : null;
       const competency = manualPosting.competencyId
-        ? snapshot.competencies.find((entry) => entry.id === manualPosting.competencyId) ?? null
+        ? competencyMap.get(manualPosting.competencyId) ?? null
         : null;
       const timeCode = manualPosting.timeCodeId
-        ? snapshot.timeCodes.find((entry) => entry.id === manualPosting.timeCodeId) ?? null
+        ? timeCodeMap.get(manualPosting.timeCodeId) ?? null
         : null;
 
       if ((!schedule && !subSchedule) || (!competency && !timeCode) || manualPosting.dates.length === 0) {
@@ -1269,31 +1426,31 @@ export function OvertimePanel({
 
       const filledCells = manualPosting.dates.reduce((count, date) => {
         if (schedule) {
-          const filledCount = countScheduleAssignmentsForTarget({
-            assignments: snapshot.assignments,
-            scheduleId: schedule.id,
+          const filledCount = getTargetCount(
+            scheduleTargetCounts,
+            schedule.id,
             date,
-            competencyId: competency?.id ?? null,
-            timeCodeId: timeCode?.id ?? null,
-          });
+            competency?.id ?? null,
+            timeCode?.id ?? null,
+          );
 
           return count + filledCount;
         }
 
-        const filledCount = snapshot.subScheduleAssignments.filter(
-          (assignment) =>
-            assignment.subScheduleId === subSchedule?.id &&
-            assignment.date === date &&
-            ((competency && assignment.competencyId === competency.id) ||
-              (timeCode && assignment.timeCodeId === timeCode.id)),
-        ).length;
+        const filledCount = subSchedule
+          ? getTargetCount(
+              subScheduleTargetCounts,
+              subSchedule.id,
+              date,
+              competency?.id ?? null,
+              timeCode?.id ?? null,
+            )
+          : 0;
 
         return count + filledCount;
       }, 0);
 
-      const claimsForPosting = snapshot.overtimeClaims.filter(
-        (claim) => claim.manualPostingId === manualPosting.id,
-      );
+      const claimsForPosting = overtimeClaimsByManualPostingId.get(manualPosting.id) ?? [];
       const claimedEmployeeIds = Array.from(new Set(claimsForPosting.map((claim) => claim.employeeId)));
       const claimedByNames = claimedEmployeeIds.map((employeeId) => employeeMap[employeeId]?.name ?? "Unknown worker");
       const claimedEmployeeId = claimedEmployeeIds[0] ?? null;
@@ -1345,15 +1502,22 @@ export function OvertimePanel({
   }, [
     assignmentIndex,
     completedSetRangeKeys,
+    competencyMap,
     employeeMap,
     extendedMonthDays,
     monthDays,
     assignmentMetaIndex,
-    snapshot,
-    snapshot.competencies,
     snapshot.month,
-    snapshot.overtimeClaims,
+    overtimeClaimsByEmployeeId,
+    overtimeClaimsByManualPostingId,
+    overtimeClaimsByScheduleCompetency,
+    scheduleMap,
     snapshot.schedules,
+    snapshot.manualOvertimePostings,
+    scheduleTargetCounts,
+    subScheduleMap,
+    subScheduleTargetCounts,
+    timeCodeMap,
   ]);
   const filteredPostings = useMemo(
     () =>
@@ -1423,6 +1587,27 @@ export function OvertimePanel({
     () => postings.find((posting) => posting.id === deletePostingId) ?? null,
     [deletePostingId, postings],
   );
+  const buildMonthHref = (month: string) => {
+    const params = new URLSearchParams({ month });
+
+    if (viewer.role !== "worker" && claimingEmployeeId) {
+      params.set("claimAs", claimingEmployeeId);
+    }
+
+    if (selectedTargetKey) {
+      params.set("target", selectedTargetKey);
+    }
+
+    if (selectedAssignmentFilter !== "all") {
+      params.set("assignment", selectedAssignmentFilter);
+    }
+
+    if (availabilityFilter !== "all") {
+      params.set("availability", availabilityFilter);
+    }
+
+    return `/overtime?${params.toString()}`;
+  };
   const eligibleEmployeesForReport = useMemo(
     () =>
       selectedEligibilityReportPosting
@@ -1609,7 +1794,7 @@ export function OvertimePanel({
             <span>Month</span>
             <select
               value={snapshot.month}
-              onChange={(event) => router.push(`/overtime?month=${event.target.value}`)}
+              onChange={(event) => router.push(buildMonthHref(event.target.value))}
             >
               {availableMonths.map((month) => (
                 <option key={month} value={month}>
@@ -1650,7 +1835,12 @@ export function OvertimePanel({
           <span>Schedule</span>
           <select
             value={selectedTargetKey}
-            onChange={(event) => setSelectedTargetKey(event.target.value as OvertimeTargetKey)}
+            onChange={(event) => {
+              setSelectedTargetKey(event.target.value as OvertimeTargetKey);
+              setSelectedAssignmentFilter("all");
+              setSelectedPostingByGroup({});
+              setStatusMessage("");
+            }}
           >
             <option value="all">All</option>
             {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}

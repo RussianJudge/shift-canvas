@@ -14,27 +14,53 @@ async function OvertimeBoard({
   session,
   requestedMonth,
   currentMonth,
+  initialFilters,
 }: {
   session: Awaited<ReturnType<typeof requireAppSession>>;
   requestedMonth?: string;
   currentMonth: string;
+  initialFilters?: {
+    targetKey?: string;
+    assignmentFilter?: string;
+    availabilityFilter?: string;
+    claimingEmployeeId?: string;
+  };
 }) {
-  const availableMonths = await getOvertimeMonths(currentMonth, session);
+  const optimisticMonth = requestedMonth ?? currentMonth;
+  const availableMonthsPromise = getOvertimeMonths(currentMonth, session);
+  const optimisticSnapshotPromise = getOvertimeBoardSnapshot(optimisticMonth, session);
+  const availableMonths = await availableMonthsPromise;
   const month =
     requestedMonth && availableMonths.includes(requestedMonth)
       ? requestedMonth
       : availableMonths.includes(currentMonth)
       ? currentMonth
       : availableMonths[0] ?? currentMonth;
-  const snapshot = await getOvertimeBoardSnapshot(month, session);
+  const snapshot =
+    month === optimisticMonth
+      ? await optimisticSnapshotPromise
+      : await getOvertimeBoardSnapshot(month, session);
 
-  return <OvertimePanel snapshot={snapshot} availableMonths={availableMonths} viewer={session} />;
+  return (
+    <OvertimePanel
+      snapshot={snapshot}
+      availableMonths={availableMonths}
+      viewer={session}
+      initialFilters={initialFilters}
+    />
+  );
 }
 
 export default async function OvertimePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ month?: string }>;
+  searchParams?: Promise<{
+    month?: string;
+    target?: string;
+    assignment?: string;
+    availability?: string;
+    claimAs?: string;
+  }>;
 }) {
   const session = await requireAppSession(["admin", "leader", "worker"]);
   const currentMonth = getCurrentMonthKey("America/Edmonton");
@@ -50,6 +76,12 @@ export default async function OvertimePage({
           session={session}
           requestedMonth={resolvedSearchParams?.month}
           currentMonth={currentMonth}
+          initialFilters={{
+            targetKey: resolvedSearchParams?.target,
+            assignmentFilter: resolvedSearchParams?.assignment,
+            availabilityFilter: resolvedSearchParams?.availability,
+            claimingEmployeeId: resolvedSearchParams?.claimAs,
+          }}
         />
       </Suspense>
     </WorkspaceShellFrame>
