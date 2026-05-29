@@ -41,12 +41,12 @@ select {
 }
 
 .shell {
-  padding: 2rem;
+  padding: 1rem;
 }
 
 .workspace-frame {
   max-width: 100%;
-  min-height: calc(100vh - 4rem);
+  min-height: calc(100vh - 2rem);
   border: 1px solid rgba(255, 255, 255, 0.5);
   border-radius: 2rem;
   background:
@@ -2938,6 +2938,12 @@ button.workspace-nav-link {
   line-height: 1.1;
 }
 
+.employee-cell strong span {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
 .employee-pin-button {
   flex: 0 0 auto;
   width: 2rem;
@@ -3940,6 +3946,10 @@ button.workspace-nav-link {
     font-size: 0.54rem;
   }
 
+  .employee-cell strong span {
+    font-size: inherit;
+  }
+
   .employee-name-full {
     display: none;
   }
@@ -4177,13 +4187,17 @@ button.workspace-nav-link {
   }
 
   .workspace-notifications-popover {
-    position: fixed;
-    left: 1rem;
-    right: 1rem;
-    bottom: 1rem;
-    width: auto;
-    max-height: calc(100vh - 2rem);
+    position: absolute;
+    left: 0;
+    right: auto;
+    bottom: calc(100% + 0.6rem);
+    width: min(22rem, calc(100vw - 2.5rem));
+    max-height: min(28rem, calc(100dvh - 8rem));
     overflow: auto;
+  }
+
+  .workspace-notifications-popover__list {
+    max-height: min(16rem, calc(100dvh - 18rem));
   }
 
   .workspace-session__meta {
