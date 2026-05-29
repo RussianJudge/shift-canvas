@@ -11,10 +11,7 @@ import type { AppNotification, AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
-const PREFETCH_DELAY_MS = 200;
-const PREFETCHABLE_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals"]);
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
-const prefetchedWorkspaceRoutes = new Set<string>();
 
 function isNotification(value: unknown): value is AppNotification {
   return (
@@ -47,11 +44,9 @@ function resolveWorkspaceRouteTargets({
 }) {
   const month = isValidMonthParam(selectedMonth) ? selectedMonth : fallbackMonth;
   const navigationHref = MONTH_ROUTE_HREFS.has(href) ? `${href}?month=${month}` : href;
-  const prefetchHref = PREFETCHABLE_ROUTE_HREFS.has(href) ? navigationHref : null;
 
   return {
     navigationHref,
-    prefetchHref,
   };
 }
 
@@ -69,10 +64,7 @@ type NavLinkProps = {
   activeHref: string;
   label: string;
   icon: React.ReactNode;
-  onIntentPrefetchStart: (href: string | null) => void;
-  onIntentPrefetchCancel: (href: string | null) => void;
   onNavigate: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
-  prefetchHref: string | null;
 };
 
 /** Small presentational wrapper so nav link semantics stay consistent everywhere. */
@@ -81,10 +73,7 @@ function NavLink({
   activeHref,
   label,
   icon,
-  onIntentPrefetchStart,
-  onIntentPrefetchCancel,
   onNavigate,
-  prefetchHref,
 }: NavLinkProps) {
   const pathname = usePathname();
   const isActive = isWorkspaceRouteActive(pathname, activeHref);
@@ -96,10 +85,6 @@ function NavLink({
       className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
       title={label}
       aria-current={isActive ? "page" : undefined}
-      onMouseEnter={() => onIntentPrefetchStart(prefetchHref)}
-      onFocus={() => onIntentPrefetchStart(prefetchHref)}
-      onMouseLeave={() => onIntentPrefetchCancel(prefetchHref)}
-      onBlur={() => onIntentPrefetchCancel(prefetchHref)}
       onClick={(event) => onNavigate(event, href)}
     >
       <span className="workspace-nav-icon">{icon}</span>
@@ -288,7 +273,6 @@ export function WorkspaceShell({
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
   const [isUpdatingScope, startScopeTransition] = useTransition();
-  const pendingPrefetchTimersRef = useRef<Record<string, number>>({});
   const notificationPopoverRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -449,55 +433,6 @@ export function WorkspaceShell({
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
   const selectedMonth = searchParams.get("month");
 
-  useEffect(() => {
-    const pendingTimers = pendingPrefetchTimersRef.current;
-
-    return () => {
-      for (const timerId of Object.values(pendingTimers)) {
-        window.clearTimeout(timerId);
-      }
-    };
-  }, []);
-
-  const handleIntentPrefetchStart = (href: string | null) => {
-    if (!href || prefetchedWorkspaceRoutes.has(href)) {
-      return;
-    }
-
-    const pendingTimers = pendingPrefetchTimersRef.current;
-
-    if (pendingTimers[href]) {
-      return;
-    }
-
-    pendingTimers[href] = window.setTimeout(() => {
-      delete pendingTimers[href];
-
-      if (prefetchedWorkspaceRoutes.has(href)) {
-        return;
-      }
-
-      prefetchedWorkspaceRoutes.add(href);
-      router.prefetch(href);
-    }, PREFETCH_DELAY_MS);
-  };
-
-  const handleIntentPrefetchCancel = (href: string | null) => {
-    if (!href) {
-      return;
-    }
-
-    const pendingTimers = pendingPrefetchTimersRef.current;
-    const timerId = pendingTimers[href];
-
-    if (!timerId) {
-      return;
-    }
-
-    window.clearTimeout(timerId);
-    delete pendingTimers[href];
-  };
-
   const handleNavLinkNavigate = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
     if (!isMobileSidebarMode) {
       return;
@@ -541,7 +476,7 @@ export function WorkspaceShell({
 
           <nav id="workspace-primary-navigation" className="workspace-nav" aria-label="Primary">
             {navItems.map((item) => {
-              const { navigationHref, prefetchHref } = resolveWorkspaceRouteTargets({
+              const { navigationHref } = resolveWorkspaceRouteTargets({
                 href: item.href,
                 fallbackMonth: currentMonthKey,
                 selectedMonth,
@@ -552,11 +487,8 @@ export function WorkspaceShell({
                   key={item.href}
                   href={navigationHref}
                   activeHref={item.href}
-                  prefetchHref={prefetchHref}
                   label={item.label}
                   icon={item.icon}
-                  onIntentPrefetchStart={handleIntentPrefetchStart}
-                  onIntentPrefetchCancel={handleIntentPrefetchCancel}
                   onNavigate={handleNavLinkNavigate}
                 />
               );

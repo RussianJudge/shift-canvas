@@ -100,23 +100,47 @@ function withEmptyScheduleAux(snapshot: ScheduleGridSnapshot): SchedulePageSnaps
 }
 
 export function ScheduleAuxHydrator({
-  auxSnapshot,
+  month,
   auxSnapshotKey,
 }: {
-  auxSnapshot: ScheduleAuxSnapshot;
+  month: string;
   auxSnapshotKey: string;
 }) {
   useEffect(() => {
-    scheduleAuxSnapshotCache.set(auxSnapshotKey, auxSnapshot);
-    window.dispatchEvent(
-      new CustomEvent<ScheduleAuxHydrationPayload>(SCHEDULE_AUX_HYDRATED_EVENT, {
-        detail: {
-          key: auxSnapshotKey,
-          snapshot: auxSnapshot,
-        },
-      }),
-    );
-  }, [auxSnapshot, auxSnapshotKey]);
+    const controller = new AbortController();
+
+    fetch(`/api/schedule-aux?month=${encodeURIComponent(month)}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Schedule details failed to load (${response.status})`);
+        }
+
+        return response.json() as Promise<ScheduleAuxSnapshot>;
+      })
+      .then((auxSnapshot) => {
+        scheduleAuxSnapshotCache.set(auxSnapshotKey, auxSnapshot);
+        window.dispatchEvent(
+          new CustomEvent<ScheduleAuxHydrationPayload>(SCHEDULE_AUX_HYDRATED_EVENT, {
+            detail: {
+              key: auxSnapshotKey,
+              snapshot: auxSnapshot,
+            },
+          }),
+        );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error("Could not load schedule details", error);
+      });
+
+    return () => controller.abort();
+  }, [auxSnapshotKey, month]);
 
   return null;
 }

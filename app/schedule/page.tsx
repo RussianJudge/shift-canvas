@@ -4,30 +4,14 @@ import { MonthlyScheduler, ScheduleAuxHydrator } from "@/components/monthly-sche
 import { ScheduleRouteLoading } from "@/components/route-loading";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { canManageWorkspace, requireAppSession } from "@/lib/auth";
-import { getScheduleAuxSnapshot, getScheduleGridSnapshot, getUserSchedulePins } from "@/lib/data";
+import { getScheduleGridSnapshot, getUserSchedulePins } from "@/lib/data";
 import { scopeScheduleSnapshot } from "@/lib/role-scopes";
 import { getCurrentMonthKey } from "@/lib/scheduling";
-import type { ScheduleAuxSnapshot } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 function isMonthKey(value: string | undefined) {
   return Boolean(value && /^\d{4}-\d{2}$/.test(value));
-}
-
-/** Streams the expensive month snapshot after the workspace shell is already visible. */
-async function ScheduleAuxStream({
-  snapshotPromise,
-  session,
-  auxSnapshotKey,
-}: {
-  snapshotPromise: Promise<ScheduleAuxSnapshot>;
-  session: Awaited<ReturnType<typeof requireAppSession>>;
-  auxSnapshotKey: string;
-}) {
-  const auxSnapshot = await snapshotPromise;
-
-  return <ScheduleAuxHydrator auxSnapshot={scopeScheduleSnapshot(auxSnapshot, session)} auxSnapshotKey={auxSnapshotKey} />;
 }
 
 async function ScheduleBoard({
@@ -39,7 +23,6 @@ async function ScheduleBoard({
   month: string;
   initialSelectedScheduleId: string | null;
 }) {
-  const auxSnapshotPromise = getScheduleAuxSnapshot(month, session);
   const auxSnapshotKey = `${month}:${Date.now()}`;
   const [snapshot, initialPinnedEmployeesBySchedule] = await Promise.all([
     getScheduleGridSnapshot(month, session),
@@ -57,9 +40,7 @@ async function ScheduleBoard({
       initialSelectedScheduleId={initialSelectedScheduleId}
       auxSnapshotKey={auxSnapshotKey}
     >
-      <Suspense fallback={null}>
-        <ScheduleAuxStream snapshotPromise={auxSnapshotPromise} session={session} auxSnapshotKey={auxSnapshotKey} />
-      </Suspense>
+      <ScheduleAuxHydrator month={month} auxSnapshotKey={auxSnapshotKey} />
     </MonthlyScheduler>
   );
 }
