@@ -79,7 +79,7 @@ type ScheduleCompetencyRow = {
 
 type EmployeeRow = {
   id: string;
-  schedule_id: string;
+  schedule_id: string | null;
   first_name: string | null;
   last_name: string | null;
   email: string | null;
@@ -416,6 +416,7 @@ function emptySnapshot(month: string, overrides: Partial<SchedulerSnapshot> = {}
   return {
     month,
     productionUnits: [],
+    unassignedEmployees: [],
     competencies: [],
     timeCodes: [],
     schedules: [],
@@ -602,6 +603,10 @@ function buildEmployeesBySchedule(
   }, {});
 
   return employeeRows.reduce<Record<string, Employee[]>>((map, row) => {
+    if (!row.schedule_id) {
+      return map;
+    }
+
     const nameParts: EmployeeNameParts = {
       firstName: row.first_name ?? "",
       lastName: row.last_name ?? "",
@@ -623,6 +628,40 @@ function buildEmployeesBySchedule(
     });
     return map;
   }, {});
+}
+
+function mapUnassignedEmployees(
+  employeeRows: EmployeeRow[],
+  employeeCompetencyRows: EmployeeCompetencyRow[],
+) {
+  const competenciesByEmployee = employeeCompetencyRows.reduce<Record<string, string[]>>((map, row) => {
+    map[row.employee_id] ??= [];
+    map[row.employee_id].push(row.competency_id);
+    return map;
+  }, {});
+
+  return employeeRows
+    .filter((row) => !row.schedule_id)
+    .map<Employee>((row) => {
+      const nameParts: EmployeeNameParts = {
+        firstName: row.first_name ?? "",
+        lastName: row.last_name ?? "",
+      };
+
+      return {
+        id: row.id,
+        firstName: nameParts.firstName,
+        lastName: nameParts.lastName,
+        email: row.email,
+        name: formatEmployeeDisplayName(nameParts),
+        role: row.role_title ?? "Operator",
+        scheduleId: "",
+        competencyIds: competenciesByEmployee[row.id] ?? [],
+        companyId: row.company_id,
+        siteId: row.site_id,
+        businessAreaId: row.business_area_id,
+      };
+    });
 }
 
 function mapSchedules(
@@ -783,6 +822,7 @@ async function getScopedSchedulesWithEmployees(
 
   return {
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule, scheduleCompetencyRows),
+    unassignedEmployees: mapUnassignedEmployees(employeeRows, employeeCompetencyRows),
     employeeRows,
     employeeCompetencyRows,
     errors: [
@@ -1084,6 +1124,10 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     competencies: mapCompetencies([...competencyRowsById.values()]),
     timeCodes: mapTimeCodes([...timeCodeRowsById.values()]),
     schedules: mappedSchedules,
+    unassignedEmployees: mapUnassignedEmployees(
+      employeeRows,
+      (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
+    ),
     assignments: mapAssignments(filteredAssignmentRows),
     projectedAssignments: buildProjectedSubScheduleAssignments({
       schedules: mappedSchedules,
@@ -1309,6 +1353,7 @@ export async function getScheduleReferenceSnapshot(
       ? mapTimeCodes((timeCodesResult.data as TimeCodeRow[] | null) ?? [])
       : [],
     schedules: scheduleReference.schedules,
+    unassignedEmployees: scheduleReference.unassignedEmployees,
     assignments: includeAssignments ? mapAssignments(filteredAssignmentRows) : [],
     projectedAssignments:
       includeProjectedAssignments && includeSubSchedules && includeSubScheduleAssignments
@@ -1441,6 +1486,10 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     (employeesResult.data as EmployeeRow[] | null) ?? [],
     (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
+  const unassignedEmployees = mapUnassignedEmployees(
+    (employeesResult.data as EmployeeRow[] | null) ?? [],
+    (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
+  );
   const scheduleCompetencyRows = (scheduleCompetenciesResult.data as ScheduleCompetencyRow[] | null) ?? [];
 
   logScopedEmptyState(
@@ -1459,6 +1508,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
     timeCodes: [],
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule, scheduleCompetencyRows),
+    unassignedEmployees,
     assignments: [],
     projectedAssignments: [],
     overtimeClaims: [],
@@ -1726,6 +1776,7 @@ export async function getProfileSnapshot(session: AppSession) {
     profileEmployeeId && scheduleReference
       ? scheduleReference.schedules
           .flatMap((schedule) => schedule.employees)
+          .concat(scheduleReference.unassignedEmployees)
           .find((entry) => entry.id === profileEmployeeId) ?? null
       : null;
   const schedule =
@@ -1769,6 +1820,7 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
     competencies: [],
     timeCodes: [],
     schedules: scheduleReference?.schedules ?? [],
+    unassignedEmployees: scheduleReference?.unassignedEmployees ?? [],
     assignments: [],
     projectedAssignments: [],
     overtimeClaims: [],
@@ -1851,6 +1903,10 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     (employeesResult.data as EmployeeRow[] | null) ?? [],
     (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
+  const unassignedEmployees = mapUnassignedEmployees(
+    (employeesResult.data as EmployeeRow[] | null) ?? [],
+    (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
+  );
   const scheduleCompetencyRows = (scheduleCompetenciesResult.data as ScheduleCompetencyRow[] | null) ?? [];
 
   return {
@@ -1859,6 +1915,7 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
     competencies: mapCompetencies((competenciesResult.data as CompetencyRow[] | null) ?? []),
     timeCodes: [],
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule, scheduleCompetencyRows),
+    unassignedEmployees,
     assignments: [],
     projectedAssignments: [],
     overtimeClaims: [],
@@ -1894,6 +1951,7 @@ export async function getTimeCodesSnapshot(month: string, session?: AppSession |
     competencies: [],
     timeCodes: mapTimeCodes((timeCodesResult.data as TimeCodeRow[] | null) ?? []),
     schedules: [],
+    unassignedEmployees: [],
     assignments: [],
     projectedAssignments: [],
     overtimeClaims: [],

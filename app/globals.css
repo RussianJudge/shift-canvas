@@ -1020,6 +1020,54 @@ button.workspace-nav-link {
   letter-spacing: -0.04em;
 }
 
+.schedule-heading-month {
+  display: inline-grid;
+  grid-template-columns: 2.75rem minmax(12rem, auto) 2.75rem;
+  align-items: stretch;
+  justify-self: start;
+  border: 1px solid color-mix(in srgb, var(--team-accent) 34%, var(--line));
+  border-radius: 1rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 16px 32px rgba(47, 34, 16, 0.08);
+}
+
+.schedule-heading-month__label {
+  display: grid;
+  place-items: center;
+  padding: 0.55rem 1.1rem 0.65rem;
+  border-inline: 1px solid color-mix(in srgb, var(--team-accent) 24%, var(--line));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--team-accent) 7%, white), rgba(255, 255, 255, 0.8));
+  text-align: center;
+}
+
+.schedule-heading-month__button {
+  border: 0;
+  padding: 0;
+  background: color-mix(in srgb, var(--team-accent) 10%, white);
+  color: var(--ink);
+  font: 800 1.7rem/1 var(--font-display), sans-serif;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.schedule-heading-month__button:hover {
+  background: color-mix(in srgb, var(--team-accent) 22%, white);
+  color: color-mix(in srgb, var(--team-accent) 72%, var(--ink));
+}
+
+.planner-actions--schedule {
+  justify-content: flex-end;
+}
+
+.schedule-print-button svg {
+  width: 1.22rem;
+  height: 1.22rem;
+}
+
 .planner-actions {
   display: flex;
   gap: 0.75rem;
@@ -2400,6 +2448,11 @@ button.workspace-nav-link {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+.modal-form-grid {
+  display: grid;
+  gap: 0.85rem;
 }
 
 .assignment-modal__note-input {
@@ -3812,6 +3865,20 @@ button.workspace-nav-link {
   .planner-actions__row--nav,
   .planner-actions__row--save {
     justify-content: flex-start;
+  }
+
+  .schedule-heading-month {
+    width: 100%;
+    grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;
+  }
+
+  .schedule-heading-month__label {
+    padding-inline: 0.65rem;
+    font-size: clamp(1.45rem, 8vw, 2rem);
+  }
+
+  .planner-actions--schedule {
+    align-items: flex-start;
   }
 
   .schedule-grid {

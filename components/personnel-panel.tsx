@@ -20,6 +20,7 @@ type EditableEmployee = {
   lastName: string;
   email: string;
   role: string;
+  /** Empty string means the employee is active but not assigned to a shift yet. */
   scheduleId: string;
   competencyIds: string[];
 };
@@ -323,10 +324,6 @@ function getEmployeeFieldIssues(employee: EditableEmployee): EmployeeFieldIssues
     issues.email = "Enter a valid email";
   }
 
-  if (!employee.scheduleId) {
-    issues.scheduleId = "Shift required";
-  }
-
   return issues;
 }
 
@@ -346,17 +343,28 @@ export function PersonnelPanel({
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const initialEmployees = useMemo<EditableEmployee[]>(
     () =>
-      snapshot.schedules.flatMap((schedule) =>
-        schedule.employees.map((employee) => ({
+      [
+        ...snapshot.schedules.flatMap((schedule) =>
+          schedule.employees.map((employee) => ({
+            id: employee.id,
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            email: employee.email ?? "",
+            role: employee.role || "Operator",
+            scheduleId: employee.scheduleId,
+            competencyIds: employee.competencyIds,
+          })),
+        ),
+        ...(snapshot.unassignedEmployees ?? []).map((employee) => ({
           id: employee.id,
           firstName: employee.firstName,
           lastName: employee.lastName,
           email: employee.email ?? "",
           role: employee.role || "Operator",
-          scheduleId: employee.scheduleId,
+          scheduleId: "",
           competencyIds: employee.competencyIds,
         })),
-      ),
+      ],
     [snapshot],
   );
 
@@ -379,11 +387,6 @@ export function PersonnelPanel({
   const canManageInvites = viewer.role === "admin" || viewer.role === "leader";
   const canInviteAdmin = viewer.role === "admin";
   const canInviteLeader = viewer.role === "admin";
-  const defaultSchedule =
-    [...snapshot.schedules]
-      .sort((left, right) => left.employees.length - right.employees.length || left.name.localeCompare(right.name))[0] ??
-    snapshot.schedules[0];
-
   const scheduleNameById = useMemo(
     () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
     [snapshot.schedules],
@@ -555,7 +558,10 @@ export function PersonnelPanel({
 
     return [...employees]
       .filter((employee) => {
-        if (selectedScheduleFilter !== "all" && employee.scheduleId !== selectedScheduleFilter) {
+        if (
+          selectedScheduleFilter !== "all" &&
+          (selectedScheduleFilter === "unassigned" ? employee.scheduleId : employee.scheduleId !== selectedScheduleFilter)
+        ) {
           return false;
         }
 
@@ -648,11 +654,6 @@ export function PersonnelPanel({
   }
 
   function handleAddEmployee() {
-    if (!defaultSchedule) {
-      setStatusMessage("Complete setup first.");
-      return;
-    }
-
     setShowActionsMenu(false);
     setDraftEmployee((current) => current ?? createDraftEmployee());
     setStatusMessage("");
@@ -681,11 +682,6 @@ export function PersonnelPanel({
     event.target.value = "";
 
     if (!file) {
-      return;
-    }
-
-    if (!defaultSchedule) {
-      setStatusMessage("Complete setup first.");
       return;
     }
 
@@ -810,7 +806,7 @@ export function PersonnelPanel({
         lastName: resolvedCsvNameParts.lastName || existing?.lastName || "Employee",
         email: csvEmail.toLowerCase() || existing?.email || "",
         role: csvRole || existing?.role || "Operator",
-        scheduleId: resolvedScheduleId || existing?.scheduleId || defaultSchedule.id,
+        scheduleId: resolvedScheduleId || existing?.scheduleId || "",
         competencyIds:
           resolvedCompetencyIds.length > 0
             ? [...new Set(resolvedCompetencyIds)]
@@ -835,7 +831,7 @@ export function PersonnelPanel({
         key: nextEmployee.id,
         name: getEditableEmployeeDisplayName(nextEmployee),
         role: nextEmployee.role,
-        shiftName: scheduleNameById[nextEmployee.scheduleId] ?? nextEmployee.scheduleId,
+        shiftName: scheduleNameById[nextEmployee.scheduleId] ?? "No shift assigned",
         action: existing ? "Update" : "Add",
         notes,
       });
@@ -957,6 +953,7 @@ export function PersonnelPanel({
             onChange={(event) => setSelectedScheduleFilter(event.target.value)}
           >
             <option value="all">All shifts</option>
+            <option value="unassigned">Unassigned</option>
             {snapshot.schedules.map((schedule) => (
               <option key={schedule.id} value={schedule.id}>
                 {schedule.name}
@@ -1301,7 +1298,7 @@ export function PersonnelPanel({
                         )
                       }
                     >
-                      <option value="">Select shift</option>
+                      <option value="">No shift assigned</option>
                       {snapshot.schedules.map((schedule) => (
                         <option key={schedule.id} value={schedule.id}>
                           {schedule.name}
@@ -1444,6 +1441,7 @@ export function PersonnelPanel({
                           }))
                         }
                       >
+                        <option value="">No shift assigned</option>
                         {snapshot.schedules.map((schedule) => (
                           <option key={schedule.id} value={schedule.id}>
                             {schedule.name}

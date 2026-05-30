@@ -72,6 +72,17 @@ type DragRange = {
   selection: AssignmentSelection;
 };
 
+function PrinterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 8V4h10v4" />
+      <path d="M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" />
+      <path d="M7 14h10v6H7z" />
+      <path d="M17 12h.01" />
+    </svg>
+  );
+}
+
 type DisplayEmployee = {
   rowId: string;
   sourceEmployeeId: string;
@@ -2078,19 +2089,35 @@ export function MonthlyScheduler({
       style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
     >
       <div className="panel-heading panel-heading--split">
-        <h1 className="panel-title">{formatMonthDateRange(monthDays)}</h1>
-        <div className="planner-actions">
-          <div className="planner-actions__row planner-actions__row--nav">
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
-              Previous month
-            </button>
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
-              Next month
-            </button>
-          </div>
+        <div className="schedule-heading-month" aria-label="Schedule month">
+          <button
+            type="button"
+            className="schedule-heading-month__button schedule-heading-month__button--previous"
+            onClick={() => handleMonthChange(-1)}
+            aria-label="Previous month"
+          >
+            ‹
+          </button>
+          <h1 className="panel-title schedule-heading-month__label">{formatMonthDateRange(monthDays)}</h1>
+          <button
+            type="button"
+            className="schedule-heading-month__button schedule-heading-month__button--next"
+            onClick={() => handleMonthChange(1)}
+            aria-label="Next month"
+          >
+            ›
+          </button>
+        </div>
+        <div className="planner-actions planner-actions--schedule">
           <div className="planner-actions__row planner-actions__row--save">
-            <button type="button" className="ghost-button" onClick={handlePrintSchedules}>
-              Print schedules
+            <button
+              type="button"
+              className="ghost-button icon-button schedule-print-button"
+              onClick={handlePrintSchedules}
+              aria-label="Print schedules"
+              title="Print schedules"
+            >
+              <PrinterIcon />
             </button>
           </div>
         </div>

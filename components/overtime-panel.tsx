@@ -32,6 +32,15 @@ type OvertimeTargetMode = "main" | "sub";
 type OvertimeTargetKey = "all" | "main" | `sub:${string}`;
 type OvertimeAvailabilityFilter = "all" | "available";
 
+function CreatePostingIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+      <path d="M6.5 4.5h11A2.5 2.5 0 0 1 20 7v10a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17V7a2.5 2.5 0 0 1 2.5-2.5Z" />
+    </svg>
+  );
+}
+
 /**
  * Overtime board for packaging claimable work into one operational queue.
  *
@@ -802,7 +811,7 @@ export function OvertimePanel({
   );
   const [selectedTargetKey, setSelectedTargetKey] = useState<OvertimeTargetKey | "">(buildInitialTargetKey(snapshot));
   const [selectedAssignmentFilter, setSelectedAssignmentFilter] = useState("all");
-  const [availabilityFilter, setAvailabilityFilter] = useState<OvertimeAvailabilityFilter>("all");
+  const [availabilityFilter, setAvailabilityFilter] = useState<OvertimeAvailabilityFilter>("available");
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
@@ -1721,8 +1730,14 @@ export function OvertimePanel({
 
         {canManageManualPostings ? (
           <div className="toolbar-actions">
-            <button type="button" className="ghost-button" onClick={() => setIsManualModalOpen(true)}>
-              Create posting
+            <button
+              type="button"
+              className="icon-button overtime-create-posting-button"
+              onClick={() => setIsManualModalOpen(true)}
+              aria-label="Create overtime posting"
+              title="Create overtime posting"
+            >
+              <CreatePostingIcon />
             </button>
           </div>
         ) : null}

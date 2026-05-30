@@ -3784,14 +3784,13 @@ export async function savePersonnel(input: SavePersonnelInput) {
     (update) =>
       isBlank(update.firstName) ||
       isBlank(update.lastName) ||
-      isBlank(update.email) ||
-      isBlank(update.scheduleId),
+      isBlank(update.email),
   );
 
   if (invalidEmployee) {
     return {
       ok: false,
-      message: "Each employee needs a first name, last name, email, and shift before saving.",
+      message: "Each employee needs a first name, last name, and email before saving.",
     };
   }
 
@@ -3804,7 +3803,9 @@ export async function savePersonnel(input: SavePersonnelInput) {
     };
   }
 
-  const scheduleIds = Array.from(new Set(input.updates.map((update) => update.scheduleId).filter(Boolean)));
+  const scheduleIds = Array.from(
+    new Set(input.updates.map((update) => update.scheduleId).filter((scheduleId): scheduleId is string => Boolean(scheduleId))),
+  );
   const competencyIds = Array.from(
     new Set(input.updates.flatMap((update) => update.competencyIds).filter(Boolean)),
   );
@@ -3887,12 +3888,12 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   for (const update of input.updates) {
-    const scheduleScope = scheduleScopeMap.get(update.scheduleId);
+    const scheduleScope = update.scheduleId ? scheduleScopeMap.get(update.scheduleId) : sessionScope;
 
     if (!scheduleScope) {
       return {
         ok: false,
-        message: "Could not resolve the organizational scope for one or more selected shifts.",
+        message: "Could not resolve the organizational scope for one or more personnel rows.",
       };
     }
 
@@ -3914,14 +3915,16 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   const employeeRows = input.updates.map((update) => {
+    const employeeScope = update.scheduleId ? scheduleScopeMap.get(update.scheduleId) ?? sessionScope : sessionScope;
+
     return {
-      ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
+      ...toDatabaseScope(employeeScope),
       id: update.employeeId,
       first_name: update.firstName.trim(),
       last_name: update.lastName.trim(),
       email: update.email.trim().toLowerCase() || null,
       role_title: update.role.trim() || "Operator",
-      schedule_id: update.scheduleId,
+      schedule_id: update.scheduleId || null,
       is_active: true,
     };
   });
@@ -3957,11 +3960,13 @@ export async function savePersonnel(input: SavePersonnelInput) {
         return { error: null };
       }
 
+      const employeeScope = update.scheduleId ? scheduleScopeMap.get(update.scheduleId) ?? sessionScope : sessionScope;
+
       return supabase.from("employee_competencies").insert(
         update.competencyIds.map((competencyId) => ({
           employee_id: update.employeeId,
           competency_id: competencyId,
-          ...toDatabaseScope(scheduleScopeMap.get(update.scheduleId) ?? sessionScope),
+          ...toDatabaseScope(employeeScope),
         })),
       );
     }),

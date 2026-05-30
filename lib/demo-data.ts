@@ -21,6 +21,7 @@ function demoEmployee(employee: DemoEmployee): SchedulerSnapshot["schedules"][nu
 
 export const demoSchedulerSnapshot: SchedulerSnapshot = {
   month: "2026-03",
+  unassignedEmployees: [],
   productionUnits: [
     {
       id: "unit-casting",
