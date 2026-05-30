@@ -12,6 +12,7 @@ import type { AppNotification, AppSession } from "@/lib/types";
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
+const HEAVY_MOBILE_NAV_PATHS = new Set(["/schedule", "/overtime", "/mutuals", "/sub-schedules", "/metrics"]);
 
 function isNotification(value: unknown): value is AppNotification {
   return (
@@ -438,10 +439,15 @@ export function WorkspaceShell({
       return;
     }
 
-    event.preventDefault();
     setIsMobileSidebarOpen(false);
     setIsNotificationsOpen(false);
-    router.push(href);
+
+    if (!HEAVY_MOBILE_NAV_PATHS.has(getWorkspaceRoutePath(href))) {
+      return;
+    }
+
+    event.preventDefault();
+    window.location.assign(href);
   };
 
   return (

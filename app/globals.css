@@ -1431,6 +1431,31 @@ button.workspace-nav-link {
   line-height: 1.4;
 }
 
+.toolbar-status--retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.toolbar-status__retry {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--team-accent);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+.toolbar-status__retry:hover {
+  color: color-mix(in srgb, var(--team-accent) 76%, var(--ink));
+}
+
 .set-builder {
   display: grid;
   gap: 0.9rem;

@@ -1,15 +1,14 @@
 import { OvertimeRouteLoading } from "@/components/route-loading";
-import { WorkspaceShell } from "@/components/workspace-shell";
-import { requireAppSession } from "@/lib/auth";
 import { getCurrentMonthKey } from "@/lib/scheduling";
+import type { AppSession } from "@/lib/types";
 
-export default async function Loading() {
-  const session = await requireAppSession(["admin", "leader", "worker"]);
+const loadingViewer = {
+  role: "leader",
+  displayName: "Loading",
+} satisfies Pick<AppSession, "role" | "displayName">;
+
+export default function Loading() {
   const month = getCurrentMonthKey("America/Edmonton");
 
-  return (
-    <WorkspaceShell viewer={session}>
-      <OvertimeRouteLoading viewer={session} month={month} />
-    </WorkspaceShell>
-  );
+  return <OvertimeRouteLoading viewer={loadingViewer} month={month} />;
 }

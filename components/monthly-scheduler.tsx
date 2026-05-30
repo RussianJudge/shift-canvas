@@ -85,8 +85,21 @@ type ScheduleAuxHydrationPayload = {
   key: string;
   snapshot: ScheduleAuxSnapshot;
 };
+type ScheduleAuxFailurePayload = {
+  key: string;
+  message: string;
+};
+type IdleCapableWindow = Window &
+  typeof globalThis & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
 
 const SCHEDULE_AUX_HYDRATED_EVENT = "shift-canvas:schedule-aux-hydrated";
+const SCHEDULE_AUX_FAILED_EVENT = "shift-canvas:schedule-aux-failed";
+const SCHEDULE_AUX_RETRY_EVENT = "shift-canvas:schedule-aux-retry";
+const SCHEDULE_AUX_TIMEOUT_MS = 12000;
+const SCHEDULE_AUX_MOBILE_DEFER_MS = 350;
 const scheduleAuxSnapshotCache = new Map<string, ScheduleAuxSnapshot>();
 
 function withEmptyScheduleAux(snapshot: ScheduleGridSnapshot): SchedulePageSnapshot {
@@ -107,39 +120,147 @@ export function ScheduleAuxHydrator({
   auxSnapshotKey: string;
 }) {
   useEffect(() => {
-    const controller = new AbortController();
+    let controller: AbortController | null = null;
+    let timeoutId: number | null = null;
+    let deferId: number | null = null;
+    let idleId: number | null = null;
+    let isDisposed = false;
 
-    fetch(`/api/schedule-aux?month=${encodeURIComponent(month)}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Schedule details failed to load (${response.status})`);
-        }
+    function dispatchFailure(message: string) {
+      window.dispatchEvent(
+        new CustomEvent<ScheduleAuxFailurePayload>(SCHEDULE_AUX_FAILED_EVENT, {
+          detail: {
+            key: auxSnapshotKey,
+            message,
+          },
+        }),
+      );
+    }
 
-        return response.json() as Promise<ScheduleAuxSnapshot>;
+    function clearPendingTimers() {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      if (deferId !== null) {
+        window.clearTimeout(deferId);
+        deferId = null;
+      }
+
+      const idleWindow = window as IdleCapableWindow;
+
+      if (idleId !== null && idleWindow.cancelIdleCallback) {
+        idleWindow.cancelIdleCallback(idleId);
+        idleId = null;
+      }
+    }
+
+    function loadAuxSnapshot() {
+      if (isDisposed) {
+        return;
+      }
+
+      controller?.abort();
+      controller = new AbortController();
+      let didTimeout = false;
+
+      timeoutId = window.setTimeout(() => {
+        didTimeout = true;
+        controller?.abort();
+      }, SCHEDULE_AUX_TIMEOUT_MS);
+
+      fetch(`/api/schedule-aux?month=${encodeURIComponent(month)}`, {
+        cache: "no-store",
+        signal: controller.signal,
       })
-      .then((auxSnapshot) => {
-        scheduleAuxSnapshotCache.set(auxSnapshotKey, auxSnapshot);
-        window.dispatchEvent(
-          new CustomEvent<ScheduleAuxHydrationPayload>(SCHEDULE_AUX_HYDRATED_EVENT, {
-            detail: {
-              key: auxSnapshotKey,
-              snapshot: auxSnapshot,
-            },
-          }),
-        );
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Schedule details failed to load (${response.status})`);
+          }
 
-        console.error("Could not load schedule details", error);
-      });
+          return response.json() as Promise<ScheduleAuxSnapshot>;
+        })
+        .then((auxSnapshot) => {
+          if (isDisposed) {
+            return;
+          }
 
-    return () => controller.abort();
+          scheduleAuxSnapshotCache.set(auxSnapshotKey, auxSnapshot);
+          window.dispatchEvent(
+            new CustomEvent<ScheduleAuxHydrationPayload>(SCHEDULE_AUX_HYDRATED_EVENT, {
+              detail: {
+                key: auxSnapshotKey,
+                snapshot: auxSnapshot,
+              },
+            }),
+          );
+        })
+        .catch((error: unknown) => {
+          if (isDisposed) {
+            return;
+          }
+
+          if (error instanceof DOMException && error.name === "AbortError" && !didTimeout) {
+            return;
+          }
+
+          console.error("Could not load schedule details", error);
+          dispatchFailure(
+            didTimeout
+              ? "Schedule details took too long to load."
+              : error instanceof Error
+                ? error.message
+                : "Schedule details could not load.",
+          );
+        })
+        .finally(() => {
+          if (timeoutId !== null) {
+            window.clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+        });
+    }
+
+    function scheduleAuxLoad() {
+      const isMobile = window.matchMedia("(max-width: 600px)").matches;
+      const idleWindow = window as IdleCapableWindow;
+
+      if (!isMobile) {
+        deferId = window.setTimeout(loadAuxSnapshot, 0);
+        return;
+      }
+
+      if (idleWindow.requestIdleCallback) {
+        idleId = idleWindow.requestIdleCallback(loadAuxSnapshot, {
+          timeout: SCHEDULE_AUX_MOBILE_DEFER_MS,
+        });
+        return;
+      }
+
+      deferId = window.setTimeout(loadAuxSnapshot, SCHEDULE_AUX_MOBILE_DEFER_MS);
+    }
+
+    function handleRetry(event: Event) {
+      const payload = (event as CustomEvent<{ key: string }>).detail;
+
+      if (payload?.key !== auxSnapshotKey) {
+        return;
+      }
+
+      clearPendingTimers();
+      loadAuxSnapshot();
+    }
+
+    window.addEventListener(SCHEDULE_AUX_RETRY_EVENT, handleRetry);
+    scheduleAuxLoad();
+
+    return () => {
+      isDisposed = true;
+      clearPendingTimers();
+      window.removeEventListener(SCHEDULE_AUX_RETRY_EVENT, handleRetry);
+      controller?.abort();
+    };
   }, [auxSnapshotKey, month]);
 
   return null;
@@ -986,6 +1107,7 @@ export function MonthlyScheduler({
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<SchedulePageSnapshot>(() => withEmptyScheduleAux(initialSnapshot));
   const [isAuxLoaded, setIsAuxLoaded] = useState(false);
+  const [auxLoadError, setAuxLoadError] = useState<string | null>(null);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
     forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
       ? forcedScheduleId
@@ -1020,8 +1142,9 @@ export function MonthlyScheduler({
   const [isSavingPins, startPinSaveTransition] = useTransition();
   const isSaving = isSavingTransition || activeSaveCount > 0;
   const isScheduleLocked = isSaving || isUpdatingSetCompletion;
-  const isScheduleDetailsLoading = !isAuxLoaded;
-  const isScheduleActionLocked = isScheduleLocked || isScheduleDetailsLoading;
+  const isScheduleDetailsLoading = !isAuxLoaded && !auxLoadError;
+  const isScheduleDetailsUnavailable = !isAuxLoaded && Boolean(auxLoadError);
+  const isScheduleActionLocked = isScheduleLocked || !isAuxLoaded;
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const latestAutoSaveTokenRef = useRef(0);
   const baselineAssignmentsRef = useRef(baselineAssignments);
@@ -1474,7 +1597,19 @@ export function MonthlyScheduler({
         ...auxSnapshot,
       };
     });
+    setAuxLoadError(null);
     setIsAuxLoaded(true);
+  }
+
+  function retryScheduleDetails() {
+    setAuxLoadError(null);
+    window.dispatchEvent(
+      new CustomEvent<{ key: string }>(SCHEDULE_AUX_RETRY_EVENT, {
+        detail: {
+          key: auxSnapshotKey,
+        },
+      }),
+    );
   }
 
   useEffect(() => {
@@ -1494,9 +1629,24 @@ export function MonthlyScheduler({
       applyAuxSnapshot(payload.snapshot);
     }
 
-    window.addEventListener(SCHEDULE_AUX_HYDRATED_EVENT, handleAuxSnapshotHydrated);
+    function handleAuxSnapshotFailed(event: Event) {
+      const payload = (event as CustomEvent<ScheduleAuxFailurePayload>).detail;
 
-    return () => window.removeEventListener(SCHEDULE_AUX_HYDRATED_EVENT, handleAuxSnapshotHydrated);
+      if (payload?.key !== auxSnapshotKey) {
+        return;
+      }
+
+      setAuxLoadError(payload.message || "Schedule details could not load.");
+      setIsAuxLoaded(false);
+    }
+
+    window.addEventListener(SCHEDULE_AUX_HYDRATED_EVENT, handleAuxSnapshotHydrated);
+    window.addEventListener(SCHEDULE_AUX_FAILED_EVENT, handleAuxSnapshotFailed);
+
+    return () => {
+      window.removeEventListener(SCHEDULE_AUX_HYDRATED_EVENT, handleAuxSnapshotHydrated);
+      window.removeEventListener(SCHEDULE_AUX_FAILED_EVENT, handleAuxSnapshotFailed);
+    };
   }, [auxSnapshotKey]);
 
   useEffect(() => {
@@ -1513,6 +1663,7 @@ export function MonthlyScheduler({
 
     setSnapshot(withEmptyScheduleAux(initialSnapshot));
     setIsAuxLoaded(false);
+    setAuxLoadError(null);
     const cachedSnapshot = scheduleAuxSnapshotCache.get(auxSnapshotKey);
 
     if (cachedSnapshot) {
@@ -2326,7 +2477,17 @@ export function MonthlyScheduler({
         <div className="toolbar-status-wrap">
           {isMonthLoading ? <p className="toolbar-status">Loading month...</p> : null}
           {!isMonthLoading && isScheduleDetailsLoading ? <p className="toolbar-status">Loading schedule details...</p> : null}
-          {!isMonthLoading && !isScheduleDetailsLoading && statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+          {!isMonthLoading && isScheduleDetailsUnavailable ? (
+            <p className="toolbar-status toolbar-status--retry">
+              Some schedule details could not load.
+              <button type="button" className="toolbar-status__retry" onClick={retryScheduleDetails}>
+                Retry
+              </button>
+            </p>
+          ) : null}
+          {!isMonthLoading && !isScheduleDetailsLoading && !isScheduleDetailsUnavailable && statusMessage ? (
+            <p className="toolbar-status">{statusMessage}</p>
+          ) : null}
         </div>
       </div>
 
