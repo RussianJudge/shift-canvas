@@ -10,6 +10,7 @@ import type {
   ClaimOvertimePostingInput,
   CreateManualOvertimePostingInput,
   CreateMutualPostingInput,
+  DeleteSubScheduleInput,
   DeleteManualOvertimePostingInput,
   AcceptMutualApplicationInput,
   ReleaseOvertimePostingInput,
@@ -4349,6 +4350,72 @@ export async function saveSubSchedules(input: SaveSubSchedulesInput) {
   return {
     ok: true,
     message: "Sub-schedule changes saved to Supabase.",
+  };
+}
+
+/** Deletes a sub-schedule and its projected assignments/allowed competencies. */
+export async function deleteSubSchedule(input: DeleteSubScheduleInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can delete sub-schedules.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Sub-schedules are unavailable.",
+    };
+  }
+
+  const subScheduleResult = await supabase
+    .from("sub_schedules")
+    .select("id, company_id, site_id, business_area_id")
+    .eq("id", input.subScheduleId)
+    .maybeSingle();
+
+  const subSchedule = subScheduleResult.data as ({ id: string } & ScopedDatabaseRow) | null;
+
+  if (subScheduleResult.error || !subSchedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected sub-schedule.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(subSchedule))) {
+    return {
+      ok: false,
+      message: "You do not have permission to delete that sub-schedule.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("sub_schedules")
+    .delete()
+    .eq("id", input.subScheduleId);
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not delete sub-schedule: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/sub-schedules");
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
+  revalidatePath("/metrics");
+  revalidatePath("/overtime");
+
+  return {
+    ok: true,
+    message: "Sub-schedule deleted.",
   };
 }
 

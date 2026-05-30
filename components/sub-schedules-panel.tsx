@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
 import {
+  deleteSubSchedule,
   saveSubScheduleAssignments,
   saveSubSchedules,
 } from "@/app/actions";
@@ -20,6 +21,7 @@ import {
 import { getManualEntryTimeCodes } from "@/lib/sub-schedules";
 import type {
   Competency,
+  DeleteSubScheduleInput,
   Employee,
   SaveSubScheduleAssignmentsInput,
   SaveSubSchedulesInput,
@@ -54,6 +56,8 @@ type DragRange = {
   currentIndex: number;
   selection: SubScheduleCellSelection;
 };
+
+const SUBSCHEDULE_AUTO_SAVE_DEBOUNCE_MS = 2500;
 
 function PlusIcon() {
   return (
@@ -334,8 +338,11 @@ function SubScheduleSettingsModal({
   issues,
   hasChanges,
   isSaving,
+  isDeleting,
+  isPersisted,
   onChange,
   onClose,
+  onDelete,
   onRevert,
   onSave,
 }: {
@@ -344,11 +351,17 @@ function SubScheduleSettingsModal({
   issues: string[];
   hasChanges: boolean;
   isSaving: boolean;
+  isDeleting: boolean;
+  isPersisted: boolean;
   onChange: (updater: (subSchedule: EditableSubSchedule) => EditableSubSchedule) => void;
   onClose: () => void;
+  onDelete: () => void;
   onRevert: () => void;
   onSave: () => void;
 }) {
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const isBusy = isSaving || isDeleting;
+
   return createPortal(
     <div className="assignment-modal-backdrop" onClick={onClose}>
       <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
@@ -357,7 +370,7 @@ function SubScheduleSettingsModal({
             <span className="assignment-modal__eyebrow">Sub-schedule settings</span>
             <h2 className="assignment-modal__title">{subSchedule.name || "New sub-schedule"}</h2>
           </div>
-          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
+          <button type="button" className="ghost-button" onClick={onClose} disabled={isBusy}>
             Close
           </button>
         </div>
@@ -367,6 +380,7 @@ function SubScheduleSettingsModal({
             <span>Name</span>
             <input
               value={subSchedule.name}
+              disabled={isBusy}
               onChange={(event) =>
                 onChange((current) => ({
                   ...current,
@@ -380,6 +394,7 @@ function SubScheduleSettingsModal({
             <span>Summary code</span>
             <select
               value={subSchedule.summaryTimeCodeId}
+              disabled={isBusy}
               onChange={(event) =>
                 onChange((current) => ({
                   ...current,
@@ -400,6 +415,7 @@ function SubScheduleSettingsModal({
             <input
               type="checkbox"
               checked={!subSchedule.isArchived}
+              disabled={isBusy}
               onChange={(event) =>
                 onChange((current) => ({
                   ...current,
@@ -413,12 +429,108 @@ function SubScheduleSettingsModal({
 
         {issues.length > 0 ? <p className="toolbar-status">{issues[0]}</p> : null}
 
+        <div className="assignment-modal__danger-zone">
+          <div>
+            <strong>Delete sub-schedule</strong>
+            <span>
+              {isPersisted
+                ? "Deletes this sub-schedule and its projected staffing rows."
+                : "Removes this unsaved sub-schedule draft."}
+            </span>
+          </div>
+          {isConfirmingDelete ? (
+            <div className="table-actions-inline">
+              <button
+                type="button"
+                className="table-action"
+                onClick={() => setIsConfirmingDelete(false)}
+                disabled={isBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="table-action table-action--danger"
+                onClick={onDelete}
+                disabled={isBusy}
+              >
+                {isDeleting ? "Deleting..." : "Confirm delete"}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="table-action table-action--danger"
+              onClick={() => setIsConfirmingDelete(true)}
+              disabled={isBusy}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+
         <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onRevert} disabled={isSaving || !hasChanges}>
+          <button type="button" className="ghost-button" onClick={onRevert} disabled={isBusy || !hasChanges}>
             Revert
           </button>
-          <button type="button" className="primary-button" onClick={onSave} disabled={isSaving || !hasChanges || issues.length > 0}>
+          <button type="button" className="primary-button" onClick={onSave} disabled={isBusy || !hasChanges || issues.length > 0}>
             {isSaving ? "Saving..." : "Save settings"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function AddSubScheduleEmployeeModal({
+  employees,
+  selectedEmployeeId,
+  onSelect,
+  onAdd,
+  onClose,
+}: {
+  employees: Employee[];
+  selectedEmployeeId: string;
+  onSelect: (employeeId: string) => void;
+  onAdd: () => void;
+  onClose: () => void;
+}) {
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Sub-schedule row</span>
+            <h2 className="assignment-modal__title">Add employee</h2>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {employees.length > 0 ? (
+          <label className="field">
+            <span>Employee</span>
+            <select value={selectedEmployeeId} onChange={(event) => onSelect(event.target.value)}>
+              <option value="">Select employee</option>
+              {employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="empty-state">
+            <strong>All employees are already visible.</strong>
+            <span>Every available worker has a row in this sub-schedule.</span>
+          </div>
+        )}
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="primary-button" onClick={onAdd} disabled={!selectedEmployeeId}>
+            Add row
           </button>
         </div>
       </section>
@@ -472,9 +584,12 @@ export function SubSchedulesPanel({
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
   const [addedEmployeeIds, setAddedEmployeeIds] = useState<string[]>([]);
   const [employeeToAddId, setEmployeeToAddId] = useState("");
+  const [isEmployeePickerOpen, setIsEmployeePickerOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isSavingDefinitions, startDefinitionSaveTransition] = useTransition();
+  const [isDeletingDefinition, startDefinitionDeleteTransition] = useTransition();
   const [isSavingAssignments, startAssignmentSaveTransition] = useTransition();
+  const lastAssignmentSaveSignatureRef = useRef("");
 
   useEffect(() => {
     setSubSchedules(cloneSubSchedules(initialSubSchedules));
@@ -488,6 +603,7 @@ export function SubSchedulesPanel({
     });
     setAddedEmployeeIds([]);
     setEmployeeToAddId("");
+    setIsEmployeePickerOpen(false);
     setIsSettingsModalOpen(false);
     setStatusMessage("");
     setAssignmentMessage("");
@@ -515,7 +631,9 @@ export function SubSchedulesPanel({
     setDragRange(null);
     setAddedEmployeeIds([]);
     setEmployeeToAddId("");
+    setIsEmployeePickerOpen(false);
     setAssignmentMessage("");
+    lastAssignmentSaveSignatureRef.current = "";
   }, [baselineAssignmentSelections]);
 
   const dirtySubScheduleIds = useMemo(
@@ -559,6 +677,60 @@ export function SubSchedulesPanel({
     [activeSubSchedule, baselineAssignmentSelections, draftAssignmentSelections],
   );
   const hasAssignmentChanges = assignmentUpdates.length > 0;
+  const assignmentUpdateSignature = useMemo(
+    () => JSON.stringify(assignmentUpdates),
+    [assignmentUpdates],
+  );
+
+  useEffect(() => {
+    if (
+      !activeSubSchedule ||
+      !isPersistedActiveSubSchedule ||
+      activeSubSchedule.isArchived ||
+      activeSubSchedule.competencyIds.length === 0 ||
+      !hasAssignmentChanges ||
+      isSavingAssignments ||
+      assignmentUpdateSignature === lastAssignmentSaveSignatureRef.current
+    ) {
+      return;
+    }
+
+    const subScheduleId = activeSubSchedule.id;
+    const updates = assignmentUpdates;
+    const signature = assignmentUpdateSignature;
+
+    const timer = window.setTimeout(() => {
+      lastAssignmentSaveSignatureRef.current = signature;
+      setAssignmentMessage("Saving changes automatically...");
+
+      startAssignmentSaveTransition(async () => {
+        const result = await saveSubScheduleAssignments({
+          subScheduleId,
+          updates,
+        } as SaveSubScheduleAssignmentsInput);
+
+        setAssignmentMessage(result.ok ? "Changes saved automatically." : result.message);
+
+        if (result.ok) {
+          setEditorCell(null);
+          router.refresh();
+        } else {
+          lastAssignmentSaveSignatureRef.current = "";
+        }
+      });
+    }, SUBSCHEDULE_AUTO_SAVE_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    activeSubSchedule,
+    assignmentUpdateSignature,
+    assignmentUpdates,
+    hasAssignmentChanges,
+    isPersistedActiveSubSchedule,
+    isSavingAssignments,
+    router,
+    startAssignmentSaveTransition,
+  ]);
 
   const assignedEmployeeIds = useMemo(
     () =>
@@ -605,9 +777,6 @@ export function SubSchedulesPanel({
     () => getManualEntryTimeCodes(snapshot.timeCodes),
     [snapshot.timeCodes],
   );
-  const selectedSummaryTimeCode = activeSubSchedule
-    ? snapshot.timeCodes.find((timeCode) => timeCode.id === activeSubSchedule.summaryTimeCodeId) ?? null
-    : null;
   const activeSubScheduleIssues = activeSubSchedule ? getSubScheduleIssues(activeSubSchedule) : [];
 
   function updateSubSchedule(
@@ -666,20 +835,66 @@ export function SubSchedulesPanel({
     setStatusMessage("Changes reverted.");
   }
 
+  function handleDeleteSubSchedule(subScheduleId: string) {
+    const isPersistedSubSchedule = snapshot.subSchedules.some((subSchedule) => subSchedule.id === subScheduleId);
+
+    if (!isPersistedSubSchedule) {
+      setSubSchedules((current) => current.filter((subSchedule) => subSchedule.id !== subScheduleId));
+      setBaselineSubSchedules((current) => current.filter((subSchedule) => subSchedule.id !== subScheduleId));
+      setSelectedSubScheduleId((current) => {
+        if (current !== subScheduleId) {
+          return current;
+        }
+
+        const nextSubSchedule = subSchedules.find((subSchedule) => subSchedule.id !== subScheduleId);
+        return nextSubSchedule?.id ?? "";
+      });
+      setIsSettingsModalOpen(false);
+      setStatusMessage("Sub-schedule draft deleted.");
+      return;
+    }
+
+    startDefinitionDeleteTransition(async () => {
+      const result = await deleteSubSchedule({
+        subScheduleId,
+      } as DeleteSubScheduleInput);
+
+      setStatusMessage(result.message);
+
+      if (result.ok) {
+        setSubSchedules((current) => current.filter((subSchedule) => subSchedule.id !== subScheduleId));
+        setBaselineSubSchedules((current) => current.filter((subSchedule) => subSchedule.id !== subScheduleId));
+        setSelectedSubScheduleId((current) => {
+          if (current !== subScheduleId) {
+            return current;
+          }
+
+          const nextSubSchedule = subSchedules.find((subSchedule) => subSchedule.id !== subScheduleId);
+          return nextSubSchedule?.id ?? "";
+        });
+        setIsSettingsModalOpen(false);
+        router.refresh();
+      }
+    });
+  }
+
   function handleMonthChange(delta: number) {
     const nextMonth = shiftMonthKey(snapshot.month, delta);
     router.push(`/sub-schedules?month=${nextMonth}`, { scroll: false });
   }
 
   function handleAddEmployeeRow() {
-    if (!employeeToAddId) {
+    const employeeId = employeeToAddId;
+
+    if (!employeeId) {
       return;
     }
 
     setAddedEmployeeIds((current) =>
-      current.includes(employeeToAddId) ? current : [...current, employeeToAddId],
+      current.includes(employeeId) ? current : [...current, employeeId],
     );
     setEmployeeToAddId("");
+    setIsEmployeePickerOpen(false);
     setAssignmentMessage("");
   }
 
@@ -782,42 +997,28 @@ export function SubSchedulesPanel({
     return () => window.removeEventListener("pointerup", handlePointerUp);
   }, [dragRange, monthDays]);
 
-  function handleSaveAssignments() {
-    if (!activeSubSchedule) {
-      return;
-    }
-
-    startAssignmentSaveTransition(async () => {
-      const result = await saveSubScheduleAssignments({
-        subScheduleId: activeSubSchedule.id,
-        updates: assignmentUpdates,
-      } as SaveSubScheduleAssignmentsInput);
-
-      setAssignmentMessage(result.message);
-
-      if (result.ok) {
-        setEditorCell(null);
-        router.refresh();
-      }
-    });
-  }
-
   return (
     <section className="panel-frame">
       <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Sub-Schedules</h1>
-        <div className="metrics-month-nav">
-          <div className="metrics-month-nav__current">
-            <strong>{formatMonthLabel(snapshot.month)}</strong>
-          </div>
-          <div className="metrics-month-nav__actions">
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(-1)}>
-              Prev month
-            </button>
-            <button type="button" className="ghost-button" onClick={() => handleMonthChange(1)}>
-              Next month
-            </button>
-          </div>
+        <div className="schedule-heading-month sub-schedules-month-pager" aria-label="Sub-schedules month">
+          <button
+            type="button"
+            className="schedule-heading-month__button schedule-heading-month__button--previous"
+            onClick={() => handleMonthChange(-1)}
+            aria-label="Previous month"
+          >
+            ‹
+          </button>
+          <strong className="panel-title schedule-heading-month__label">{formatMonthLabel(snapshot.month)}</strong>
+          <button
+            type="button"
+            className="schedule-heading-month__button schedule-heading-month__button--next"
+            onClick={() => handleMonthChange(1)}
+            aria-label="Next month"
+          >
+            ›
+          </button>
         </div>
       </div>
 
@@ -893,57 +1094,9 @@ export function SubSchedulesPanel({
       </section>
 
       <section className="metrics-section">
-        <div className="metrics-section__header">
-          <div className="metrics-section__title-group">
-            <h2 className="metrics-section__title">Monthly Builder</h2>
-            {activeSubSchedule && selectedSummaryTimeCode ? (
-              <p className="toolbar-status">
-                Building {activeSubSchedule.name}. Main schedule will show {selectedSummaryTimeCode.code} for assigned cells.
-              </p>
-            ) : null}
-          </div>
-        </div>
-
         {activeSubSchedule ? (
           <>
             <div className="workspace-toolbar workspace-toolbar--scheduler subschedule-builder-toolbar">
-              <label className="field">
-                <span>Add employee</span>
-                <div className="subschedule-add-employee">
-                  <select
-                    value={employeeToAddId}
-                    onChange={(event) => setEmployeeToAddId(event.target.value)}
-                    disabled={!isPersistedActiveSubSchedule || activeSubSchedule.isArchived || availableEmployeesToAdd.length === 0}
-                  >
-                    <option value="">Select employee</option>
-                    {availableEmployeesToAdd.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={handleAddEmployeeRow}
-                    disabled={!isPersistedActiveSubSchedule || activeSubSchedule.isArchived || !employeeToAddId}
-                  >
-                    Add
-                  </button>
-                </div>
-              </label>
-
-              <div className="toolbar-actions">
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={handleSaveAssignments}
-                  disabled={!isPersistedActiveSubSchedule || activeSubSchedule.isArchived || isSavingAssignments || !hasAssignmentChanges}
-                >
-                  {isSavingAssignments ? "Saving..." : "Save assignments"}
-                </button>
-              </div>
-
               <div className="toolbar-status-wrap">
                 {!isPersistedActiveSubSchedule ? (
                   <p className="toolbar-status">Save this new sub-schedule definition before staffing it.</p>
@@ -951,6 +1104,8 @@ export function SubSchedulesPanel({
                   <p className="toolbar-status">Archived sub-schedules stay visible for history but cannot be edited.</p>
                 ) : activeSubSchedule.competencyIds.length === 0 ? (
                   <p className="toolbar-status">Assign competencies to this sub-schedule first, then staff its monthly builder.</p>
+                ) : isSavingAssignments ? (
+                  <p className="toolbar-status">Saving changes automatically...</p>
                 ) : assignmentMessage ? (
                   <p className="toolbar-status">{assignmentMessage}</p>
                 ) : null}
@@ -979,93 +1134,112 @@ export function SubSchedulesPanel({
                   </div>
                 ))}
 
-                {rowEmployeeIds.length === 0 ? (
-                  <div
-                    className="empty-state sticky-column"
-                    style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
-                  >
-                    <strong>No employees added yet.</strong>
-                    <span>Add a worker to start building this sub-schedule.</span>
-                  </div>
-                ) : (
-                  rowEmployeeIds.flatMap((employeeId) => {
-                    const employee = employeeMap[employeeId];
-                    const homeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+                {rowEmployeeIds.flatMap((employeeId) => {
+                  const employee = employeeMap[employeeId];
 
-                    if (!employee || !homeSchedule) {
-                      return [];
-                    }
+                  if (!employee) {
+                    return [];
+                  }
 
-                    return [
-                      <div key={`sub-row-${employeeId}`} className="employee-cell sticky-column">
-                        <div className="employee-cell__main">
-                          <strong>{employee.name}</strong>
-                          <span>{homeSchedule.name}</span>
-                        </div>
-                      </div>,
-                      ...monthDays.map((day, dayIndex) => {
-                        const key = createSubScheduleCellKey(employee.id, day.date);
-                        const selection = draftAssignmentSelections[key] ?? {
-                          competencyId: null,
-                          timeCodeId: null,
-                          notes: null,
-                        };
-                        const competency = selection.competencyId ? competencyMap[selection.competencyId] : null;
-                        const timeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
-                        const colorToken = timeCode?.colorToken ?? competency?.colorToken ?? "";
-                        const isInDragRange =
-                          dragRange?.employeeId === employee.id &&
-                          dayIndex >= Math.min(dragRange.startIndex, dragRange.currentIndex) &&
-                          dayIndex <= Math.max(dragRange.startIndex, dragRange.currentIndex);
+                  const homeSchedule = employee.scheduleId ? getScheduleById(snapshot, employee.scheduleId) : null;
 
-                        return (
-                          <div
-                            key={`sub-cell-${employee.id}-${day.date}`}
-                            className={`shift-cell shift-cell--day ${day.isWeekend ? "shift-cell--weekend" : ""} ${
+                  return [
+                    <div key={`sub-row-${employeeId}`} className="employee-cell sticky-column">
+                      <div className="employee-cell__main">
+                        <strong>{employee.name}</strong>
+                        <span>{homeSchedule?.name ?? "Unassigned"}</span>
+                      </div>
+                    </div>,
+                    ...monthDays.map((day, dayIndex) => {
+                      const key = createSubScheduleCellKey(employee.id, day.date);
+                      const selection = draftAssignmentSelections[key] ?? {
+                        competencyId: null,
+                        timeCodeId: null,
+                        notes: null,
+                      };
+                      const competency = selection.competencyId ? competencyMap[selection.competencyId] : null;
+                      const timeCode = selection.timeCodeId ? timeCodeMap[selection.timeCodeId] : null;
+                      const colorToken = timeCode?.colorToken ?? competency?.colorToken ?? "";
+                      const isInDragRange =
+                        dragRange?.employeeId === employee.id &&
+                        dayIndex >= Math.min(dragRange.startIndex, dragRange.currentIndex) &&
+                        dayIndex <= Math.max(dragRange.startIndex, dragRange.currentIndex);
+
+                      return (
+                        <div
+                          key={`sub-cell-${employee.id}-${day.date}`}
+                          className={`shift-cell shift-cell--day ${day.isWeekend ? "shift-cell--weekend" : ""} ${
+                            colorToken ? `legend-pill--${colorToken.toLowerCase()}` : ""
+                          } ${colorToken ? "shift-cell--coded" : ""} ${
+                            selection.notes ? "shift-cell--has-note" : ""
+                          } ${isInDragRange ? "shift-cell--range" : ""}`}
+                          onPointerDown={(event) => {
+                            if (
+                              event.button !== 0 ||
+                              !isPersistedActiveSubSchedule ||
+                              activeSubSchedule.isArchived
+                            ) {
+                              return;
+                            }
+
+                            handleCellPointerDown(employee.id, dayIndex, selection);
+                          }}
+                          onPointerEnter={(event) => {
+                            if (
+                              dragRange &&
+                              isPersistedActiveSubSchedule &&
+                              !activeSubSchedule.isArchived &&
+                              event.buttons === 1
+                            ) {
+                              handleDragHover(employee.id, dayIndex);
+                            }
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className={`shift-cell-button ${
                               colorToken ? `legend-pill--${colorToken.toLowerCase()}` : ""
-                            } ${colorToken ? "shift-cell--coded" : ""} ${
-                              selection.notes ? "shift-cell--has-note" : ""
-                            } ${isInDragRange ? "shift-cell--range" : ""}`}
-                            onPointerDown={(event) => {
-                              if (
-                                event.button !== 0 ||
-                                !isPersistedActiveSubSchedule ||
-                                activeSubSchedule.isArchived
-                              ) {
-                                return;
-                              }
-
-                              handleCellPointerDown(employee.id, dayIndex, selection);
-                            }}
-                            onPointerEnter={(event) => {
-                              if (
-                                dragRange &&
-                                isPersistedActiveSubSchedule &&
-                                !activeSubSchedule.isArchived &&
-                                event.buttons === 1
-                              ) {
-                                handleDragHover(employee.id, dayIndex);
-                              }
-                            }}
+                            }`}
+                            disabled={!isPersistedActiveSubSchedule || activeSubSchedule.isArchived}
+                            title={selection.notes ?? undefined}
+                            onClick={() => setEditorCell({ employeeId: employee.id, date: day.date })}
                           >
-                            <button
-                              type="button"
-                              className={`shift-cell-button ${
-                                colorToken ? `legend-pill--${colorToken.toLowerCase()}` : ""
-                              }`}
-                              disabled={!isPersistedActiveSubSchedule || activeSubSchedule.isArchived}
-                              title={selection.notes ?? undefined}
-                              onClick={() => setEditorCell({ employeeId: employee.id, date: day.date })}
-                            >
-                              {getCellCode(selection, competencyMap, timeCodeMap)}
-                              {selection.notes ? <span className="shift-cell__note-indicator" aria-hidden="true" /> : null}
-                            </button>
-                          </div>
-                        );
-                      }),
-                    ];
-                  })
-                )}
+                            {getCellCode(selection, competencyMap, timeCodeMap)}
+                            {selection.notes ? <span className="shift-cell__note-indicator" aria-hidden="true" /> : null}
+                          </button>
+                        </div>
+                      );
+                    }),
+                  ];
+                })}
+
+                <div className="employee-cell sticky-column subschedule-add-row">
+                  <button
+                    type="button"
+                    className="subschedule-add-row__button"
+                    onClick={() => {
+                      setEmployeeToAddId("");
+                      setIsEmployeePickerOpen(true);
+                    }}
+                    disabled={
+                      !isPersistedActiveSubSchedule ||
+                      activeSubSchedule.isArchived ||
+                      availableEmployeesToAdd.length === 0
+                    }
+                  >
+                    <span aria-hidden="true">+</span>
+                    {rowEmployeeIds.length === 0 ? "Add first worker" : "Add row"}
+                  </button>
+                </div>
+                {monthDays.map((day) => (
+                  <div
+                    key={`sub-add-row-cell-${day.date}`}
+                    className={`shift-cell shift-cell--day subschedule-add-row__cell ${
+                      day.isWeekend ? "shift-cell--weekend" : ""
+                    }`}
+                    aria-hidden="true"
+                  />
+                ))}
               </div>
             </div>
           </>
@@ -1107,6 +1281,19 @@ export function SubSchedulesPanel({
         />
       ) : null}
 
+      {isEmployeePickerOpen ? (
+        <AddSubScheduleEmployeeModal
+          employees={availableEmployeesToAdd}
+          selectedEmployeeId={employeeToAddId}
+          onSelect={setEmployeeToAddId}
+          onAdd={handleAddEmployeeRow}
+          onClose={() => {
+            setEmployeeToAddId("");
+            setIsEmployeePickerOpen(false);
+          }}
+        />
+      ) : null}
+
       {activeSubSchedule && isSettingsModalOpen ? (
         <SubScheduleSettingsModal
           subSchedule={activeSubSchedule}
@@ -1114,8 +1301,11 @@ export function SubSchedulesPanel({
           issues={activeSubScheduleIssues}
           hasChanges={hasDefinitionChanges}
           isSaving={isSavingDefinitions}
+          isDeleting={isDeletingDefinition}
+          isPersisted={isPersistedActiveSubSchedule}
           onChange={(updater) => updateSubSchedule(activeSubSchedule.id, updater)}
           onClose={() => setIsSettingsModalOpen(false)}
+          onDelete={() => handleDeleteSubSchedule(activeSubSchedule.id)}
           onRevert={() => handleRevertDefinitions({ closeModal: true })}
           onSave={() => handleSaveDefinitions({ closeModal: true })}
         />

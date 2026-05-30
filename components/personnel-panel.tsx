@@ -2,6 +2,7 @@
 
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 
 import { savePersonnel } from "@/app/actions";
 import { createAccountInvite } from "@/app/auth-actions";
@@ -72,6 +73,53 @@ function createInviteDraft(): InviteDraft {
     lastName: "",
     email: "",
   };
+}
+
+function RemoveEmployeeModal({
+  employeeName,
+  onCancel,
+  onConfirm,
+}: {
+  employeeName: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section
+        className="assignment-modal mutual-modal"
+        aria-label="Remove employee confirmation"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Personnel</span>
+            <h2 className="assignment-modal__title">Remove employee?</h2>
+            <p className="assignment-modal__context">
+              Remove {employeeName} from Personnel? This change will not save until you click Save.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+            Remove employee
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
 }
 
 /** Keeps UI sorting/search/display consistent while the editor stores split names. */
@@ -377,6 +425,7 @@ export function PersonnelPanel({
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
   const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
+  const [pendingRemoveEmployeeId, setPendingRemoveEmployeeId] = useState<string | null>(null);
   const [showInviteBuilder, setShowInviteBuilder] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [inviteDraft, setInviteDraft] = useState<InviteDraft>(createInviteDraft);
@@ -486,6 +535,7 @@ export function PersonnelPanel({
     setSelectedCompetencyFilter("all");
     setPendingCsvImport(null);
     setDraftEmployee(null);
+    setPendingRemoveEmployeeId(null);
     setShowInviteBuilder(false);
     setShowActionsMenu(false);
     setInviteDraft(createInviteDraft());
@@ -552,6 +602,9 @@ export function PersonnelPanel({
   const hasValidationErrors = invalidEmployeeIds.size > 0;
   const draftEmployeeIssues = draftEmployee ? getEmployeeIssues(draftEmployee) : [];
   const draftEmployeeFieldIssues = draftEmployee ? getEmployeeFieldIssues(draftEmployee) : {};
+  const pendingRemoveEmployee = pendingRemoveEmployeeId
+    ? employees.find((employee) => employee.id === pendingRemoveEmployeeId) ?? null
+    : null;
 
   const visibleEmployees = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -875,11 +928,17 @@ export function PersonnelPanel({
       return;
     }
 
-    const employeeName = getEditableEmployeeDisplayName(employee);
+    setPendingRemoveEmployeeId(employeeId);
+  }
 
-    if (!window.confirm(`Remove ${employeeName} from Personnel? This change will not save until you click Save.`)) {
+  function handleConfirmRemoveEmployee() {
+    if (!pendingRemoveEmployee) {
+      setPendingRemoveEmployeeId(null);
       return;
     }
+
+    const employeeId = pendingRemoveEmployee.id;
+    const employeeName = getEditableEmployeeDisplayName(pendingRemoveEmployee);
 
     setEmployees((current) => current.filter((employee) => employee.id !== employeeId));
 
@@ -887,6 +946,7 @@ export function PersonnelPanel({
       setDeletedEmployeeIds((current) => [...current, employeeId]);
     }
 
+    setPendingRemoveEmployeeId(null);
     setStatusMessage(`${employeeName} removed from the table. Save when you're ready.`);
   }
 
@@ -930,6 +990,7 @@ export function PersonnelPanel({
   }
 
   return (
+    <>
     <section className="panel-frame">
       <div className="panel-heading panel-heading--simple">
         <h1 className="panel-title">Personnel</h1>
@@ -1503,5 +1564,14 @@ export function PersonnelPanel({
         </table>
       </div>
     </section>
+
+    {pendingRemoveEmployee ? (
+      <RemoveEmployeeModal
+        employeeName={getEditableEmployeeDisplayName(pendingRemoveEmployee)}
+        onCancel={() => setPendingRemoveEmployeeId(null)}
+        onConfirm={handleConfirmRemoveEmployee}
+      />
+    ) : null}
+    </>
   );
 }

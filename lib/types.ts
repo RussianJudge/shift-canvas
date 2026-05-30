@@ -385,6 +385,10 @@ export interface SaveSubSchedulesInput {
   updates: SubScheduleUpdate[];
 }
 
+export interface DeleteSubScheduleInput {
+  subScheduleId: string;
+}
+
 export interface SaveSubScheduleCompetenciesInput {
   subScheduleId: string;
   competencyIds: string[];

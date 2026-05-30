@@ -2020,6 +2020,15 @@ button.workspace-nav-link {
   text-align: right;
 }
 
+.mutuals-year-pager {
+  justify-self: end;
+  grid-template-columns: 2.75rem minmax(6rem, auto) 2.75rem;
+}
+
+.sub-schedules-month-pager {
+  justify-self: end;
+}
+
 .mutuals-section {
   padding: 0 1.5rem 1.4rem;
 }
@@ -2472,6 +2481,32 @@ button.workspace-nav-link {
   outline-offset: 2px;
 }
 
+.assignment-modal__danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(185, 28, 28, 0.22);
+  border-radius: 0.95rem;
+  background: rgba(254, 242, 242, 0.74);
+}
+
+.assignment-modal__danger-zone > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.assignment-modal__danger-zone strong {
+  font-size: 0.7rem;
+  color: #991b1b;
+}
+
+.assignment-modal__danger-zone span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .assignment-modal__footer {
   display: flex;
   align-items: center;
@@ -2651,24 +2686,8 @@ button.workspace-nav-link {
 }
 
 .subschedule-builder-toolbar {
-  grid-template-columns: minmax(0, 20rem) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   row-gap: 0.9rem;
-}
-
-.subschedule-builder-toolbar .field {
-  min-width: min(100%, 17rem);
-}
-
-.subschedule-add-employee {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  align-items: center;
-}
-
-.subschedule-add-employee select {
-  min-width: min(100%, 14rem);
-  flex: 1 1 14rem;
 }
 
 .subschedule-builder-toolbar .toolbar-actions {
@@ -2689,6 +2708,46 @@ button.workspace-nav-link {
   align-items: stretch;
   width: max-content;
   min-width: 100%;
+}
+
+.subschedule-add-row {
+  min-height: 3rem;
+}
+
+.subschedule-add-row__button {
+  width: 100%;
+  min-height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px dashed color-mix(in srgb, var(--team-accent, #f97316) 48%, var(--line));
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--team-accent, #f97316) 8%, white);
+  color: var(--ink);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.subschedule-add-row__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.subschedule-add-row__button span {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  background: var(--team-accent, #f97316);
+  color: #fff;
+  line-height: 1;
+}
+
+.subschedule-add-row__cell {
+  min-height: 3rem;
+  opacity: 0.64;
 }
 
 .shift-cell--projected {
@@ -3870,6 +3929,14 @@ button.workspace-nav-link {
   .schedule-heading-month {
     width: 100%;
     grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;
+  }
+
+  .mutuals-year-pager {
+    justify-self: stretch;
+  }
+
+  .sub-schedules-month-pager {
+    justify-self: stretch;
   }
 
   .schedule-heading-month__label {
