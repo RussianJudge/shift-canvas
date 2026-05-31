@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 
 import { saveSchedules } from "@/app/actions";
 import type { SaveSchedulesInput, ScheduleUpdate, SchedulerSnapshot } from "@/lib/types";
@@ -15,6 +16,53 @@ type EditableSchedule = {
   isActive: boolean;
   employeeCount: number;
 };
+
+function RemoveScheduleModal({
+  scheduleName,
+  onCancel,
+  onConfirm,
+}: {
+  scheduleName: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section
+        className="assignment-modal mutual-modal"
+        aria-label="Remove shift confirmation"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Shifts</span>
+            <h2 className="assignment-modal__title">Remove shift?</h2>
+            <p className="assignment-modal__context">
+              Remove {scheduleName}? This change will not save until you click Save.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+            Remove shift
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
 
 /** Clones editable shift rows so the save baseline stays immutable. */
 function cloneSchedules(schedules: EditableSchedule[]) {
@@ -83,6 +131,7 @@ export function SchedulesPanel({
   const [baselineSchedules, setBaselineSchedules] = useState(initialSchedules);
   const [deletedScheduleIds, setDeletedScheduleIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
+  const [pendingRemoveScheduleId, setPendingRemoveScheduleId] = useState<string | null>(null);
   const [isSaving, startSaveTransition] = useTransition();
 
   const baselineMap = useMemo(
@@ -115,6 +164,9 @@ export function SchedulesPanel({
     );
   const hasChanges = dirtyUpdates.length > 0 || deletedScheduleIds.length > 0;
   const hasValidationErrors = invalidScheduleIds.size > 0;
+  const pendingRemoveSchedule = pendingRemoveScheduleId
+    ? schedules.find((schedule) => schedule.id === pendingRemoveScheduleId) ?? null
+    : null;
 
   function updateSchedule(
     scheduleId: string,
@@ -153,9 +205,16 @@ export function SchedulesPanel({
       return;
     }
 
-    if (!window.confirm(`Remove ${schedule.name}?`)) {
+    setPendingRemoveScheduleId(scheduleId);
+  }
+
+  function handleConfirmRemoveSchedule() {
+    if (!pendingRemoveSchedule) {
+      setPendingRemoveScheduleId(null);
       return;
     }
+
+    const scheduleId = pendingRemoveSchedule.id;
 
     setSchedules((current) => current.filter((entry) => entry.id !== scheduleId));
 
@@ -163,6 +222,7 @@ export function SchedulesPanel({
       setDeletedScheduleIds((current) => [...current, scheduleId]);
     }
 
+    setPendingRemoveScheduleId(null);
     setStatusMessage("");
   }
 
@@ -189,10 +249,12 @@ export function SchedulesPanel({
   function handleRevert() {
     setSchedules(cloneSchedules(baselineSchedules));
     setDeletedScheduleIds([]);
+    setPendingRemoveScheduleId(null);
     setStatusMessage("Changes reverted.");
   }
 
   return (
+    <>
     <section className="panel-frame">
       <div className="panel-heading panel-heading--simple">
         <h1 className="panel-title">Shifts</h1>
@@ -362,5 +424,14 @@ export function SchedulesPanel({
         </table>
       </div>
     </section>
+
+    {pendingRemoveSchedule ? (
+      <RemoveScheduleModal
+        scheduleName={pendingRemoveSchedule.name}
+        onCancel={() => setPendingRemoveScheduleId(null)}
+        onConfirm={handleConfirmRemoveSchedule}
+      />
+    ) : null}
+    </>
   );
 }

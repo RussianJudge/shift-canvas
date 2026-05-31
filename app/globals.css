@@ -2014,6 +2014,12 @@ button.workspace-nav-link {
   gap: 1rem;
 }
 
+.mutual-card .legend-pill,
+.mutual-application-row .legend-pill {
+  align-self: flex-start;
+  white-space: nowrap;
+}
+
 .mutuals-page {
   padding-bottom: 1.5rem;
 }
@@ -2039,6 +2045,10 @@ button.workspace-nav-link {
   justify-self: end;
 }
 
+.metrics-month-pager {
+  justify-self: end;
+}
+
 .mutuals-section {
   padding: 0 1.5rem 1.4rem;
 }
@@ -2061,7 +2071,16 @@ button.workspace-nav-link {
 .mutual-card__actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.75rem;
+}
+
+.mutual-card__actions .primary-button,
+.mutual-card__actions .ghost-button,
+.mutual-application-row__actions .primary-button,
+.mutual-application-row__actions .ghost-button {
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 .mutual-picker {
@@ -2746,6 +2765,11 @@ button.workspace-nav-link {
 .subschedule-builder-section {
   margin-top: 1.5rem;
   padding-top: 0.65rem;
+}
+
+.subschedule-builder-section > .workspace-toolbar .toolbar-actions {
+  gap: 0.45rem;
+  padding: 0.2rem;
 }
 
 .subschedule-builder-toolbar {
@@ -3844,7 +3868,7 @@ button.workspace-nav-link {
   .mutual-card__actions .ghost-button,
   .mutual-application-row__actions .primary-button,
   .mutual-application-row__actions .ghost-button {
-    width: 100%;
+    width: auto;
   }
 
   .metrics-team-list {
@@ -3999,6 +4023,10 @@ button.workspace-nav-link {
   }
 
   .sub-schedules-month-pager {
+    justify-self: stretch;
+  }
+
+  .metrics-month-pager {
     justify-self: stretch;
   }
 

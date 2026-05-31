@@ -1036,18 +1036,24 @@ export function MetricsPanel({
     <section className="panel-frame">
       <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Metrics</h1>
-        <div className="metrics-month-nav">
-          <div className="metrics-month-nav__current">
-            <strong>{formatMonthLabel(snapshot.month)}</strong>
-          </div>
-          <div className="metrics-month-nav__actions">
-            <button type="button" className="ghost-button" onClick={() => navigateMonth(-1)}>
-              Prev month
-            </button>
-            <button type="button" className="ghost-button" onClick={() => navigateMonth(1)}>
-              Next month
-            </button>
-          </div>
+        <div className="schedule-heading-month metrics-month-pager" aria-label="Metrics month">
+          <button
+            type="button"
+            className="schedule-heading-month__button schedule-heading-month__button--previous"
+            onClick={() => navigateMonth(-1)}
+            aria-label="Previous month"
+          >
+            ‹
+          </button>
+          <strong className="panel-title schedule-heading-month__label">{formatMonthLabel(snapshot.month)}</strong>
+          <button
+            type="button"
+            className="schedule-heading-month__button schedule-heading-month__button--next"
+            onClick={() => navigateMonth(1)}
+            aria-label="Next month"
+          >
+            ›
+          </button>
         </div>
       </div>
 

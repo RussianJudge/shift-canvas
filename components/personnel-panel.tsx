@@ -52,6 +52,8 @@ type InviteDraft = {
   email: string;
 };
 
+const PERSONNEL_AUTO_SAVE_DEBOUNCE_MS = 2500;
+
 /** Creates the unsaved row shown at the top of the table before add/save. */
 function createDraftEmployee() {
   return {
@@ -100,7 +102,7 @@ function RemoveEmployeeModal({
             <span className="assignment-modal__eyebrow">Personnel</span>
             <h2 className="assignment-modal__title">Remove employee?</h2>
             <p className="assignment-modal__context">
-              Remove {employeeName} from Personnel? This change will not save until you click Save.
+              Remove {employeeName} from Personnel? This change will save automatically after confirmation.
             </p>
           </div>
           <button type="button" className="ghost-button" onClick={onCancel}>
@@ -389,6 +391,7 @@ export function PersonnelPanel({
 }) {
   const csvInputRef = useRef<HTMLInputElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const lastPersonnelSaveSignatureRef = useRef("");
   const initialEmployees = useMemo<EditableEmployee[]>(
     () =>
       [
@@ -520,10 +523,18 @@ export function PersonnelPanel({
     [],
   );
 
-  const dirtyUpdates = employees
-    .map((employee) => normalizeEmployee(employee))
-    .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee));
+  const dirtyUpdates = useMemo(
+    () =>
+      employees
+        .map((employee) => normalizeEmployee(employee))
+        .filter((employee) => JSON.stringify(baselineMap.get(employee.employeeId)) !== JSON.stringify(employee)),
+    [baselineMap, employees],
+  );
   const hasChanges = dirtyUpdates.length > 0 || deletedEmployeeIds.length > 0;
+  const personnelSaveSignature = useMemo(
+    () => JSON.stringify({ updates: dirtyUpdates, deletedEmployeeIds }),
+    [deletedEmployeeIds, dirtyUpdates],
+  );
 
   useEffect(() => {
     setEmployees(cloneEmployees(initialEmployees));
@@ -541,6 +552,7 @@ export function PersonnelPanel({
     setInviteDraft(createInviteDraft());
     setInviteLink("");
     setInviteStatusMessage("");
+    lastPersonnelSaveSignatureRef.current = "";
   }, [initialEmployees]);
 
   useEffect(() => {
@@ -678,33 +690,56 @@ export function PersonnelPanel({
     });
   }
 
-  function handleSave() {
-    if (hasValidationErrors) {
-      setStatusMessage("Fix the highlighted personnel rows before saving.");
+  useEffect(() => {
+    if (!hasChanges) {
       return;
     }
 
-    startSaveTransition(async () => {
-      const result = await savePersonnel({
-        updates: dirtyUpdates,
-        deletedEmployeeIds,
-      } as SavePersonnelInput);
-      setStatusMessage(result.message);
+    if (
+      hasValidationErrors ||
+      isSaving ||
+      personnelSaveSignature === lastPersonnelSaveSignatureRef.current
+    ) {
+      return;
+    }
 
-      if (result.ok) {
-        setBaselineEmployees(cloneEmployees(employees));
-        setDeletedEmployeeIds([]);
-      }
-    });
-  }
+    const employeeSnapshot = cloneEmployees(employees);
+    const updates = dirtyUpdates;
+    const employeeIdsToDelete = [...deletedEmployeeIds];
+    const signature = personnelSaveSignature;
 
-  function handleRevert() {
-    setEmployees(cloneEmployees(baselineEmployees));
-    setDeletedEmployeeIds([]);
-    setPendingCsvImport(null);
-    setDraftEmployee(null);
-    setStatusMessage("Changes reverted.");
-  }
+    const timer = window.setTimeout(() => {
+      lastPersonnelSaveSignatureRef.current = signature;
+      setStatusMessage("Saving personnel changes automatically...");
+
+      startSaveTransition(async () => {
+        const result = await savePersonnel({
+          updates,
+          deletedEmployeeIds: employeeIdsToDelete,
+        } as SavePersonnelInput);
+
+        setStatusMessage(result.ok ? "Personnel changes saved automatically." : result.message);
+
+        if (result.ok) {
+          setBaselineEmployees(employeeSnapshot);
+          setDeletedEmployeeIds([]);
+        } else {
+          lastPersonnelSaveSignatureRef.current = "";
+        }
+      });
+    }, PERSONNEL_AUTO_SAVE_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    deletedEmployeeIds,
+    dirtyUpdates,
+    employees,
+    hasChanges,
+    hasValidationErrors,
+    isSaving,
+    personnelSaveSignature,
+    startSaveTransition,
+  ]);
 
   function handleAddEmployee() {
     setShowActionsMenu(false);
@@ -726,7 +761,7 @@ export function PersonnelPanel({
 
     setEmployees((current) => [{ ...draftEmployee }, ...current]);
     setDraftEmployee(null);
-    setStatusMessage("Employee added to the table. Save when you're ready.");
+    setStatusMessage("Employee added. Autosave will run shortly.");
   }
 
   async function handleCsvImport(event: ChangeEvent<HTMLInputElement>) {
@@ -947,7 +982,7 @@ export function PersonnelPanel({
     }
 
     setPendingRemoveEmployeeId(null);
-    setStatusMessage(`${employeeName} removed from the table. Save when you're ready.`);
+    setStatusMessage(`${employeeName} removed. Autosave will run shortly.`);
   }
 
   function handleInviteDraftChange<K extends keyof InviteDraft>(key: K, value: InviteDraft[K]) {
@@ -1083,17 +1118,6 @@ export function PersonnelPanel({
               </div>
             ) : null}
           </div>
-          <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
-            Revert
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={handleSave}
-            disabled={isSaving || !hasChanges || hasValidationErrors}
-          >
-            {isSaving ? "Saving..." : "Save"}
-          </button>
         </div>
 
         <input
@@ -1106,7 +1130,9 @@ export function PersonnelPanel({
 
         <div className="toolbar-status-wrap">
           {hasValidationErrors ? (
-            <p className="toolbar-status">Fix highlighted rows before saving.</p>
+            <p className="toolbar-status">Fix highlighted rows before autosave can continue.</p>
+          ) : isSaving ? (
+            <p className="toolbar-status">Saving personnel changes automatically...</p>
           ) : statusMessage ? (
             <p className="toolbar-status">{statusMessage}</p>
           ) : null}
