@@ -1153,6 +1153,16 @@ button.workspace-nav-link {
     border-color 160ms ease;
 }
 
+.ghost-button.icon-button {
+  min-height: 2.75rem;
+  padding: 0;
+}
+
+.ghost-button.icon-button.schedule-print-button {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
 .icon-button:hover {
   transform: translateY(-1px);
   background: rgba(255, 255, 255, 0.9);
