@@ -1360,12 +1360,19 @@ button.workspace-nav-link {
 .overtime-toolbar-actions {
   align-items: center;
   gap: 0.55rem;
+  overflow-x: auto;
 }
 
 .overtime-toolbar-button {
+  flex: 0 0 auto;
   gap: 0.45rem;
   min-height: 2.75rem;
   padding-inline: 0.8rem;
+  white-space: nowrap;
+}
+
+.overtime-toolbar-button span {
+  white-space: nowrap;
 }
 
 .overtime-toolbar-button svg {
@@ -2066,9 +2073,9 @@ button.workspace-nav-link {
 
 .overtime-calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(6.75rem, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0.45rem;
-  min-width: 49rem;
+  min-width: 0;
 }
 
 .overtime-calendar-weekday {
@@ -3899,6 +3906,11 @@ button.workspace-nav-link {
     grid-template-columns: 1fr;
     padding: 0 1rem 1rem;
     align-items: stretch;
+  }
+
+  .overtime-calendar-grid {
+    grid-template-columns: repeat(7, minmax(6.75rem, 1fr));
+    min-width: 49rem;
   }
 
   .workspace-copy,
