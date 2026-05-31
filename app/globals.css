@@ -1064,8 +1064,8 @@ button.workspace-nav-link {
 }
 
 .schedule-print-button svg {
-  width: 1.22rem;
-  height: 1.22rem;
+  width: 1.55rem;
+  height: 1.55rem;
 }
 
 .planner-actions {
@@ -2395,6 +2395,59 @@ button.workspace-nav-link {
   left: auto;
   top: auto;
   box-shadow: none;
+}
+
+.print-schedule-grid .shift-cell {
+  color: #111827;
+  font-weight: 800;
+}
+
+.print-schedule-grid .shift-cell--day {
+  background: #fde68a;
+}
+
+.print-schedule-grid .shift-cell--night {
+  background: #bfdbfe;
+}
+
+.print-schedule-grid .shift-cell--off {
+  background: #e5e7eb;
+}
+
+.print-schedule-grid .shift-cell--blank {
+  background: #f3f4f6;
+}
+
+.print-schedule-grid .shift-cell.legend-pill--amber {
+  background: #fbbf24;
+}
+
+.print-schedule-grid .shift-cell.legend-pill--teal {
+  background: #5eead4;
+}
+
+.print-schedule-grid .shift-cell.legend-pill--violet {
+  background: #c4b5fd;
+}
+
+.print-schedule-grid .shift-cell.legend-pill--rose {
+  background: #fda4af;
+}
+
+.print-schedule-grid .shift-cell.legend-pill--blue {
+  background: #93c5fd;
+}
+
+.print-schedule-grid .shift-cell.legend-pill--lime {
+  background: #bef264;
+}
+
+.print-schedule-grid .shift-cell.legend-pill--orange {
+  background: #fdba74;
+}
+
+.print-schedule-grid .shift-cell.legend-pill--slate {
+  background: #cbd5e1;
 }
 
 .assignment-modal-backdrop {
@@ -4366,19 +4419,19 @@ button.workspace-nav-link {
   }
 
   .print-schedule-grid .shift-cell--day {
-    background: #f9f1d9 !important;
+    background: #fde68a !important;
   }
 
   .print-schedule-grid .shift-cell--night {
-    background: #e7eef9 !important;
+    background: #bfdbfe !important;
   }
 
   .print-schedule-grid .shift-cell--off {
-    background: #f2f1ef !important;
+    background: #e5e7eb !important;
   }
 
   .print-schedule-grid .shift-cell--blank {
-    background: #f7f7f6 !important;
+    background: #f3f4f6 !important;
   }
 
   .print-schedule-grid .shift-cell--weekend {
@@ -4386,35 +4439,35 @@ button.workspace-nav-link {
   }
 
   .print-schedule-grid .shift-cell.legend-pill--amber {
-    background: #f7e7b3 !important;
+    background: #fbbf24 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--teal {
-    background: #c6ece6 !important;
+    background: #5eead4 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--violet {
-    background: #e6def4 !important;
+    background: #c4b5fd !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--rose {
-    background: #f4d8de !important;
+    background: #fda4af !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--blue {
-    background: #d7e4f6 !important;
+    background: #93c5fd !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--lime {
-    background: #dceab8 !important;
+    background: #bef264 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--orange {
-    background: #f2debf !important;
+    background: #fdba74 !important;
   }
 
   .print-schedule-grid .shift-cell.legend-pill--slate {
-    background: #e5e8ec !important;
+    background: #cbd5e1 !important;
   }
 
   .print-schedule-grid .employee-cell__main span {
