@@ -1432,6 +1432,42 @@ export async function getOvertimeBoardSnapshot(month: string, session?: AppSessi
   });
 }
 
+export async function getFutureOvertimeClaimsForEmployee(
+  employeeId: string | null | undefined,
+  today: string,
+  session?: AppSession | null,
+) {
+  if (!employeeId) {
+    return [];
+  }
+
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    console.error("Future overtime claims unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
+    return [];
+  }
+
+  const result = await fetchAllRows<OvertimeClaimRow>(
+    applySessionScope(
+      supabase
+        .from("overtime_claims")
+        .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+      session,
+    )
+      .eq("employee_id", employeeId)
+      .gt("assignment_date", today)
+      .order("assignment_date")
+      .order("id"),
+  );
+
+  if (result.error) {
+    return [];
+  }
+
+  return mapOvertimeClaims(result.data ?? []);
+}
+
 export async function getPersonnelSnapshot(month: string, session?: AppSession | null) {
   const supabase = getDataClient();
 

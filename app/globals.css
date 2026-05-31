@@ -1357,6 +1357,27 @@ button.workspace-nav-link {
   justify-content: flex-start;
 }
 
+.overtime-toolbar-actions {
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.overtime-toolbar-button {
+  gap: 0.45rem;
+  min-height: 2.75rem;
+  padding-inline: 0.8rem;
+}
+
+.overtime-toolbar-button svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .workspace-toolbar--overtime .toolbar-status-wrap {
   justify-content: flex-start;
 }
@@ -2002,6 +2023,108 @@ button.workspace-nav-link {
 .overtime-eligibility-modal__row span {
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.overtime-my-claims-modal__list {
+  display: grid;
+  gap: 0.65rem;
+  max-height: min(24rem, 52vh);
+  overflow-y: auto;
+}
+
+.overtime-my-claims-modal__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.overtime-my-claims-modal__row div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.overtime-my-claims-modal__row span:not(.legend-pill) {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.overtime-calendar-modal {
+  width: min(64rem, 100%);
+  max-height: min(48rem, 92vh);
+  overflow: hidden;
+}
+
+.overtime-calendar-modal__scroll {
+  overflow: auto;
+  padding-bottom: 0.15rem;
+}
+
+.overtime-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(6.75rem, 1fr));
+  gap: 0.45rem;
+  min-width: 49rem;
+}
+
+.overtime-calendar-weekday {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.overtime-calendar-day {
+  min-height: 8.25rem;
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.overtime-calendar-day--empty {
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.overtime-calendar-day__number {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.overtime-calendar-day__postings {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.overtime-calendar-entry {
+  display: grid;
+  justify-content: stretch;
+  gap: 0.18rem;
+  width: 100%;
+  border-radius: 0.7rem;
+  padding: 0.42rem 0.5rem;
+  white-space: normal;
+}
+
+.overtime-calendar-entry strong,
+.overtime-calendar-entry span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overtime-calendar-entry span {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  opacity: 0.78;
 }
 
 .mutuals-create-action {
@@ -3558,6 +3681,11 @@ button.workspace-nav-link {
 
 .empty-state span {
   color: var(--muted);
+}
+
+.empty-state__action {
+  justify-self: start;
+  margin-top: 0.35rem;
 }
 
 .sr-only {

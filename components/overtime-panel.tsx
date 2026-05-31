@@ -26,7 +26,7 @@ import {
   shiftMonthKey,
   shiftForDate,
 } from "@/lib/scheduling";
-import type { AppSession, Employee, SchedulerSnapshot, ShiftKind } from "@/lib/types";
+import type { AppSession, Employee, OvertimeClaim, SchedulerSnapshot, ShiftKind } from "@/lib/types";
 
 type OvertimeTargetMode = "main" | "sub";
 type OvertimeTargetKey = "all" | "main" | `sub:${string}`;
@@ -37,6 +37,26 @@ function CreatePostingIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 5v14M5 12h14" />
       <path d="M6.5 4.5h11A2.5 2.5 0 0 1 20 7v10a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17V7a2.5 2.5 0 0 1 2.5-2.5Z" />
+    </svg>
+  );
+}
+
+function PersonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 12a4 4 0 1 0 0-8a4 4 0 0 0 0 8Z" />
+      <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 3.5v3M17 3.5v3" />
+      <path d="M4.5 8.5h15" />
+      <path d="M6.5 5h11A2.5 2.5 0 0 1 20 7.5v10A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-10A2.5 2.5 0 0 1 6.5 5Z" />
+      <path d="M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01" />
     </svg>
   );
 }
@@ -561,6 +581,188 @@ function DeleteOvertimePostingModal({
   );
 }
 
+type MyOvertimeClaimRow = {
+  id: string;
+  date: string;
+  targetLabel: string;
+  assignmentLabel: string;
+};
+
+function MyOvertimeClaimsModal({
+  claims,
+  onClose,
+}: {
+  claims: MyOvertimeClaimRow[];
+  onClose: () => void;
+}) {
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section
+        className="assignment-modal overtime-my-claims-modal"
+        aria-label="My overtime claims"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Overtime</span>
+            <h2 className="assignment-modal__title">My claims</h2>
+            <p className="assignment-modal__context">Future overtime claims after today.</p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {claims.length > 0 ? (
+          <div className="overtime-my-claims-modal__list">
+            {claims.map((claim) => (
+              <div key={claim.id} className="overtime-my-claims-modal__row">
+                <div>
+                  <strong>{formatShortDate(claim.date)}</strong>
+                  <span>{claim.targetLabel}</span>
+                </div>
+                <span className="legend-pill legend-pill--slate">{claim.assignmentLabel}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <strong>No future claims.</strong>
+            <span>You do not have any overtime claims after today.</span>
+          </div>
+        )}
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function OvertimeCalendarModal({
+  monthLabel,
+  monthDays,
+  postings,
+  onClose,
+}: {
+  monthLabel: string;
+  monthDays: ReturnType<typeof getMonthDays>;
+  postings: OvertimePosting[];
+  onClose: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const postingsByDate = new Map<string, OvertimePosting[]>();
+
+  for (const posting of postings) {
+    for (const date of posting.dates) {
+      if (!postingsByDate.has(date)) {
+        postingsByDate.set(date, []);
+      }
+
+      postingsByDate.get(date)!.push(posting);
+    }
+  }
+
+  for (const datePostings of postingsByDate.values()) {
+    datePostings.sort(
+      (left, right) =>
+        left.scheduleName.localeCompare(right.scheduleName) ||
+        left.shiftKind.localeCompare(right.shiftKind) ||
+        left.competencyCode.localeCompare(right.competencyCode),
+    );
+  }
+
+  const firstWeekday = monthDays[0]
+    ? new Date(`${monthDays[0].date}T00:00:00Z`).getUTCDay()
+    : 0;
+  const calendarCells: Array<(typeof monthDays)[number] | null> = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...monthDays,
+  ];
+
+  while (calendarCells.length % 7 !== 0) {
+    calendarCells.push(null);
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section
+        className="assignment-modal overtime-calendar-modal"
+        aria-label="Overtime calendar"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Overtime</span>
+            <h2 className="assignment-modal__title">Calendar</h2>
+            <p className="assignment-modal__context">
+              {monthLabel} postings using the current filters.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div className="overtime-calendar-modal__scroll">
+          <div className="overtime-calendar-grid">
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => (
+              <div key={weekday} className="overtime-calendar-weekday">
+                {weekday}
+              </div>
+            ))}
+            {calendarCells.map((day, index) => {
+              const dayPostings = day ? postingsByDate.get(day.date) ?? [] : [];
+
+              return (
+                <div
+                  key={day?.date ?? `blank-${index}`}
+                  className={`overtime-calendar-day ${day ? "" : "overtime-calendar-day--empty"}`}
+                >
+                  {day ? (
+                    <>
+                      <div className="overtime-calendar-day__number">{day.dayNumber}</div>
+                      <div className="overtime-calendar-day__postings">
+                        {dayPostings.map((posting) => (
+                          <div
+                            key={`${posting.id}:${day.date}`}
+                            className={`overtime-calendar-entry legend-pill legend-pill--${posting.colorToken.toLowerCase()}`}
+                          >
+                            <strong>
+                              {posting.competencyCode.replace("Post ", "")}
+                              {posting.source === "manual" ? " · Manual" : ""}
+                            </strong>
+                            <span>
+                              {posting.targetMode === "main" ? `Shift ${posting.scheduleName}` : posting.scheduleName}
+                              {" · "}
+                              {getShiftBadgeLabel(posting.shiftKind)}
+                              {" · "}
+                              {posting.openShifts} open
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {postings.length === 0 ? (
+          <div className="empty-state">
+            <strong>No postings to show.</strong>
+            <span>Try changing the overtime filters or showing all postings.</span>
+          </div>
+        ) : null}
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 /** Modal used by leaders/admins to author a manual overtime posting. */
 function ManualOvertimePostingModal({
   snapshot,
@@ -796,10 +998,12 @@ export function OvertimePanel({
   snapshot,
   availableMonths,
   viewer,
+  futureOvertimeClaims,
 }: {
   snapshot: SchedulerSnapshot;
   availableMonths: string[];
   viewer: AppSession;
+  futureOvertimeClaims: OvertimeClaim[];
 }) {
   // The board is built from snapshot state only; claiming/releasing triggers a
   // server refresh instead of trying to locally simulate every OT side effect.
@@ -816,6 +1020,8 @@ export function OvertimePanel({
   const [statusMessage, setStatusMessage] = useState("");
   const [isClaiming, startClaimTransition] = useTransition();
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [isMyClaimsModalOpen, setIsMyClaimsModalOpen] = useState(false);
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [eligibilityReportPostingId, setEligibilityReportPostingId] = useState<string | null>(null);
   const [turnaroundConfirmationPostingId, setTurnaroundConfirmationPostingId] = useState<string | null>(null);
   const [deletePostingId, setDeletePostingId] = useState<string | null>(null);
@@ -869,6 +1075,41 @@ export function OvertimePanel({
         .flatMap((schedule) => schedule.employees)
         .sort((left, right) => left.name.localeCompare(right.name)),
     [snapshot.schedules],
+  );
+  const scheduleMap = useMemo(
+    () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule])),
+    [snapshot.schedules],
+  );
+  const subScheduleMap = useMemo(
+    () => Object.fromEntries(snapshot.subSchedules.map((subSchedule) => [subSchedule.id, subSchedule])),
+    [snapshot.subSchedules],
+  );
+  const competencyMap = useMemo(
+    () => Object.fromEntries(snapshot.competencies.map((competency) => [competency.id, competency])),
+    [snapshot.competencies],
+  );
+  const timeCodeMap = useMemo(
+    () => Object.fromEntries(snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode])),
+    [snapshot.timeCodes],
+  );
+  const futureClaimRows = useMemo<MyOvertimeClaimRow[]>(
+    () =>
+      futureOvertimeClaims
+        .map((claim) => {
+          const schedule = claim.scheduleId ? scheduleMap[claim.scheduleId] : null;
+          const subSchedule = claim.subScheduleId ? subScheduleMap[claim.subScheduleId] : null;
+          const competency = claim.competencyId ? competencyMap[claim.competencyId] : null;
+          const timeCode = claim.timeCodeId ? timeCodeMap[claim.timeCodeId] : null;
+
+          return {
+            id: claim.id,
+            date: claim.date,
+            targetLabel: subSchedule?.name ?? (schedule ? `Shift ${schedule.name}` : "Overtime"),
+            assignmentLabel: competency?.code ?? timeCode?.code ?? "Overtime",
+          };
+        })
+        .sort((left, right) => left.date.localeCompare(right.date) || left.assignmentLabel.localeCompare(right.assignmentLabel)),
+    [competencyMap, futureOvertimeClaims, scheduleMap, subScheduleMap, timeCodeMap],
   );
   const availableSubSchedules = useMemo(
     () => snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived),
@@ -1728,19 +1969,42 @@ export function OvertimePanel({
           </select>
         </label>
 
-        {canManageManualPostings ? (
-          <div className="toolbar-actions">
+        <div className="toolbar-actions overtime-toolbar-actions">
+          <button
+            type="button"
+            className="ghost-button overtime-toolbar-button"
+            onClick={() => setIsCalendarModalOpen(true)}
+            aria-label="Overtime calendar"
+            title="Overtime calendar"
+          >
+            <CalendarIcon />
+            <span>Calendar</span>
+          </button>
+          {viewer.employeeId ? (
             <button
               type="button"
-              className="icon-button overtime-create-posting-button"
+              className="ghost-button overtime-toolbar-button"
+              onClick={() => setIsMyClaimsModalOpen(true)}
+              aria-label="My overtime claims"
+              title="My overtime claims"
+            >
+              <PersonIcon />
+              <span>My claims</span>
+            </button>
+          ) : null}
+          {canManageManualPostings ? (
+            <button
+              type="button"
+              className="ghost-button overtime-toolbar-button overtime-create-posting-button"
               onClick={() => setIsManualModalOpen(true)}
               aria-label="Create overtime posting"
               title="Create overtime posting"
             >
               <CreatePostingIcon />
+              <span>Create</span>
             </button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         <div className="toolbar-status-wrap">
           {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
@@ -1934,14 +2198,30 @@ export function OvertimePanel({
 
         {groupedPostings.length === 0 ? (
           <div className="empty-state">
-            <strong>No overtime postings.</strong>
-            <span>
-              {selectedTargetMode === "all"
-                ? "Complete a set on the Schedule page or create a manual posting to make overtime claimable here."
-                : selectedTargetMode === "main"
-                ? "Complete a set on the Schedule page, or all completed sets are fully staffed."
-                : "Create a manual posting for a sub-schedule to make overtime claimable here."}
-            </span>
+            {availabilityFilter === "available" ? (
+              <>
+                <strong>No unclaimed overtime postings.</strong>
+                <span>Claimed or filled postings are hidden by the availability filter.</span>
+                <button
+                  type="button"
+                  className="ghost-button empty-state__action"
+                  onClick={() => setAvailabilityFilter("all")}
+                >
+                  Show all postings
+                </button>
+              </>
+            ) : (
+              <>
+                <strong>No overtime postings.</strong>
+                <span>
+                  {selectedTargetMode === "all"
+                    ? "Complete a set on the Schedule page or create a manual posting to make overtime claimable here."
+                    : selectedTargetMode === "main"
+                    ? "Complete a set on the Schedule page, or all completed sets are fully staffed."
+                    : "Create a manual posting for a sub-schedule to make overtime claimable here."}
+                </span>
+              </>
+            )}
           </div>
         ) : null}
       </div>
@@ -1971,6 +2251,22 @@ export function OvertimePanel({
           onClose={() => setIsManualModalOpen(false)}
           onSubmit={handleCreateManualPosting}
           isSubmitting={isManagingManual}
+        />
+      ) : null}
+
+      {isMyClaimsModalOpen ? (
+        <MyOvertimeClaimsModal
+          claims={futureClaimRows}
+          onClose={() => setIsMyClaimsModalOpen(false)}
+        />
+      ) : null}
+
+      {isCalendarModalOpen ? (
+        <OvertimeCalendarModal
+          monthLabel={formatMonthLabel(snapshot.month)}
+          monthDays={monthDays}
+          postings={filteredPostings}
+          onClose={() => setIsCalendarModalOpen(false)}
         />
       ) : null}
 
