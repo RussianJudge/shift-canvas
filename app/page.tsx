@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import { BrandLockup } from "@/components/brand-lockup";
 import { getAppSession, getSessionHomePath } from "@/lib/auth";
 
@@ -21,9 +19,9 @@ export default async function HomePage() {
         </div>
 
         <div className="auth-home__actions">
-          <Link href={primaryHref} className="primary-button">
+          <a href={primaryHref} className="primary-button">
             {session ? "Open workspace" : "Log in"}
-          </Link>
+          </a>
         </div>
       </section>
     </main>

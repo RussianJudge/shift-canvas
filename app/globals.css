@@ -1358,6 +1358,8 @@ button.workspace-nav-link {
 }
 
 .overtime-toolbar-actions {
+  grid-column: 1 / -1;
+  width: 100%;
   align-items: center;
   gap: 0.55rem;
   overflow-x: auto;

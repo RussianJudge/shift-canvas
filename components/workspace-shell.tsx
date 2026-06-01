@@ -70,7 +70,7 @@ type NavLinkProps = {
   icon: React.ReactNode;
   onIntentPrefetchStart: (href: string | null) => void;
   onIntentPrefetchCancel: (href: string | null) => void;
-  onNavigate: () => void;
+  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
   prefetchHref: string | null;
 };
 
@@ -99,7 +99,7 @@ function NavLink({
       onFocus={() => onIntentPrefetchStart(prefetchHref)}
       onMouseLeave={() => onIntentPrefetchCancel(prefetchHref)}
       onBlur={() => onIntentPrefetchCancel(prefetchHref)}
-      onClick={onNavigate}
+      onClick={(event) => onNavigate(event, href)}
     >
       <span className="workspace-nav-icon">{icon}</span>
       <strong>{label}</strong>
@@ -497,12 +497,17 @@ export function WorkspaceShell({
     delete pendingTimers[href];
   };
 
-  const handleNavLinkNavigate = () => {
+  const handleNavLinkNavigate = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     if (!isMobileSidebarMode) {
       return;
     }
 
+    event.preventDefault();
     setIsMobileSidebarOpen(false);
+
+    if (typeof window !== "undefined") {
+      window.location.assign(href);
+    }
   };
 
   return (
