@@ -63,7 +63,7 @@ type NavLinkProps = {
   activeHref: string;
   label: string;
   icon: React.ReactNode;
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
+  onNavigate: () => void;
 };
 
 /** Small presentational wrapper so nav link semantics stay consistent everywhere. */
@@ -78,16 +78,17 @@ function NavLink({
   const isActive = isWorkspaceRouteActive(pathname, activeHref);
 
   return (
-    <a
+    <Link
       href={href}
+      prefetch={false}
       className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
       title={label}
       aria-current={isActive ? "page" : undefined}
-      onClick={(event) => onNavigate(event, href)}
+      onClick={onNavigate}
     >
       <span className="workspace-nav-icon">{icon}</span>
       <strong>{label}</strong>
-    </a>
+    </Link>
   );
 }
 
@@ -431,21 +432,8 @@ export function WorkspaceShell({
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
   const selectedMonth = searchParams.get("month");
 
-  const handleNavLinkNavigate = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+  const handleNavLinkNavigate = () => {
     setIsMobileSidebarOpen(false);
-
-    const isStandaloneWebApp =
-      typeof window !== "undefined" &&
-      (window.matchMedia("(display-mode: standalone)").matches ||
-        (window.navigator as Navigator & { standalone?: boolean }).standalone === true);
-
-    if (
-      typeof window !== "undefined" &&
-      (isMobileSidebarMode || isStandaloneWebApp)
-    ) {
-      event.preventDefault();
-      window.location.assign(href);
-    }
   };
 
   return (

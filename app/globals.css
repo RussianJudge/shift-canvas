@@ -2063,14 +2063,18 @@ button.workspace-nav-link {
 }
 
 .overtime-calendar-modal {
-  width: min(64rem, 100%);
-  max-height: min(48rem, 92vh);
+  width: min(90vw, 72rem);
+  height: min(88vh, 54rem);
+  max-height: 88vh;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
 
 .overtime-calendar-modal__scroll {
   overflow: auto;
   padding-bottom: 0.15rem;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .overtime-calendar-grid {
