@@ -1,6 +1,7 @@
 "use server";
 
 import { createHash, randomBytes } from "crypto";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 
@@ -69,6 +70,12 @@ type InviteEmployeeRow = {
   company_id: string;
   site_id: string;
   business_area_id: string;
+};
+
+type ExistingProfileRow = {
+  id: string;
+  display_name: string | null;
+  employee_id: string | null;
 };
 
 function hashInviteToken(token: string) {
@@ -594,7 +601,11 @@ export async function createAccountInvite(input: {
   }
 
   const [existingProfileResult, employeeResult] = await Promise.all([
-    supabase.from("profiles").select("id").eq("email", normalizedEmail).maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("id, display_name, employee_id")
+      .eq("email", normalizedEmail)
+      .maybeSingle(),
     employeeId
       ? supabase
           .from("employees")
@@ -613,7 +624,18 @@ export async function createAccountInvite(input: {
     };
   }
 
-  if (existingProfileResult.data) {
+  const existingProfile = existingProfileResult.data as ExistingProfileRow | null;
+
+  if (existingProfile) {
+    if (employeeId) {
+      return {
+        ok: false,
+        message: "That email already has an account. Link it to this employee instead?",
+        requiresAccountLink: true,
+        existingDisplayName: existingProfile.display_name,
+      };
+    }
+
     return {
       ok: false,
       message: "That email already has an account.",
@@ -721,6 +743,184 @@ export async function createAccountInvite(input: {
     ok: true,
     message,
     inviteUrl,
+  };
+}
+
+export async function linkExistingAccountToEmployee(input: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: AppRole;
+  employeeId: string;
+}) {
+  const session = await getAppSession();
+
+  if (!session || !["admin", "leader"].includes(session.role)) {
+    return {
+      ok: false,
+      message: "Only admins and leaders can link existing accounts.",
+    };
+  }
+
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  const employeeId = input.employeeId.trim();
+  const role = input.role;
+
+  if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+    return {
+      ok: false,
+      message: "Enter a valid account email address before linking.",
+    };
+  }
+
+  if (!employeeId) {
+    return {
+      ok: false,
+      message: "Choose an employee before linking an existing account.",
+    };
+  }
+
+  if (!["admin", "leader", "worker"].includes(role)) {
+    return {
+      ok: false,
+      message: "Choose a valid app role for the linked account.",
+    };
+  }
+
+  if (session.role === "leader" && role !== "worker") {
+    return {
+      ok: false,
+      message: "Leaders can only link worker accounts.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Account linking is unavailable.",
+    };
+  }
+
+  const [existingProfileResult, employeeResult] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, display_name, employee_id")
+      .eq("email", normalizedEmail)
+      .maybeSingle(),
+    supabase
+      .from("employees")
+      .select("id, first_name, last_name, email, schedule_id, company_id, site_id, business_area_id")
+      .eq("id", employeeId)
+      .maybeSingle(),
+  ]);
+
+  if (existingProfileResult.error) {
+    return {
+      ok: false,
+      message: "Could not load the existing account profile.",
+    };
+  }
+
+  const existingProfile = existingProfileResult.data as ExistingProfileRow | null;
+
+  if (!existingProfile) {
+    return {
+      ok: false,
+      message: "No existing account was found for that email address.",
+    };
+  }
+
+  const linkedEmployee = employeeResult.data as InviteEmployeeRow | null;
+
+  if (employeeResult.error || !linkedEmployee) {
+    return {
+      ok: false,
+      message: "Could not load the selected employee for account linking.",
+    };
+  }
+
+  if (
+    linkedEmployee.company_id !== session.companyId ||
+    linkedEmployee.site_id !== session.siteId ||
+    linkedEmployee.business_area_id !== session.businessAreaId
+  ) {
+    return {
+      ok: false,
+      message: "You can only link accounts to employees inside your current scope.",
+    };
+  }
+
+  if (
+    session.role === "leader" &&
+    session.scheduleId &&
+    linkedEmployee.schedule_id !== session.scheduleId
+  ) {
+    return {
+      ok: false,
+      message: "Leaders can only link accounts to employees on their own shift.",
+    };
+  }
+
+  const conflictingProfileResult = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("employee_id", linkedEmployee.id)
+    .neq("id", existingProfile.id)
+    .maybeSingle();
+
+  if (conflictingProfileResult.error) {
+    return {
+      ok: false,
+      message: "Could not verify whether that employee is already linked to another account.",
+    };
+  }
+
+  if (conflictingProfileResult.data) {
+    return {
+      ok: false,
+      message: "That employee is already linked to a different account.",
+    };
+  }
+
+  const displayName =
+    existingProfile.display_name?.trim() ||
+    formatEmployeeDisplayName({ firstName, lastName }) ||
+    normalizedEmail.split("@")[0] ||
+    "User";
+
+  const profileUpdate = await supabase
+    .from("profiles")
+    .update({
+      email: normalizedEmail,
+      display_name: displayName,
+      role,
+      company_id: linkedEmployee.company_id,
+      site_id: linkedEmployee.site_id,
+      business_area_id: linkedEmployee.business_area_id,
+      schedule_id: linkedEmployee.schedule_id,
+      employee_id: linkedEmployee.id,
+    })
+    .eq("id", existingProfile.id);
+
+  if (profileUpdate.error) {
+    return {
+      ok: false,
+      message: `Could not link the existing account: ${profileUpdate.error.message}`,
+    };
+  }
+
+  revalidatePath("/personnel");
+
+  return {
+    ok: true,
+    message: `Linked ${normalizedEmail} to ${formatEmployeeDisplayName({
+      firstName: linkedEmployee.first_name ?? firstName,
+      lastName: linkedEmployee.last_name ?? lastName,
+    })}.`,
   };
 }
 

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 
 import { savePersonnel } from "@/app/actions";
-import { createAccountInvite } from "@/app/auth-actions";
+import { createAccountInvite, linkExistingAccountToEmployee } from "@/app/auth-actions";
 import { formatEmployeeDisplayName, splitEmployeeDisplayName } from "@/lib/employee-names";
 import type { AppRole, AppSession, PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
 
@@ -50,6 +50,16 @@ type InviteDraft = {
   firstName: string;
   lastName: string;
   email: string;
+};
+
+type PendingAccountLink = {
+  email: string;
+  employeeId: string;
+  employeeName: string;
+  existingDisplayName: string;
+  role: AppRole;
+  firstName: string;
+  lastName: string;
 };
 
 const PERSONNEL_AUTO_SAVE_DEBOUNCE_MS = 2500;
@@ -116,6 +126,56 @@ function RemoveEmployeeModal({
           </button>
           <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
             Remove employee
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function LinkExistingAccountModal({
+  pendingLink,
+  isSubmitting,
+  onCancel,
+  onConfirm,
+}: {
+  pendingLink: PendingAccountLink;
+  isSubmitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={isSubmitting ? undefined : onCancel}>
+      <section
+        className="assignment-modal mutual-modal"
+        aria-label="Link existing account confirmation"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Personnel</span>
+            <h2 className="assignment-modal__title">Link existing account?</h2>
+            <p className="assignment-modal__context">
+              {pendingLink.existingDisplayName || pendingLink.email} already has an account for {pendingLink.email}.
+              Link that account to {pendingLink.employeeName} and assign the {pendingLink.role} role?
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Close
+          </button>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Cancel
+          </button>
+          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+            {isSubmitting ? "Linking..." : "Link account"}
           </button>
         </div>
       </section>
@@ -434,8 +494,10 @@ export function PersonnelPanel({
   const [inviteDraft, setInviteDraft] = useState<InviteDraft>(createInviteDraft);
   const [inviteLink, setInviteLink] = useState("");
   const [inviteStatusMessage, setInviteStatusMessage] = useState("");
+  const [pendingAccountLink, setPendingAccountLink] = useState<PendingAccountLink | null>(null);
   const [isSaving, startSaveTransition] = useTransition();
   const [isCreatingInvite, startInviteTransition] = useTransition();
+  const [isLinkingExistingAccount, startLinkAccountTransition] = useTransition();
   const canManageInvites = viewer.role === "admin" || viewer.role === "leader";
   const canInviteAdmin = viewer.role === "admin";
   const canInviteLeader = viewer.role === "admin";
@@ -552,6 +614,7 @@ export function PersonnelPanel({
     setInviteDraft(createInviteDraft());
     setInviteLink("");
     setInviteStatusMessage("");
+    setPendingAccountLink(null);
     lastPersonnelSaveSignatureRef.current = "";
   }, [initialEmployees]);
 
@@ -994,6 +1057,9 @@ export function PersonnelPanel({
 
   function handleCreateInvite() {
     startInviteTransition(async () => {
+      const selectedEmployee = inviteDraft.employeeId
+        ? employeeOptions.find((entry) => entry.id === inviteDraft.employeeId) ?? null
+        : null;
       const result = await createAccountInvite({
         email: inviteDraft.email,
         firstName: inviteDraft.firstName,
@@ -1002,10 +1068,50 @@ export function PersonnelPanel({
         employeeId: inviteDraft.employeeId || null,
       });
 
+      if (!result.ok && "requiresAccountLink" in result && result.requiresAccountLink && inviteDraft.employeeId) {
+        setInviteLink("");
+        setPendingAccountLink({
+          email: inviteDraft.email.trim().toLowerCase(),
+          employeeId: inviteDraft.employeeId,
+          employeeName: selectedEmployee ? getEditableEmployeeDisplayName(selectedEmployee) : "this employee",
+          existingDisplayName:
+            ("existingDisplayName" in result && result.existingDisplayName) || inviteDraft.email.trim().toLowerCase(),
+          role: inviteDraft.role,
+          firstName: inviteDraft.firstName,
+          lastName: inviteDraft.lastName,
+        });
+      } else {
+        setPendingAccountLink(null);
+      }
+
       setInviteStatusMessage(result.message);
       setInviteLink(result.ok && "inviteUrl" in result && result.inviteUrl ? result.inviteUrl : "");
 
       if (result.ok) {
+        setShowInviteBuilder(true);
+      }
+    });
+  }
+
+  function handleConfirmLinkExistingAccount() {
+    if (!pendingAccountLink) {
+      return;
+    }
+
+    startLinkAccountTransition(async () => {
+      const result = await linkExistingAccountToEmployee({
+        email: pendingAccountLink.email,
+        firstName: pendingAccountLink.firstName,
+        lastName: pendingAccountLink.lastName,
+        role: pendingAccountLink.role,
+        employeeId: pendingAccountLink.employeeId,
+      });
+
+      setInviteStatusMessage(result.message);
+      setInviteLink("");
+
+      if (result.ok) {
+        setPendingAccountLink(null);
         setShowInviteBuilder(true);
       }
     });
@@ -1233,7 +1339,7 @@ export function PersonnelPanel({
               type="button"
               className="primary-button"
               onClick={handleCreateInvite}
-              disabled={isCreatingInvite}
+              disabled={isCreatingInvite || isLinkingExistingAccount}
             >
               {isCreatingInvite ? "Creating invite..." : "Create invite"}
             </button>
@@ -1596,6 +1702,14 @@ export function PersonnelPanel({
         employeeName={getEditableEmployeeDisplayName(pendingRemoveEmployee)}
         onCancel={() => setPendingRemoveEmployeeId(null)}
         onConfirm={handleConfirmRemoveEmployee}
+      />
+    ) : null}
+    {pendingAccountLink ? (
+      <LinkExistingAccountModal
+        pendingLink={pendingAccountLink}
+        isSubmitting={isLinkingExistingAccount}
+        onCancel={() => setPendingAccountLink(null)}
+        onConfirm={handleConfirmLinkExistingAccount}
       />
     ) : null}
     </>
