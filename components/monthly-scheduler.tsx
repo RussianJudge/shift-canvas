@@ -11,7 +11,7 @@ import {
   cancelTemporaryLoan,
   createTemporaryLoan,
   saveAssignments,
-  saveSchedulePins,
+  saveScheduleEmployeeOrder,
   setScheduleSetCompletion,
 } from "@/app/actions";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
@@ -58,7 +58,7 @@ import type {
  * - debounced auto-save
  * - set-builder workflows
  * - whole-column copy/paste from a clicked day
- * - per-user row pinning
+ * - shared shift display ordering
  * - cell editing + drag-copy
  * - borrowed overtime rows
  *
@@ -79,6 +79,11 @@ type LoanCancelTarget = {
   sourceScheduleName: string;
   targetScheduleName: string;
   date: string;
+};
+type ShiftOrderEmployee = {
+  id: string;
+  name: string;
+  role: string;
 };
 type DragRange = {
   employeeId: string;
@@ -542,19 +547,124 @@ function CancelTemporaryLoanModal({
   );
 }
 
+function ShiftOrderModal({
+  scheduleName,
+  employees,
+  onCancel,
+  onSave,
+  isSubmitting,
+}: {
+  scheduleName: string;
+  employees: ShiftOrderEmployee[];
+  onCancel: () => void;
+  onSave: (employeeIds: string[]) => void;
+  isSubmitting: boolean;
+}) {
+  const [orderedEmployees, setOrderedEmployees] = useState(employees);
+  const [draggedEmployeeId, setDraggedEmployeeId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOrderedEmployees(employees);
+  }, [employees]);
+
+  function moveEmployee(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) {
+      return;
+    }
+
+    setOrderedEmployees((current) => {
+      const next = [...current];
+      const [movedEmployee] = next.splice(fromIndex, 1);
+
+      if (!movedEmployee) {
+        return current;
+      }
+
+      next.splice(toIndex, 0, movedEmployee);
+      return next;
+    });
+  }
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section className="assignment-modal shift-order-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Shift display order</h2>
+            <p className="assignment-modal__context">
+              Drag workers into the order everyone should see on {scheduleName}.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Close
+          </button>
+        </div>
+
+        <div className="shift-order-list">
+          {orderedEmployees.map((employee, index) => (
+            <div
+              key={employee.id}
+              className={`shift-order-row ${draggedEmployeeId === employee.id ? "shift-order-row--dragging" : ""}`}
+              draggable={!isSubmitting}
+              onDragStart={(event) => {
+                setDraggedEmployeeId(employee.id);
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", employee.id);
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                const fromIndex = orderedEmployees.findIndex((entry) => entry.id === draggedEmployeeId);
+                moveEmployee(fromIndex, index);
+              }}
+              onDragEnd={() => setDraggedEmployeeId(null)}
+            >
+              <span className="shift-order-row__handle" aria-hidden="true">
+                ::
+              </span>
+              <div>
+                <strong>{employee.name}</strong>
+                <span>{employee.role}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => onSave(orderedEmployees.map((employee) => employee.id))}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? "Saving..." : "Save order"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 /** Builds the visible roster, including borrowed overtime and mutual rows for the month. */
 function buildDisplayEmployeesForSchedule({
   schedule,
   snapshot,
   employeeMap,
   currentMonth,
-  pinnedEmployeesBySchedule,
+  scheduleEmployeeOrderBySchedule,
 }: {
   schedule: Schedule;
   snapshot: SchedulePageSnapshot;
   employeeMap: Record<string, Employee>;
   currentMonth: string;
-  pinnedEmployeesBySchedule: Record<string, string[]>;
+  scheduleEmployeeOrderBySchedule: Record<string, string[]>;
 }) {
   const baseRows: DisplayEmployee[] = schedule.employees.map((employee) => ({
     rowId: `base:${employee.id}`,
@@ -693,26 +803,26 @@ function buildDisplayEmployeesForSchedule({
   ).sort((left, right) => left.name.localeCompare(right.name));
 
   const rows = [...baseRows, ...borrowedRows, ...mutualRows];
-  const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
-  const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
+  const orderedIds = scheduleEmployeeOrderBySchedule[schedule.id] ?? [];
+  const orderIndex = new Map(orderedIds.map((employeeId, index) => [employeeId, index]));
 
   return rows
     .map((employee, index) => ({ employee, index }))
     .sort((left, right) => {
-      const leftPinned = pinnedIndex.get(left.employee.sourceEmployeeId);
-      const rightPinned = pinnedIndex.get(right.employee.sourceEmployeeId);
+      const leftOrder = orderIndex.get(left.employee.sourceEmployeeId);
+      const rightOrder = orderIndex.get(right.employee.sourceEmployeeId);
 
-      if (leftPinned !== undefined || rightPinned !== undefined) {
-        if (leftPinned === undefined) {
+      if (leftOrder !== undefined || rightOrder !== undefined) {
+        if (leftOrder === undefined) {
           return 1;
         }
 
-        if (rightPinned === undefined) {
+        if (rightOrder === undefined) {
           return -1;
         }
 
-        if (leftPinned !== rightPinned) {
-          return leftPinned - rightPinned;
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder;
         }
       }
 
@@ -1251,7 +1361,7 @@ function buildSetAutofillPlan({
 
 export function MonthlyScheduler({
   initialSnapshot,
-  initialPinnedEmployeesBySchedule,
+  initialScheduleEmployeeOrderBySchedule,
   canEdit,
   canManageSetBuilder,
   canSwitchSchedule,
@@ -1259,7 +1369,7 @@ export function MonthlyScheduler({
   initialSelectedScheduleId,
 }: {
   initialSnapshot: SchedulePageSnapshot;
-  initialPinnedEmployeesBySchedule: Record<string, string[]>;
+  initialScheduleEmployeeOrderBySchedule: Record<string, string[]>;
   canEdit: boolean;
   canManageSetBuilder: boolean;
   canSwitchSchedule: boolean;
@@ -1295,8 +1405,8 @@ export function MonthlyScheduler({
     readCopiedColumnTemplateFromStorage,
   );
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
-  const [pinnedEmployeesBySchedule, setPinnedEmployeesBySchedule] = useState<Record<string, string[]>>(
-    initialPinnedEmployeesBySchedule,
+  const [scheduleEmployeeOrderBySchedule, setScheduleEmployeeOrderBySchedule] = useState<Record<string, string[]>>(
+    initialScheduleEmployeeOrderBySchedule,
   );
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
@@ -1307,9 +1417,10 @@ export function MonthlyScheduler({
   const [isTemporaryLoanModalOpen, setIsTemporaryLoanModalOpen] = useState(false);
   const [loanCancelTarget, setLoanCancelTarget] = useState<LoanCancelTarget | null>(null);
   const [isLoanTransition, startLoanTransition] = useTransition();
-  const [isSavingPins, startPinSaveTransition] = useTransition();
+  const [isShiftOrderModalOpen, setIsShiftOrderModalOpen] = useState(false);
+  const [isSavingShiftOrder, startShiftOrderTransition] = useTransition();
   const isSaving = isSavingTransition || activeSaveCount > 0;
-  const isScheduleLocked = isSaving || isUpdatingSetCompletion || isLoanTransition;
+  const isScheduleLocked = isSaving || isUpdatingSetCompletion || isLoanTransition || isSavingShiftOrder;
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const latestAutoSaveTokenRef = useRef(0);
   const baselineAssignmentsRef = useRef(baselineAssignments);
@@ -1529,10 +1640,10 @@ export function MonthlyScheduler({
             snapshot,
             employeeMap,
             currentMonth,
-            pinnedEmployeesBySchedule,
+            scheduleEmployeeOrderBySchedule,
           })
         : [],
-    [activeSchedule, currentMonth, employeeMap, pinnedEmployeesBySchedule, snapshot],
+    [activeSchedule, currentMonth, employeeMap, scheduleEmployeeOrderBySchedule, snapshot],
   );
   if (!activeSchedule) {
     return (
@@ -1704,6 +1815,38 @@ export function MonthlyScheduler({
     [dirtyUpdates, displayEmployeeMap, monthDays],
   );
   const hasActiveChanges = activeDirtyUpdates.length > 0;
+  const activeShiftOrderEmployees = useMemo<ShiftOrderEmployee[]>(() => {
+    const orderedIds = scheduleEmployeeOrderBySchedule[activeSchedule.id] ?? [];
+    const orderIndex = new Map(orderedIds.map((employeeId, index) => [employeeId, index]));
+
+    return activeSchedule.employees
+      .map((employee, index) => ({ employee, index }))
+      .sort((left, right) => {
+        const leftOrder = orderIndex.get(left.employee.id);
+        const rightOrder = orderIndex.get(right.employee.id);
+
+        if (leftOrder !== undefined || rightOrder !== undefined) {
+          if (leftOrder === undefined) {
+            return 1;
+          }
+
+          if (rightOrder === undefined) {
+            return -1;
+          }
+
+          if (leftOrder !== rightOrder) {
+            return leftOrder - rightOrder;
+          }
+        }
+
+        return left.index - right.index;
+      })
+      .map(({ employee }) => ({
+        id: employee.id,
+        name: employee.name,
+        role: employee.role,
+      }));
+  }, [activeSchedule, scheduleEmployeeOrderBySchedule]);
 
   function getProjectedAssignmentForCell(employeeId: string, date: string) {
     return projectedAssignmentIndex[createAssignmentKey(activeSchedule.id, employeeId, date)] ?? null;
@@ -1889,8 +2032,8 @@ export function MonthlyScheduler({
   }, []);
 
   useEffect(() => {
-    setPinnedEmployeesBySchedule(initialPinnedEmployeesBySchedule);
-  }, [initialPinnedEmployeesBySchedule]);
+    setScheduleEmployeeOrderBySchedule(initialScheduleEmployeeOrderBySchedule);
+  }, [initialScheduleEmployeeOrderBySchedule]);
 
   useEffect(() => {
     if (!isDraftHydrated) {
@@ -2242,43 +2385,34 @@ export function MonthlyScheduler({
     });
   }
 
-  function handlePinToggle(employeeId: string) {
-    const currentPins = pinnedEmployeesBySchedule[activeSchedule.id] ?? [];
-    const nextPins = currentPins.includes(employeeId)
-      ? currentPins.filter((pinnedEmployeeId) => pinnedEmployeeId !== employeeId)
-      : [...currentPins, employeeId];
+  function handleSaveShiftOrder(employeeIds: string[]) {
+    if (!canManageSetBuilder || isScheduleLocked) {
+      return;
+    }
 
-    startTransition(() => {
-      setPinnedEmployeesBySchedule((current) => {
-        const next = Object.fromEntries(
-          Object.entries(current).map(([scheduleId, employeeIds]) => [scheduleId, [...employeeIds]]),
-        ) as Record<string, string[]>;
+    const nextOrder = Array.from(new Set(employeeIds));
 
-        if (nextPins.length === 0) {
-          delete next[activeSchedule.id];
-        } else {
-          next[activeSchedule.id] = nextPins;
-        }
+    setScheduleEmployeeOrderBySchedule((current) => ({
+      ...current,
+      [activeSchedule.id]: nextOrder,
+    }));
+    setIsShiftOrderModalOpen(false);
 
-        if (currentPins.includes(employeeId)) {
-          setStatusMessage("Employee unpinned");
-          return next;
-        }
-
-        setStatusMessage("Employee pinned to top");
-        return next;
-      });
-    });
-
-    startPinSaveTransition(async () => {
-      const result = await saveSchedulePins({
+    startShiftOrderTransition(async () => {
+      setStatusMessage("Saving shift display order...");
+      const result = await saveScheduleEmployeeOrder({
         scheduleId: activeSchedule.id,
-        pinnedEmployeeIds: nextPins,
+        employeeIds: nextOrder,
       });
+
+      setStatusMessage(result.message);
 
       if (!result.ok) {
-        setStatusMessage(result.message);
+        setScheduleEmployeeOrderBySchedule(initialScheduleEmployeeOrderBySchedule);
+        return;
       }
+
+      router.refresh();
     });
   }
 
@@ -2671,6 +2805,16 @@ export function MonthlyScheduler({
                 Temporary loan
               </button>
             ) : null}
+            {canManageSetBuilder ? (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setIsShiftOrderModalOpen(true)}
+                disabled={isScheduleLocked}
+              >
+                Shift order
+              </button>
+            ) : null}
             <button
               type="button"
               className="ghost-button icon-button schedule-print-button"
@@ -2925,7 +3069,6 @@ export function MonthlyScheduler({
                     <EmployeeRow
                       key={employee.rowId}
                       employee={employee}
-                      isPinned={(pinnedEmployeesBySchedule[activeSchedule.id] ?? []).includes(employee.sourceEmployeeId)}
                       schedule={activeSchedule}
                       monthDays={monthDays}
                       assignments={effectiveAssignments}
@@ -2942,7 +3085,6 @@ export function MonthlyScheduler({
                       selectedCoverageCompetencyId={selectedCoverageCompetencyId}
                       selectedSetDays={selectedSetDays}
                       canEdit={canEdit && !isScheduleLocked}
-                      onPinToggle={handlePinToggle}
                       onCellPointerDown={handleCellPointerDown}
                       onDragHover={handleDragHover}
                       onCellClick={(cell) => {
@@ -3055,6 +3197,16 @@ export function MonthlyScheduler({
         />
       ) : null}
 
+      {isShiftOrderModalOpen ? (
+        <ShiftOrderModal
+          scheduleName={activeSchedule.name}
+          employees={activeShiftOrderEmployees}
+          onCancel={() => setIsShiftOrderModalOpen(false)}
+          onSave={handleSaveShiftOrder}
+          isSubmitting={isSavingShiftOrder}
+        />
+      ) : null}
+
       {canEdit && !isScheduleLocked ? (
         <ScheduleAssignmentModal
           selectedEmployeeName={editorEmployee?.name ?? null}
@@ -3092,7 +3244,6 @@ export function MonthlyScheduler({
 
 function EmployeeRow({
   employee,
-  isPinned,
   schedule,
   monthDays,
   assignments,
@@ -3109,14 +3260,12 @@ function EmployeeRow({
   selectedCoverageCompetencyId,
   selectedSetDays,
   canEdit,
-  onPinToggle,
   onCellPointerDown,
   onDragHover,
   onCellClick,
   rowStyle,
 }: {
   employee: DisplayEmployee;
-  isPinned: boolean;
   schedule: Schedule;
   monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
   assignments: Record<string, AssignmentSelection>;
@@ -3133,7 +3282,6 @@ function EmployeeRow({
   selectedCoverageCompetencyId: string | null;
   selectedSetDays: Array<{ date: string }>;
   canEdit: boolean;
-  onPinToggle: (employeeId: string) => void;
   onCellPointerDown: (
     employeeId: string,
     date: string,
@@ -3159,17 +3307,6 @@ function EmployeeRow({
             <span className="employee-name-compact">{getCompactEmployeeName(employee.name)}</span>
           </strong>
         </div>
-        <button
-          type="button"
-          className={`employee-pin-button ${isPinned ? "employee-pin-button--active" : ""}`}
-          onClick={() => onPinToggle(employee.sourceEmployeeId)}
-          aria-pressed={isPinned}
-          title={isPinned ? "Unpin employee" : "Pin employee to top"}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M9 3h6l-1 5 4 4v2h-5v7l-1-1-1 1v-7H6v-2l4-4-1-5Z" />
-          </svg>
-        </button>
       </div>
 
       {monthDays.map((day, dayIndex) => {

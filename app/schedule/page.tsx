@@ -4,7 +4,7 @@ import { MonthlyScheduler } from "@/components/monthly-scheduler";
 import { ScheduleRouteLoading } from "@/components/route-loading";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { canManageWorkspace, requireAppSession } from "@/lib/auth";
-import { getSchedulePageSnapshot, getUserSchedulePins } from "@/lib/data";
+import { getScheduleEmployeeOrder, getSchedulePageSnapshot } from "@/lib/data";
 import { scopeScheduleSnapshot } from "@/lib/role-scopes";
 import { getCurrentMonthKey } from "@/lib/scheduling";
 
@@ -24,15 +24,15 @@ async function ScheduleBoard({
   month: string;
   initialSelectedScheduleId: string | null;
 }) {
-  const [snapshot, initialPinnedEmployeesBySchedule] = await Promise.all([
+  const [snapshot, initialScheduleEmployeeOrderBySchedule] = await Promise.all([
     getSchedulePageSnapshot(month, session),
-    getUserSchedulePins(session.email),
+    getScheduleEmployeeOrder(session),
   ]);
 
   return (
     <MonthlyScheduler
       initialSnapshot={scopeScheduleSnapshot(snapshot, session)}
-      initialPinnedEmployeesBySchedule={initialPinnedEmployeesBySchedule}
+      initialScheduleEmployeeOrderBySchedule={initialScheduleEmployeeOrderBySchedule}
       canEdit={canManageWorkspace(session)}
       canManageSetBuilder={session.role !== "worker"}
       canSwitchSchedule={true}

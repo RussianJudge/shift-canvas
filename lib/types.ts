@@ -236,6 +236,11 @@ export interface SaveAssignmentsInput {
   updates: StoredAssignment[];
 }
 
+export interface SaveScheduleEmployeeOrderInput {
+  scheduleId: string;
+  employeeIds: string[];
+}
+
 export interface CreateTemporaryLoanInput {
   employeeId: string;
   targetScheduleId: string;

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { PrintDialogLauncher } from "@/components/print-dialog-launcher";
 import { SchedulePrintView } from "@/components/schedule-print-view";
 import { requireAppSession } from "@/lib/auth";
-import { getSchedulerSnapshot, getUserSchedulePins } from "@/lib/data";
+import { getScheduleEmployeeOrder, getSchedulerSnapshot } from "@/lib/data";
 import { scopeScheduleSnapshot } from "@/lib/role-scopes";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
 
@@ -23,7 +23,7 @@ export default async function SchedulePrintPage({
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
   const snapshot = scopeScheduleSnapshot(await getSchedulerSnapshot(month, session), session);
-  const pinnedEmployeesBySchedule = await getUserSchedulePins(session.email);
+  const scheduleEmployeeOrderBySchedule = await getScheduleEmployeeOrder(session);
 
   return (
     <main className="print-preview-page">
@@ -43,7 +43,7 @@ export default async function SchedulePrintPage({
       <SchedulePrintView
         snapshot={snapshot}
         monthKey={month}
-        pinnedEmployeesBySchedule={pinnedEmployeesBySchedule}
+        scheduleEmployeeOrderBySchedule={scheduleEmployeeOrderBySchedule}
       />
     </main>
   );

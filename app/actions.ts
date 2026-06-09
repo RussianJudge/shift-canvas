@@ -18,6 +18,7 @@ import type {
   ReleaseOvertimePostingInput,
   SaveAssignmentsInput,
   SaveCompetenciesInput,
+  SaveScheduleEmployeeOrderInput,
   SavePersonnelInput,
   SaveScheduleCompetenciesInput,
   SaveSchedulesInput,
@@ -110,7 +111,7 @@ type TemporaryLoanNotification = {
  * - completed-set toggles
  * - overtime claim / release
  * - admin maintenance screens
- * - per-user schedule pin storage
+ * - shared shift display ordering
  *
  * The actions deliberately centralize validation and side effects so the client
  * components can stay focused on interaction state.
@@ -1592,20 +1593,13 @@ export async function cancelTemporaryLoan(input: CancelTemporaryLoanInput) {
   };
 }
 
-/**
- * Stores the current user's pinned rows for one shift in Supabase so the
- * preference survives refreshes and device changes.
- */
-export async function saveSchedulePins(input: {
-  scheduleId: string;
-  pinnedEmployeeIds: string[];
-}) {
-  const session = await requireActionRole(["admin", "leader", "worker"]);
+export async function saveScheduleEmployeeOrder(input: SaveScheduleEmployeeOrderInput) {
+  const session = await requireActionRole(["admin", "leader"]);
 
   if (!session) {
     return {
       ok: false,
-      message: "You do not have permission to save pinned workers.",
+      message: "You do not have permission to change shift display order.",
     };
   }
 
@@ -1614,7 +1608,7 @@ export async function saveSchedulePins(input: {
   if (!supabase) {
     return {
       ok: false,
-      message: "Supabase is not configured yet. Pins could not be saved.",
+      message: "Supabase is not configured yet. Shift display order could not be saved.",
     };
   }
 
@@ -1638,7 +1632,7 @@ export async function saveSchedulePins(input: {
   if (scheduleResult.error || !scheduleScopeRow) {
     return {
       ok: false,
-      message: "Could not resolve the selected shift for pinning.",
+      message: "Could not resolve the selected shift.",
     };
   }
 
@@ -1647,41 +1641,47 @@ export async function saveSchedulePins(input: {
   if (!canAccessScope(session, scheduleScope)) {
     return {
       ok: false,
-      message: "You do not have permission to save pins for that shift.",
+      message: "You do not have permission to save order for that shift.",
     };
   }
 
-  const profileResult = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("email", session.email)
-    .maybeSingle();
+  const snapshot = await getScheduleReferenceSnapshot(getCurrentUtcDateKey().slice(0, 7), session, {
+    includeEmployeeCompetencies: false,
+    includeCompetencies: false,
+    includeTimeCodes: false,
+    includeSubSchedules: false,
+  });
+  const schedule = getScheduleById(snapshot, input.scheduleId);
 
-  const userId = (profileResult.data as { id: string } | null)?.id;
-
-  if (profileResult.error || !userId) {
+  if (!schedule) {
     return {
       ok: false,
-      message: "Could not resolve the signed-in user profile for pinning.",
+      message: "Could not load workers for that shift.",
     };
   }
 
+  const validEmployeeIds = new Set(schedule.employees.map((employee) => employee.id));
+  const orderedEmployeeIds = Array.from(new Set(input.employeeIds)).filter((employeeId) =>
+    validEmployeeIds.has(employeeId),
+  );
+  const missingEmployeeIds = schedule.employees
+    .map((employee) => employee.id)
+    .filter((employeeId) => !orderedEmployeeIds.includes(employeeId));
+  const completeEmployeeIds = [...orderedEmployeeIds, ...missingEmployeeIds];
   const { error: deleteError } = await supabase
-    .from("user_schedule_pins")
+    .from("schedule_employee_order")
     .delete()
-    .eq("user_id", userId)
     .eq("schedule_id", input.scheduleId);
 
   if (deleteError) {
     return {
       ok: false,
-      message: `Could not clear existing pins: ${deleteError.message}`,
+      message: `Could not clear existing shift order: ${deleteError.message}`,
     };
   }
 
-  if (input.pinnedEmployeeIds.length > 0) {
-    const rows = input.pinnedEmployeeIds.map((employeeId, index) => ({
-      user_id: userId,
+  if (completeEmployeeIds.length > 0) {
+    const rows = completeEmployeeIds.map((employeeId, index) => ({
       schedule_id: input.scheduleId,
       employee_id: employeeId,
       sort_order: index,
@@ -1689,22 +1689,23 @@ export async function saveSchedulePins(input: {
     }));
 
     const { error: insertError } = await supabase
-      .from("user_schedule_pins")
+      .from("schedule_employee_order")
       .insert(rows);
 
     if (insertError) {
       return {
         ok: false,
-        message: `Could not save pinned workers: ${insertError.message}`,
+        message: `Could not save shift order: ${insertError.message}`,
       };
     }
   }
 
   revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
 
   return {
     ok: true,
-    message: "Pinned workers saved.",
+    message: "Shift display order saved.",
   };
 }
 

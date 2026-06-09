@@ -125,13 +125,13 @@ function buildDisplayEmployeesForSchedule({
   snapshot,
   employeeMap,
   currentMonth,
-  pinnedEmployeesBySchedule,
+  scheduleEmployeeOrderBySchedule,
 }: {
   schedule: Schedule;
   snapshot: SchedulerSnapshot;
   employeeMap: Record<string, Employee>;
   currentMonth: string;
-  pinnedEmployeesBySchedule: Record<string, string[]>;
+  scheduleEmployeeOrderBySchedule: Record<string, string[]>;
 }) {
   const baseRows: DisplayEmployee[] = schedule.employees.map((employee) => ({
     rowId: `base:${employee.id}`,
@@ -242,26 +242,26 @@ function buildDisplayEmployeesForSchedule({
   ).sort((left, right) => left.name.localeCompare(right.name));
 
   const rows = [...baseRows, ...borrowedRows, ...mutualRows];
-  const pinnedIds = pinnedEmployeesBySchedule[schedule.id] ?? [];
-  const pinnedIndex = new Map(pinnedIds.map((employeeId, index) => [employeeId, index]));
+  const orderedIds = scheduleEmployeeOrderBySchedule[schedule.id] ?? [];
+  const orderIndex = new Map(orderedIds.map((employeeId, index) => [employeeId, index]));
 
   return rows
     .map((employee, index) => ({ employee, index }))
     .sort((left, right) => {
-      const leftPinned = pinnedIndex.get(left.employee.sourceEmployeeId);
-      const rightPinned = pinnedIndex.get(right.employee.sourceEmployeeId);
+      const leftOrder = orderIndex.get(left.employee.sourceEmployeeId);
+      const rightOrder = orderIndex.get(right.employee.sourceEmployeeId);
 
-      if (leftPinned !== undefined || rightPinned !== undefined) {
-        if (leftPinned === undefined) {
+      if (leftOrder !== undefined || rightOrder !== undefined) {
+        if (leftOrder === undefined) {
           return 1;
         }
 
-        if (rightPinned === undefined) {
+        if (rightOrder === undefined) {
           return -1;
         }
 
-        if (leftPinned !== rightPinned) {
-          return leftPinned - rightPinned;
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder;
         }
       }
 
@@ -393,11 +393,11 @@ function PrintScheduleSheet({
 export function SchedulePrintView({
   snapshot,
   monthKey,
-  pinnedEmployeesBySchedule,
+  scheduleEmployeeOrderBySchedule,
 }: {
   snapshot: SchedulerSnapshot;
   monthKey: string;
-  pinnedEmployeesBySchedule: Record<string, string[]>;
+  scheduleEmployeeOrderBySchedule: Record<string, string[]>;
 }) {
   const assignments = {
     ...buildAssignmentIndex(snapshot.assignments),
@@ -434,7 +434,7 @@ export function SchedulePrintView({
             snapshot,
             employeeMap,
             currentMonth: monthKey,
-            pinnedEmployeesBySchedule,
+            scheduleEmployeeOrderBySchedule,
           })}
         />
       ))}

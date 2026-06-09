@@ -2729,6 +2729,62 @@ button.workspace-nav-link {
   opacity: 0.38;
 }
 
+.shift-order-modal {
+  width: min(34rem, 100%);
+}
+
+.shift-order-list {
+  display: grid;
+  gap: 0.45rem;
+  max-height: min(30rem, 58vh);
+  overflow: auto;
+  padding: 0.15rem;
+}
+
+.shift-order-row {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.76);
+  cursor: grab;
+}
+
+.shift-order-row:active {
+  cursor: grabbing;
+}
+
+.shift-order-row--dragging {
+  border-color: color-mix(in srgb, var(--team-accent, #f97316) 48%, white);
+  background: color-mix(in srgb, var(--team-accent, #f97316) 13%, white);
+}
+
+.shift-order-row__handle {
+  display: inline-flex;
+  justify-content: center;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: -0.08em;
+}
+
+.shift-order-row div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.shift-order-row strong {
+  font-size: 0.85rem;
+}
+
+.shift-order-row span:not(.shift-order-row__handle) {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
 .assignment-modal__note-input {
   width: 100%;
   min-height: 5.5rem;
@@ -3234,43 +3290,6 @@ button.workspace-nav-link {
   color: var(--muted);
   font-size: 0.58rem;
   line-height: 1.1;
-}
-
-.employee-pin-button {
-  flex: 0 0 auto;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(131, 110, 87, 0.22);
-  border-radius: 0.8rem;
-  background: rgba(255, 255, 255, 0.76);
-  color: var(--muted);
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.employee-pin-button svg {
-  width: 0.88rem;
-  height: 0.88rem;
-  fill: currentColor;
-}
-
-.employee-pin-button:hover {
-  border-color: color-mix(in srgb, var(--team-accent) 44%, rgba(131, 110, 87, 0.22));
-  color: color-mix(in srgb, var(--team-accent) 72%, #4b3424);
-}
-
-.employee-pin-button--active {
-  border-color: color-mix(in srgb, var(--team-accent) 58%, rgba(131, 110, 87, 0.22));
-  background: color-mix(in srgb, var(--team-accent) 14%, white);
-  color: color-mix(in srgb, var(--team-accent) 72%, #4b3424);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--team-accent) 18%, transparent);
 }
 
 .shift-cell {
@@ -4267,12 +4286,6 @@ button.workspace-nav-link {
     display: inline;
   }
 
-  .employee-pin-button {
-    min-width: 2.1rem;
-    padding-inline: 0.35rem;
-    font-size: 0.52rem;
-  }
-
   .shift-cell {
     min-height: 2.95rem;
   }
@@ -4626,10 +4639,6 @@ button.workspace-nav-link {
   .print-schedule-grid .employee-cell__main strong {
     font-size: 0.72rem;
     line-height: 1.05;
-  }
-
-  .print-schedule-grid .employee-pin-button {
-    display: none;
   }
 
   .print-schedule-grid .shift-cell-button {

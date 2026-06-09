@@ -279,6 +279,15 @@ type UserSchedulePinRow = {
   business_area_id: string;
 };
 
+type ScheduleEmployeeOrderRow = {
+  schedule_id: string;
+  employee_id: string;
+  sort_order: number;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
 type MutualShiftPostingRow = {
   id: string;
   owner_employee_id: string;
@@ -2091,6 +2100,36 @@ export async function getUserSchedulePins(email: string) {
   }
 
   return ((pinsResult.data as UserSchedulePinRow[] | null) ?? []).reduce<Record<string, string[]>>(
+    (map, row) => {
+      map[row.schedule_id] ??= [];
+      map[row.schedule_id].push(row.employee_id);
+      return map;
+    },
+    {},
+  );
+}
+
+export async function getScheduleEmployeeOrder(session?: AppSession | null) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {};
+  }
+
+  const orderResult = await applySessionScope(
+    supabase
+      .from("schedule_employee_order")
+      .select("schedule_id, employee_id, sort_order, company_id, site_id, business_area_id"),
+    session,
+  )
+    .order("schedule_id")
+    .order("sort_order");
+
+  if (orderResult.error) {
+    return {};
+  }
+
+  return ((orderResult.data as ScheduleEmployeeOrderRow[] | null) ?? []).reduce<Record<string, string[]>>(
     (map, row) => {
       map[row.schedule_id] ??= [];
       map[row.schedule_id].push(row.employee_id);
