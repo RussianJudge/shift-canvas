@@ -588,6 +588,18 @@ type MyOvertimeClaimRow = {
   assignmentLabel: string;
 };
 
+type OvertimeCalendarPosting = {
+  id: string;
+  source: OvertimePosting["source"];
+  targetMode: OvertimePosting["targetMode"];
+  scheduleName: string;
+  shiftKind: OvertimePosting["shiftKind"];
+  competencyCode: string;
+  colorToken: string;
+  dates: string[];
+  openShifts: number;
+};
+
 function MyOvertimeClaimsModal({
   claims,
   onClose,
@@ -645,14 +657,14 @@ function OvertimeCalendarModal({
 }: {
   monthLabel: string;
   monthDays: ReturnType<typeof getMonthDays>;
-  postings: OvertimePosting[];
+  postings: OvertimeCalendarPosting[];
   onClose: () => void;
 }) {
   if (typeof document === "undefined") {
     return null;
   }
 
-  const postingsByDate = new Map<string, OvertimePosting[]>();
+  const postingsByDate = new Map<string, OvertimeCalendarPosting[]>();
 
   for (const posting of postings) {
     for (const date of posting.dates) {
@@ -1632,6 +1644,39 @@ export function OvertimePanel({
       }),
     [availabilityFilter, postings, selectedAssignmentFilter, selectedSubScheduleFilter, selectedTargetMode],
   );
+  const calendarPostings = useMemo<OvertimeCalendarPosting[]>(
+    () =>
+      Object.values(
+        filteredPostings.reduce<Record<string, OvertimeCalendarPosting>>((entries, posting) => {
+          const targetId = posting.targetMode === "main" ? posting.scheduleId : posting.subScheduleId;
+          const originalAssignmentId = posting.coverageCompetencyId ?? posting.timeCodeId ?? posting.assignmentKey;
+          const key = `${posting.targetMode}:${targetId}:${posting.shiftKind}:${posting.dates.join(",")}:${originalAssignmentId}`;
+
+          entries[key] ??= {
+            id: key,
+            source: posting.source,
+            targetMode: posting.targetMode,
+            scheduleName: posting.scheduleName,
+            shiftKind: posting.shiftKind,
+            competencyCode: posting.coverageCompetencyCode,
+            colorToken: posting.coverageCompetencyId
+              ? competencyMap[posting.coverageCompetencyId]?.colorToken ?? posting.colorToken
+              : posting.colorToken,
+            dates: posting.dates,
+            openShifts: posting.openShifts,
+          };
+
+          return entries;
+        }, {}),
+      ).sort(
+        (left, right) =>
+          left.dates[0].localeCompare(right.dates[0]) ||
+          left.scheduleName.localeCompare(right.scheduleName) ||
+          left.shiftKind.localeCompare(right.shiftKind) ||
+          left.competencyCode.localeCompare(right.competencyCode),
+      ),
+    [competencyMap, filteredPostings],
+  );
   const groupedPostings = useMemo(
     () =>
       Object.values(
@@ -2265,7 +2310,7 @@ export function OvertimePanel({
         <OvertimeCalendarModal
           monthLabel={formatMonthLabel(snapshot.month)}
           monthDays={monthDays}
-          postings={filteredPostings}
+          postings={calendarPostings}
           onClose={() => setIsCalendarModalOpen(false)}
         />
       ) : null}

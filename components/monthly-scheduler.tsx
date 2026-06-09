@@ -59,6 +59,7 @@ import type {
  * render detail.
  */
 const STORAGE_KEY = "shift-canvas-drafts-v2";
+const COLUMN_COPY_STORAGE_KEY = "shift-canvas-column-copy-v1";
 const AUTO_SAVE_DEBOUNCE_MS = 2500;
 const STALE_SNAPSHOT_PROTECTION_MS = 12000;
 const SCHEDULE_ROW_HEIGHT_PX = 51;
@@ -123,6 +124,69 @@ type CopiedColumnTemplate = {
   sourceDate: string;
   selectionsByEmployeeId: Record<string, AssignmentSelection>;
 };
+
+function isAssignmentSelection(value: unknown): value is AssignmentSelection {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const selection = value as Partial<AssignmentSelection>;
+
+  return (
+    (typeof selection.competencyId === "string" || selection.competencyId === null) &&
+    (typeof selection.timeCodeId === "string" || selection.timeCodeId === null) &&
+    (typeof selection.notes === "string" || selection.notes === null)
+  );
+}
+
+function readCopiedColumnTemplateFromStorage(): CopiedColumnTemplate | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const savedTemplate = window.sessionStorage.getItem(COLUMN_COPY_STORAGE_KEY);
+
+  if (!savedTemplate) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(savedTemplate) as Partial<CopiedColumnTemplate>;
+
+    if (
+      typeof parsed.scheduleId !== "string" ||
+      typeof parsed.sourceDate !== "string" ||
+      !parsed.selectionsByEmployeeId ||
+      typeof parsed.selectionsByEmployeeId !== "object" ||
+      !Object.values(parsed.selectionsByEmployeeId).every(isAssignmentSelection)
+    ) {
+      window.sessionStorage.removeItem(COLUMN_COPY_STORAGE_KEY);
+      return null;
+    }
+
+    return {
+      scheduleId: parsed.scheduleId,
+      sourceDate: parsed.sourceDate,
+      selectionsByEmployeeId: parsed.selectionsByEmployeeId,
+    };
+  } catch {
+    window.sessionStorage.removeItem(COLUMN_COPY_STORAGE_KEY);
+    return null;
+  }
+}
+
+function persistCopiedColumnTemplateToStorage(template: CopiedColumnTemplate | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!template) {
+    window.sessionStorage.removeItem(COLUMN_COPY_STORAGE_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(COLUMN_COPY_STORAGE_KEY, JSON.stringify(template));
+}
 
 const ScheduleAssignmentModal = dynamic(
   () =>
@@ -892,7 +956,9 @@ export function MonthlyScheduler({
   const [selectedSetAnchorDate, setSelectedSetAnchorDate] = useState<string | null>(null);
   const [selectedCoverageCompetencyId, setSelectedCoverageCompetencyId] = useState<string | null>(null);
   const [copiedSetTemplate, setCopiedSetTemplate] = useState<CopiedSetTemplate | null>(null);
-  const [copiedColumnTemplate, setCopiedColumnTemplate] = useState<CopiedColumnTemplate | null>(null);
+  const [copiedColumnTemplate, setCopiedColumnTemplate] = useState<CopiedColumnTemplate | null>(
+    readCopiedColumnTemplateFromStorage,
+  );
   const [dragRange, setDragRange] = useState<DragRange | null>(null);
   const [pinnedEmployeesBySchedule, setPinnedEmployeesBySchedule] = useState<Record<string, string[]>>(
     initialPinnedEmployeesBySchedule,
@@ -987,6 +1053,7 @@ export function MonthlyScheduler({
     selectedColumnDate !== null &&
     copiedColumnTemplate.sourceDate !== selectedColumnDate &&
     !completedSetDates.has(selectedColumnDate);
+  const hasSelectedBuilderTarget = selectedSetDays.length > 0 || selectedColumnDate !== null;
   const competencyCoverage = useMemo(() => {
     if (!activeSchedule) {
       return {};
@@ -1661,6 +1728,11 @@ export function MonthlyScheduler({
       return;
     }
 
+    if (canManageSetBuilder) {
+      setSelectedSetAnchorDate(date);
+      setSelectedCoverageCompetencyId(null);
+    }
+
     setSelectedCell({ employeeId, date });
     setDragRange({
       employeeId,
@@ -1988,7 +2060,12 @@ export function MonthlyScheduler({
   }
 
   function handleCopyColumn() {
-    if (isScheduleLocked || !canManageSetBuilder || !selectedColumnDate) {
+    if (isScheduleLocked || !canManageSetBuilder) {
+      return;
+    }
+
+    if (!selectedColumnDate) {
+      setStatusMessage("Select a date column first, then copy it.");
       return;
     }
 
@@ -2006,16 +2083,49 @@ export function MonthlyScheduler({
       ]),
     );
 
-    setCopiedColumnTemplate({
+    const nextTemplate = {
       scheduleId: activeSchedule.id,
       sourceDate: selectedColumnDate,
       selectionsByEmployeeId,
-    });
+    };
+
+    setCopiedColumnTemplate(nextTemplate);
+    persistCopiedColumnTemplateToStorage(nextTemplate);
     setStatusMessage(`Column copied from ${formatShortDate(selectedColumnDate)}.`);
   }
 
   function handlePasteColumn() {
-    if (isScheduleLocked || !canEdit || !canManageSetBuilder || !copiedColumnTemplate || !selectedColumnDate || !canPasteColumn) {
+    if (isScheduleLocked || !canEdit || !canManageSetBuilder) {
+      return;
+    }
+
+    if (!copiedColumnTemplate) {
+      setStatusMessage("Copy a column before pasting.");
+      return;
+    }
+
+    if (!selectedColumnDate) {
+      setStatusMessage("Select a target date column first, then paste.");
+      return;
+    }
+
+    if (copiedColumnTemplate.scheduleId !== activeScheduleId) {
+      setStatusMessage("Copied columns can only be pasted within the same shift.");
+      return;
+    }
+
+    if (copiedColumnTemplate.sourceDate === selectedColumnDate) {
+      setStatusMessage("Select a different target date before pasting this column.");
+      return;
+    }
+
+    if (completedSetDates.has(selectedColumnDate)) {
+      setStatusMessage("Completed set columns are locked. Reopen the set before pasting.");
+      return;
+    }
+
+    if (!canPasteColumn) {
+      setStatusMessage("This column cannot be pasted here.");
       return;
     }
 
@@ -2165,7 +2275,7 @@ export function MonthlyScheduler({
         </div>
       </div>
 
-      {canManageSetBuilder && selectedSetDays.length > 0 ? (
+      {canManageSetBuilder && hasSelectedBuilderTarget ? (
         <section className="set-builder" aria-label="Set builder">
           <div className="set-builder__surface">
             <div className="set-builder-heading">
@@ -2174,7 +2284,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handleCopyColumn}
-                  disabled={isScheduleLocked || !selectedColumnDate}
+                  disabled={isScheduleLocked}
                 >
                   Copy column
                 </button>
@@ -2182,7 +2292,7 @@ export function MonthlyScheduler({
                   type="button"
                   className="ghost-button"
                   onClick={handlePasteColumn}
-                  disabled={isScheduleLocked || !canPasteColumn}
+                  disabled={isScheduleLocked || !canEdit}
                 >
                   Paste column
                 </button>
@@ -2370,6 +2480,11 @@ export function MonthlyScheduler({
                       onCellClick={(cell) => {
                         if (!canEdit || isScheduleLocked) {
                           return;
+                        }
+
+                        if (canManageSetBuilder) {
+                          setSelectedSetAnchorDate(cell.date);
+                          setSelectedCoverageCompetencyId(null);
                         }
 
                         const projectedAssignment = getProjectedAssignmentForCell(cell.employeeId, cell.date);
