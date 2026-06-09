@@ -297,161 +297,164 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                   </button>
                 </div>
 
-                <div className="metrics-transfer-grid">
-                  <label className="field">
-                    <span>From shift</span>
-                    <select
-                      value={sourceScheduleId}
-                      onChange={(event) => {
-                        setSourceScheduleId(event.target.value);
-                        setTransferSuggestions([]);
-                        setSelectedTransferSuggestionIndex(0);
-                        setTransferMessage("");
-                      }}
-                    >
-                      {snapshot.schedules.map((schedule) => (
-                        <option key={schedule.id} value={schedule.id}>
-                          {schedule.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="metrics-transfer-modal__body">
+                  <div className="metrics-transfer-grid">
+                    <label className="field">
+                      <span>From shift</span>
+                      <select
+                        value={sourceScheduleId}
+                        onChange={(event) => {
+                          setSourceScheduleId(event.target.value);
+                          setTransferSuggestions([]);
+                          setSelectedTransferSuggestionIndex(0);
+                          setTransferMessage("");
+                        }}
+                      >
+                        {snapshot.schedules.map((schedule) => (
+                          <option key={schedule.id} value={schedule.id}>
+                            {schedule.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <label className="field">
-                    <span>To shift</span>
-                    <select
-                      value={targetScheduleId}
-                      onChange={(event) => {
-                        setTargetScheduleId(event.target.value);
-                        setTransferSuggestions([]);
-                        setSelectedTransferSuggestionIndex(0);
-                        setTransferMessage("");
-                      }}
-                    >
-                      {snapshot.schedules.map((schedule) => (
-                        <option key={schedule.id} value={schedule.id}>
-                          {schedule.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
-                <div className="assignment-modal__group">
-                  <span className="assignment-modal__label">Include competencies</span>
-                  <div className="assignment-modal__options">
-                    {snapshot.competencies.map((competency) => {
-                      const isSelected = selectedTransferCompetencyIds.includes(competency.id);
-
-                      return (
-                        <button
-                          key={competency.id}
-                          type="button"
-                          className={`metrics-transfer-competency-option ${
-                            isSelected ? "metrics-transfer-competency-option--active" : ""
-                          }`}
-                          aria-pressed={isSelected}
-                          onClick={() => toggleTransferCompetency(competency.id)}
-                        >
-                          <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
-                            {competency.code}
-                          </span>
-                          <span>{competency.label}</span>
-                        </button>
-                      );
-                    })}
+                    <label className="field">
+                      <span>To shift</span>
+                      <select
+                        value={targetScheduleId}
+                        onChange={(event) => {
+                          setTargetScheduleId(event.target.value);
+                          setTransferSuggestions([]);
+                          setSelectedTransferSuggestionIndex(0);
+                          setTransferMessage("");
+                        }}
+                      >
+                        {snapshot.schedules.map((schedule) => (
+                          <option key={schedule.id} value={schedule.id}>
+                            {schedule.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
-                </div>
 
-                <div className="assignment-modal__actions">
-                  <button type="button" className="primary-button" onClick={handleCalculateTransfer}>
-                    Calculate shift transfer
-                  </button>
-                </div>
+                  <div className="assignment-modal__group">
+                    <span className="assignment-modal__label">Include competencies</span>
+                    <div className="assignment-modal__options">
+                      {snapshot.competencies.map((competency) => {
+                        const isSelected = selectedTransferCompetencyIds.includes(competency.id);
 
-                {transferMessage ? <p className="toolbar-status">{transferMessage}</p> : null}
-
-                {transferSuggestions.length > 0 ? (
-                  <section className="metrics-transfer-results">
-                    <div className="metrics-transfer-results__header">
-                      <strong>
-                        {transferSuggestions.length} possible transfer{transferSuggestions.length === 1 ? "" : "s"}
-                      </strong>
-                      {transferSuggestions.length > 1 ? (
-                        <label className="field field--compact">
-                          <span>Option</span>
-                          <select
-                            value={selectedTransferSuggestionIndex}
-                            onChange={(event) => setSelectedTransferSuggestionIndex(Number(event.target.value))}
+                        return (
+                          <button
+                            key={competency.id}
+                            type="button"
+                            className={`metrics-transfer-competency-option ${
+                              isSelected ? "metrics-transfer-competency-option--active" : ""
+                            }`}
+                            aria-pressed={isSelected}
+                            onClick={() => toggleTransferCompetency(competency.id)}
                           >
-                            {transferSuggestions.map((suggestion, index) => (
-                              <option key={`${suggestion.employeeId}-${index}`} value={index}>
-                                {index + 1}. {suggestion.employeeName}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : null}
+                            <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
+                              {competency.code}
+                            </span>
+                            <span>{competency.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
+                  </div>
 
-                    {transferSuggestion ? (
-                      <div className="metrics-transfer-result">
-                        <div className="metrics-transfer-result__summary">
-                          <div>
-                            <span className="metrics-card__eyebrow">Recommended transfer</span>
-                            <h3 className="metrics-card__title">{transferSuggestion.employeeName}</h3>
-                          </div>
-                          <div className="metrics-card__stats">
-                            <span>{transferSuggestion.employeeRole || "No role"}</span>
-                            <span>Score {transferSuggestion.score.toFixed(2)}</span>
-                          </div>
-                        </div>
+                  <div className="assignment-modal__actions">
+                    <button type="button" className="primary-button" onClick={handleCalculateTransfer}>
+                      Calculate shift transfer
+                    </button>
+                  </div>
 
-                        <div className="metrics-transfer-pill-row">
-                          <span className="metrics-transfer-path">
-                            Shift {transferSuggestion.sourceScheduleName} → Shift {transferSuggestion.targetScheduleName}
-                          </span>
-                        </div>
+                  {transferMessage ? <p className="toolbar-status">{transferMessage}</p> : null}
 
-                        {transferSuggestion.matchedCompetencyIds.length > 0 ? (
-                          <div className="metrics-transfer-pill-row">
-                            {transferSuggestion.projections
-                              .filter((projection) => projection.included)
-                              .map((projection) => (
-                                <span
-                                  key={projection.competencyId}
-                                  className={`legend-pill legend-pill--${projection.colorToken.toLowerCase()}`}
-                                >
-                                  {projection.code}
-                                </span>
+                  {transferSuggestions.length > 0 ? (
+                    <section className="metrics-transfer-results">
+                      <div className="metrics-transfer-results__header">
+                        <strong>
+                          {transferSuggestions.length} possible transfer{transferSuggestions.length === 1 ? "" : "s"}
+                        </strong>
+                        {transferSuggestions.length > 1 ? (
+                          <label className="field field--compact">
+                            <span>Option</span>
+                            <select
+                              value={selectedTransferSuggestionIndex}
+                              onChange={(event) => setSelectedTransferSuggestionIndex(Number(event.target.value))}
+                            >
+                              {transferSuggestions.map((suggestion, index) => (
+                                <option key={`${suggestion.employeeId}-${index}`} value={index}>
+                                  {index + 1}. {suggestion.employeeName}
+                                </option>
                               ))}
-                          </div>
+                            </select>
+                          </label>
                         ) : null}
-
-                        <div className="metrics-transfer-projections">
-                          {transferSuggestion.projections.map((projection) => (
-                            <div key={projection.competencyId} className="metrics-transfer-projection">
-                              <div className="metrics-transfer-projection__label">
-                                <span className={`legend-pill legend-pill--${projection.colorToken.toLowerCase()}`}>
-                                  {projection.code}
-                                </span>
-                                <strong>{projection.included ? "Included" : "Reference"}</strong>
-                              </div>
-                              <p>
-                                Shift {transferSuggestion.sourceScheduleName}: {projection.sourceCount} to{" "}
-                                {projection.nextSourceCount}
-                              </p>
-                              <p>
-                                Shift {transferSuggestion.targetScheduleName}: {projection.targetCount} to{" "}
-                                {projection.nextTargetCount}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
                       </div>
-                    ) : null}
-                  </section>
-                ) : null}
+
+                      {transferSuggestion ? (
+                        <div className="metrics-transfer-result">
+                          <div className="metrics-transfer-result__summary">
+                            <div>
+                              <span className="metrics-card__eyebrow">Recommended transfer</span>
+                              <h3 className="metrics-card__title">{transferSuggestion.employeeName}</h3>
+                            </div>
+                            <div className="metrics-card__stats">
+                              <span>{transferSuggestion.employeeRole || "No role"}</span>
+                              <span>Score {transferSuggestion.score.toFixed(2)}</span>
+                            </div>
+                          </div>
+
+                          <div className="metrics-transfer-pill-row">
+                            <span className="metrics-transfer-path">
+                              Shift {transferSuggestion.sourceScheduleName} → Shift{" "}
+                              {transferSuggestion.targetScheduleName}
+                            </span>
+                          </div>
+
+                          {transferSuggestion.matchedCompetencyIds.length > 0 ? (
+                            <div className="metrics-transfer-pill-row">
+                              {transferSuggestion.projections
+                                .filter((projection) => projection.included)
+                                .map((projection) => (
+                                  <span
+                                    key={projection.competencyId}
+                                    className={`legend-pill legend-pill--${projection.colorToken.toLowerCase()}`}
+                                  >
+                                    {projection.code}
+                                  </span>
+                                ))}
+                            </div>
+                          ) : null}
+
+                          <div className="metrics-transfer-projections">
+                            {transferSuggestion.projections.map((projection) => (
+                              <div key={projection.competencyId} className="metrics-transfer-projection">
+                                <div className="metrics-transfer-projection__label">
+                                  <span className={`legend-pill legend-pill--${projection.colorToken.toLowerCase()}`}>
+                                    {projection.code}
+                                  </span>
+                                  <strong>{projection.included ? "Included" : "Reference"}</strong>
+                                </div>
+                                <p>
+                                  Shift {transferSuggestion.sourceScheduleName}: {projection.sourceCount} to{" "}
+                                  {projection.nextSourceCount}
+                                </p>
+                                <p>
+                                  Shift {transferSuggestion.targetScheduleName}: {projection.targetCount} to{" "}
+                                  {projection.nextTargetCount}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : null}
+                </div>
               </section>
             </div>,
             document.body,

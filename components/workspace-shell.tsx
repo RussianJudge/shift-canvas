@@ -467,28 +467,7 @@ export function WorkspaceShell({
           </div>
 
           <nav id="workspace-primary-navigation" className="workspace-nav" aria-label="Primary">
-            {navItems.map((item) => {
-              const { navigationHref } = resolveWorkspaceRouteTargets({
-                href: item.href,
-                fallbackMonth: currentMonthKey,
-                selectedMonth,
-              });
-
-              return (
-                <NavLink
-                  key={item.href}
-                  href={navigationHref}
-                  activeHref={item.href}
-                  label={item.label}
-                  icon={item.icon}
-                  onNavigate={handleNavLinkNavigate}
-                />
-              );
-            })}
-          </nav>
-
-          <div className="workspace-sidebar-bottom">
-            <div className="workspace-notifications" ref={notificationPopoverRef}>
+            <div className="workspace-notifications workspace-notifications--top" ref={notificationPopoverRef}>
               <button
                 type="button"
                 className={`workspace-nav-link workspace-notifications__button ${
@@ -551,6 +530,27 @@ export function WorkspaceShell({
               ) : null}
             </div>
 
+            {navItems.map((item) => {
+              const { navigationHref } = resolveWorkspaceRouteTargets({
+                href: item.href,
+                fallbackMonth: currentMonthKey,
+                selectedMonth,
+              });
+
+              return (
+                <NavLink
+                  key={item.href}
+                  href={navigationHref}
+                  activeHref={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                  onNavigate={handleNavLinkNavigate}
+                />
+              );
+            })}
+          </nav>
+
+          <div className="workspace-sidebar-bottom">
             {viewer.role === "admin" && adminScope ? (
               <section
                 className={`workspace-admin-scope ${

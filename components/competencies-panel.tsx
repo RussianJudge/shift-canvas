@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 
 import {
   saveCompetencies,
@@ -27,6 +28,53 @@ type EditableCompetency = {
 };
 
 type ScheduleTargetKey = "main" | `sub:${string}`;
+
+function RemoveCompetencyModal({
+  competency,
+  onCancel,
+  onConfirm,
+}: {
+  competency: EditableCompetency;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section
+        className="assignment-modal mutual-modal"
+        aria-label="Remove competency confirmation"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Competencies</span>
+            <h2 className="assignment-modal__title">Remove competency?</h2>
+            <p className="assignment-modal__context">
+              Remove {competency.code || "this competency"}? This change will not save until you click Save.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+            Remove competency
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
 
 function cloneCompetencies(competencies: EditableCompetency[]) {
   return competencies.map((competency) => ({ ...competency }));
@@ -101,6 +149,7 @@ export function CompetenciesPanel({
   const [competencies, setCompetencies] = useState(initialCompetencies);
   const [baselineCompetencies, setBaselineCompetencies] = useState(initialCompetencies);
   const [deletedCompetencyIds, setDeletedCompetencyIds] = useState<string[]>([]);
+  const [pendingRemoveCompetencyId, setPendingRemoveCompetencyId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
   const [isSavingScheduleCompetencies, startScheduleSaveTransition] = useTransition();
@@ -111,6 +160,7 @@ export function CompetenciesPanel({
     setCompetencies(cloneCompetencies(initialCompetencies));
     setBaselineCompetencies(cloneCompetencies(initialCompetencies));
     setDeletedCompetencyIds([]);
+    setPendingRemoveCompetencyId(null);
     setStatusMessage("");
   }, [initialCompetencies]);
 
@@ -194,6 +244,9 @@ export function CompetenciesPanel({
   const hasAvailabilityChanges =
     JSON.stringify([...baselineTargetCompetencyIds].sort()) !==
     JSON.stringify([...draftTargetCompetencyIds].sort());
+  const pendingRemoveCompetency = pendingRemoveCompetencyId
+    ? competencies.find((competency) => competency.id === pendingRemoveCompetencyId) ?? null
+    : null;
 
   function updateCompetency(
     competencyId: string,
@@ -219,12 +272,24 @@ export function CompetenciesPanel({
   }
 
   function handleRemoveCompetency(competencyId: string) {
+    setPendingRemoveCompetencyId(competencyId);
+  }
+
+  function handleConfirmRemoveCompetency() {
+    if (!pendingRemoveCompetency) {
+      setPendingRemoveCompetencyId(null);
+      return;
+    }
+
+    const competencyId = pendingRemoveCompetency.id;
+
     setCompetencies((current) => current.filter((competency) => competency.id !== competencyId));
 
     if (baselineMap.has(competencyId)) {
       setDeletedCompetencyIds((current) => [...current, competencyId]);
     }
 
+    setPendingRemoveCompetencyId(null);
     setStatusMessage("");
   }
 
@@ -588,6 +653,14 @@ export function CompetenciesPanel({
           </table>
         </div>
       )}
+
+      {pendingRemoveCompetency ? (
+        <RemoveCompetencyModal
+          competency={pendingRemoveCompetency}
+          onCancel={() => setPendingRemoveCompetencyId(null)}
+          onConfirm={handleConfirmRemoveCompetency}
+        />
+      ) : null}
     </section>
   );
 }
