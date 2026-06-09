@@ -347,7 +347,10 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                         <button
                           key={competency.id}
                           type="button"
-                          className={`assignment-modal__option ${isSelected ? "assignment-modal__option--active" : ""}`}
+                          className={`metrics-transfer-competency-option ${
+                            isSelected ? "metrics-transfer-competency-option--active" : ""
+                          }`}
+                          aria-pressed={isSelected}
                           onClick={() => toggleTransferCompetency(competency.id)}
                         >
                           <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
