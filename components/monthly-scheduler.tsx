@@ -7,8 +7,15 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { saveAssignments, saveSchedulePins, setScheduleSetCompletion } from "@/app/actions";
+import {
+  cancelTemporaryLoan,
+  createTemporaryLoan,
+  saveAssignments,
+  saveSchedulePins,
+  setScheduleSetCompletion,
+} from "@/app/actions";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
+import { parseTemporaryLoanAssignmentNote } from "@/lib/temporary-loans";
 import {
   buildProjectedAssignmentIndex,
   getManualEntryTimeCodes,
@@ -66,6 +73,13 @@ const SCHEDULE_ROW_HEIGHT_PX = 51;
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes: string | null };
 type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
 type SelectedCell = { employeeId: string; date: string };
+type LoanCancelTarget = {
+  loanId: string;
+  employeeName: string;
+  sourceScheduleName: string;
+  targetScheduleName: string;
+  date: string;
+};
 type DragRange = {
   employeeId: string;
   startIndex: number;
@@ -93,6 +107,7 @@ type DisplayEmployee = {
   overtimeDates?: string[];
   overtimeCompetencyByDate?: Record<string, string | null>;
   mutualDates?: string[];
+  loanDates?: string[];
 };
 
 type CoverageSummary = {
@@ -257,6 +272,276 @@ function SetCompletionWarningModal({
   );
 }
 
+function TemporaryLoanModal({
+  schedules,
+  competencies,
+  monthDays,
+  defaultTargetScheduleId,
+  onCancel,
+  onSubmit,
+  isSubmitting,
+}: {
+  schedules: Schedule[];
+  competencies: Competency[];
+  monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
+  defaultTargetScheduleId: string;
+  onCancel: () => void;
+  onSubmit: (input: { employeeId: string; targetScheduleId: string; competencyId: string; dates: string[] }) => void;
+  isSubmitting: boolean;
+}) {
+  const employees = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          schedules.flatMap((schedule) => schedule.employees.map((employee) => [employee.id, employee] as const)),
+        ).values(),
+      ).sort((left, right) => left.name.localeCompare(right.name)),
+    [schedules],
+  );
+  const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
+  const [targetScheduleId, setTargetScheduleId] = useState(defaultTargetScheduleId);
+  const [competencyId, setCompetencyId] = useState("");
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  const employeeMap = useMemo(() => getEmployeeMap(schedules), [schedules]);
+  const selectedEmployee = employeeMap[employeeId] ?? null;
+  const sourceSchedule = selectedEmployee ? schedules.find((schedule) => schedule.id === selectedEmployee.scheduleId) ?? null : null;
+  const targetSchedule = schedules.find((schedule) => schedule.id === targetScheduleId) ?? null;
+  const qualifiedCompetencies = useMemo(
+    () =>
+      targetSchedule && selectedEmployee
+        ? competencies
+            .filter(
+              (competency) =>
+                targetSchedule.competencyIds.includes(competency.id) &&
+                selectedEmployee.competencyIds.includes(competency.id),
+            )
+            .sort((left, right) => left.code.localeCompare(right.code))
+        : [],
+    [competencies, selectedEmployee, targetSchedule],
+  );
+  const isSameSchedule = Boolean(sourceSchedule && targetSchedule && sourceSchedule.id === targetSchedule.id);
+  const canSubmit =
+    Boolean(selectedEmployee && sourceSchedule && targetSchedule && competencyId && selectedDates.length > 0) &&
+    !isSameSchedule &&
+    !isSubmitting;
+
+  useEffect(() => {
+    if (qualifiedCompetencies.some((competency) => competency.id === competencyId)) {
+      return;
+    }
+
+    setCompetencyId(qualifiedCompetencies[0]?.id ?? "");
+  }, [competencyId, qualifiedCompetencies]);
+
+  useEffect(() => {
+    setSelectedDates((current) =>
+      current.filter((date) => {
+        if (!sourceSchedule || !targetSchedule) {
+          return false;
+        }
+
+        return shiftForDate(sourceSchedule, date) !== "OFF" && shiftForDate(targetSchedule, date) !== "OFF";
+      }),
+    );
+  }, [sourceSchedule, targetSchedule]);
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section className="assignment-modal temporary-loan-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Temporary loan</h2>
+            <p className="assignment-modal__context">
+              Loan a worker to another shift for regular worked dates.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Close
+          </button>
+        </div>
+
+        <div className="modal-form-grid">
+          <label className="field">
+            <span>Worker</span>
+            <select
+              value={employeeId}
+              onChange={(event) => {
+                setEmployeeId(event.target.value);
+                setSelectedDates([]);
+              }}
+              disabled={isSubmitting}
+            >
+              {employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Target shift</span>
+            <select
+              value={targetScheduleId}
+              onChange={(event) => {
+                setTargetScheduleId(event.target.value);
+                setSelectedDates([]);
+              }}
+              disabled={isSubmitting}
+            >
+              {schedules.map((schedule) => (
+                <option key={schedule.id} value={schedule.id}>
+                  {schedule.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Target competency</span>
+            <select
+              value={competencyId}
+              onChange={(event) => setCompetencyId(event.target.value)}
+              disabled={isSubmitting || qualifiedCompetencies.length === 0}
+            >
+              {qualifiedCompetencies.length > 0 ? (
+                qualifiedCompetencies.map((competency) => (
+                  <option key={competency.id} value={competency.id}>
+                    {competency.code} · {competency.label}
+                  </option>
+                ))
+              ) : (
+                <option value="">No matching competencies</option>
+              )}
+            </select>
+          </label>
+        </div>
+
+        <div className="assignment-modal__group">
+          <span className="assignment-modal__label">Loan dates</span>
+          <div className="temporary-loan-date-grid">
+            {monthDays.map((day) => {
+              const sourceShiftKind = sourceSchedule ? shiftForDate(sourceSchedule, day.date) : "OFF";
+              const targetShiftKind = targetSchedule ? shiftForDate(targetSchedule, day.date) : "OFF";
+              const disabled = sourceShiftKind === "OFF" || targetShiftKind === "OFF" || isSameSchedule;
+              const isSelected = selectedDates.includes(day.date);
+
+              return (
+                <button
+                  key={day.date}
+                  type="button"
+                  className={`temporary-loan-date ${isSelected ? "temporary-loan-date--selected" : ""}`}
+                  disabled={disabled || isSubmitting}
+                  title={
+                    disabled
+                      ? isSameSchedule
+                        ? "Choose a different target shift"
+                        : `Home ${sourceShiftKind.toLowerCase()} · target ${targetShiftKind.toLowerCase()}`
+                      : `${day.dayName} ${day.date}`
+                  }
+                  onClick={() =>
+                    setSelectedDates((current) =>
+                      current.includes(day.date)
+                        ? current.filter((date) => date !== day.date)
+                        : [...current, day.date].sort(),
+                    )
+                  }
+                >
+                  <span>{day.dayName.slice(0, 1)}</span>
+                  <strong>{day.dayNumber}</strong>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <p className="toolbar-status">
+          {isSameSchedule
+            ? "Choose a target shift different from the worker's home shift."
+            : selectedDates.length > 0
+            ? `${selectedDates.length} date${selectedDates.length === 1 ? "" : "s"} selected.`
+            : "Choose one or more regular worked dates."}
+        </p>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!canSubmit}
+            onClick={() =>
+              onSubmit({
+                employeeId,
+                targetScheduleId,
+                competencyId,
+                dates: selectedDates,
+              })
+            }
+          >
+            {isSubmitting ? "Creating..." : "Create loan"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function CancelTemporaryLoanModal({
+  target,
+  onCancel,
+  onConfirm,
+  isSubmitting,
+}: {
+  target: LoanCancelTarget;
+  onCancel: () => void;
+  onConfirm: () => void;
+  isSubmitting: boolean;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section className="assignment-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <h2 className="assignment-modal__title">Cancel temporary loan?</h2>
+            <p className="assignment-modal__context">
+              {target.employeeName} · {formatShortDate(target.date)}
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Close
+          </button>
+        </div>
+
+        <p className="toolbar-status">
+          This will remove the loan from {target.targetScheduleName} and restore the home shift marker on{" "}
+          {target.sourceScheduleName}.
+        </p>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+            Keep loan
+          </button>
+          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+            {isSubmitting ? "Cancelling..." : "Cancel loan"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 /** Builds the visible roster, including borrowed overtime and mutual rows for the month. */
 function buildDisplayEmployeesForSchedule({
   schedule,
@@ -328,6 +613,7 @@ function buildDisplayEmployeesForSchedule({
     }
 
     const parsed = parseMutualAssignmentNote(assignment.notes);
+    const parsedLoan = parseTemporaryLoanAssignmentNote(assignment.notes);
 
     if (parsed.targetScheduleId === schedule.id) {
       continue;
@@ -335,6 +621,27 @@ function buildDisplayEmployeesForSchedule({
 
     const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
     const existingDates = borrowedRowsByEmployee[employee.id]?.overtimeDates ?? [];
+    const existingLoanDates = borrowedRowsByEmployee[employee.id]?.loanDates ?? [];
+
+    if (parsedLoan.role === "target" && parsedLoan.targetScheduleId === schedule.id) {
+      borrowedRowsByEmployee[employee.id] = {
+        rowId: borrowedRowsByEmployee[employee.id]?.rowId ?? `loan:${schedule.id}:${employee.id}`,
+        sourceEmployeeId: employee.id,
+        name: employee.name,
+        role: borrowedRowsByEmployee[employee.id]?.role ?? `${employee.role} · Loan from ${homeSchedule.name}`,
+        competencyIds: employee.competencyIds,
+        overtimeDates: borrowedRowsByEmployee[employee.id]?.overtimeDates,
+        overtimeCompetencyByDate: borrowedRowsByEmployee[employee.id]?.overtimeCompetencyByDate,
+        loanDates: existingLoanDates.includes(assignment.date)
+          ? existingLoanDates
+          : [...existingLoanDates, assignment.date].sort(),
+      };
+      continue;
+    }
+
+    if (parsedLoan.loanId) {
+      continue;
+    }
 
     borrowedRowsByEmployee[employee.id] = {
       rowId: borrowedRowsByEmployee[employee.id]?.rowId ?? `manual:${schedule.id}:${employee.id}`,
@@ -673,19 +980,40 @@ function isOvertimeManagedSelection(selection: AssignmentSelection) {
   return Boolean(selection.notes?.startsWith("OT|"));
 }
 
+function isTemporaryLoanManagedSelection(selection: AssignmentSelection) {
+  return Boolean(parseTemporaryLoanAssignmentNote(selection.notes).loanId);
+}
+
 function getScheduleCellComment({
   notes,
   employeeName,
   employeeId,
   scheduleId,
   employeeMap,
+  scheduleNameMap,
 }: {
   notes: string | null;
   employeeName: string;
   employeeId: string;
   scheduleId: string;
   employeeMap: Record<string, Employee>;
+  scheduleNameMap: Record<string, string>;
 }) {
+  const parsedLoan = parseTemporaryLoanAssignmentNote(notes);
+
+  if (parsedLoan.loanId) {
+    const sourceScheduleName = parsedLoan.sourceScheduleId
+      ? scheduleNameMap[parsedLoan.sourceScheduleId] ?? "their home shift"
+      : "their home shift";
+    const targetScheduleName = parsedLoan.targetScheduleId
+      ? scheduleNameMap[parsedLoan.targetScheduleId] ?? "the target shift"
+      : "the target shift";
+
+    return parsedLoan.role === "source"
+      ? `${employeeName} is loaned to ${targetScheduleName}.`
+      : `${employeeName} is loaned from ${sourceScheduleName}.`;
+  }
+
   const parsedMutual = parseMutualAssignmentNote(notes);
 
   if (parsedMutual.partnerEmployeeId) {
@@ -705,6 +1033,12 @@ function getSelectionCode(
   competencyMap: Record<string, Competency>,
   timeCodeMap: Record<string, TimeCode>,
 ) {
+  const parsedLoan = parseTemporaryLoanAssignmentNote(selection.notes);
+
+  if (parsedLoan.role === "source") {
+    return "LN";
+  }
+
   if (selection.timeCodeId) {
     return getTimeCodeDisplayCode(timeCodeMap[selection.timeCodeId], selection.notes);
   }
@@ -944,6 +1278,7 @@ export function MonthlyScheduler({
       : initialSnapshot.schedules[0]?.id ?? "",
   );
   const [search, setSearch] = useState("");
+  const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [baselineAssignments, setBaselineAssignments] = useState(() =>
     buildAssignmentIndex(initialSnapshot.assignments),
   );
@@ -969,9 +1304,12 @@ export function MonthlyScheduler({
   const [activeSaveCount, setActiveSaveCount] = useState(0);
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const [isSetCompletionWarningOpen, setIsSetCompletionWarningOpen] = useState(false);
+  const [isTemporaryLoanModalOpen, setIsTemporaryLoanModalOpen] = useState(false);
+  const [loanCancelTarget, setLoanCancelTarget] = useState<LoanCancelTarget | null>(null);
+  const [isLoanTransition, startLoanTransition] = useTransition();
   const [isSavingPins, startPinSaveTransition] = useTransition();
   const isSaving = isSavingTransition || activeSaveCount > 0;
-  const isScheduleLocked = isSaving || isUpdatingSetCompletion;
+  const isScheduleLocked = isSaving || isUpdatingSetCompletion || isLoanTransition;
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const latestAutoSaveTokenRef = useRef(0);
   const baselineAssignmentsRef = useRef(baselineAssignments);
@@ -987,6 +1325,10 @@ export function MonthlyScheduler({
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
   const timeCodeMap = useMemo(() => getTimeCodeMap(snapshot.timeCodes), [snapshot.timeCodes]);
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
+  const scheduleNameMap = useMemo(
+    () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
+    [snapshot.schedules],
+  );
   const projectedAssignmentIndex = useMemo(
     () => buildProjectedAssignmentIndex(snapshot.projectedAssignments),
     [snapshot.projectedAssignments],
@@ -1019,6 +1361,14 @@ export function MonthlyScheduler({
         : [],
     [activeSchedule, snapshot.competencies],
   );
+  useEffect(() => {
+    if (
+      selectedCompetencyFilter !== "all" &&
+      !activeScheduleCompetencies.some((competency) => competency.id === selectedCompetencyFilter)
+    ) {
+      setSelectedCompetencyFilter("all");
+    }
+  }, [activeScheduleCompetencies, selectedCompetencyFilter]);
   const selectedSetDays = useMemo(
     () => (activeSchedule ? getWorkedSetDays(activeSchedule, extendedMonthDays, selectedSetAnchorDate) : []),
     [activeSchedule, extendedMonthDays, selectedSetAnchorDate],
@@ -1199,6 +1549,13 @@ export function MonthlyScheduler({
   }
 
   const visibleEmployees = displayEmployees.filter((employee) => {
+    if (
+      selectedCompetencyFilter !== "all" &&
+      !employee.competencyIds.includes(selectedCompetencyFilter)
+    ) {
+      return false;
+    }
+
     if (!deferredSearch) {
       return true;
     }
@@ -1324,6 +1681,8 @@ export function MonthlyScheduler({
       : { competencyId: null, timeCodeId: null, notes: null };
   const editorClearDisabledReason = isOvertimeManagedSelection(editorSelection)
     ? "This cell came from an overtime posting. Release it from the Overtime page instead of clearing it here."
+    : isTemporaryLoanManagedSelection(editorSelection)
+    ? "This cell came from a temporary loan. Cancel the temporary loan instead of editing it directly."
     : null;
   const editorEmployeeCompetencies = editorEmployee
     ? editorEmployee.competencyIds
@@ -1801,6 +2160,88 @@ export function MonthlyScheduler({
     });
   }
 
+  async function saveActiveDraftsBeforeLoan() {
+    if (activeDirtyUpdates.length === 0) {
+      return true;
+    }
+
+    const saveResult = await runTrackedAssignmentSave({
+      scheduleId: activeSchedule.id,
+      updates: activeDirtyUpdates,
+    });
+
+    setStatusMessage(saveResult.message);
+
+    if (!saveResult.ok) {
+      return false;
+    }
+
+    protectLocalBaselineFromStaleSnapshots();
+    setBaselineAssignments(cloneAssignments(draftAssignments));
+    return true;
+  }
+
+  function handleCreateTemporaryLoan(input: {
+    employeeId: string;
+    targetScheduleId: string;
+    competencyId: string;
+    dates: string[];
+  }) {
+    if (!canEdit || isScheduleLocked) {
+      return;
+    }
+
+    startLoanTransition(async () => {
+      const savedDrafts = await saveActiveDraftsBeforeLoan();
+
+      if (!savedDrafts) {
+        return;
+      }
+
+      setStatusMessage("Creating temporary loan...");
+      const result = await createTemporaryLoan(input);
+      setStatusMessage(result.message);
+
+      if (!result.ok) {
+        return;
+      }
+
+      setIsTemporaryLoanModalOpen(false);
+      setSelectedCell(null);
+      setEditorCell(null);
+      router.refresh();
+    });
+  }
+
+  function handleCancelTemporaryLoan() {
+    if (!loanCancelTarget || !canEdit || isScheduleLocked) {
+      return;
+    }
+
+    const loanId = loanCancelTarget.loanId;
+
+    startLoanTransition(async () => {
+      const savedDrafts = await saveActiveDraftsBeforeLoan();
+
+      if (!savedDrafts) {
+        return;
+      }
+
+      setStatusMessage("Cancelling temporary loan...");
+      const result = await cancelTemporaryLoan({ loanId });
+      setStatusMessage(result.message);
+
+      if (!result.ok) {
+        return;
+      }
+
+      setLoanCancelTarget(null);
+      setSelectedCell(null);
+      setEditorCell(null);
+      router.refresh();
+    });
+  }
+
   function handlePinToggle(employeeId: string) {
     const currentPins = pinnedEmployeesBySchedule[activeSchedule.id] ?? [];
     const nextPins = currentPins.includes(employeeId)
@@ -2220,6 +2661,16 @@ export function MonthlyScheduler({
         </div>
         <div className="planner-actions planner-actions--schedule">
           <div className="planner-actions__row planner-actions__row--save">
+            {canEdit && canManageSetBuilder ? (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setIsTemporaryLoanModalOpen(true)}
+                disabled={isScheduleLocked}
+              >
+                Temporary loan
+              </button>
+            ) : null}
             <button
               type="button"
               className="ghost-button icon-button schedule-print-button"
@@ -2244,6 +2695,7 @@ export function MonthlyScheduler({
                 setSelectedScheduleId(nextScheduleId);
                 replaceScheduleUrlState(currentMonth, nextScheduleId);
                 setSelectedCoverageCompetencyId(null);
+                setSelectedCompetencyFilter("all");
               }}
             >
               {snapshot.schedules.map((schedule) => (
@@ -2268,6 +2720,21 @@ export function MonthlyScheduler({
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+        </label>
+
+        <label className="field">
+          <span>Competency</span>
+          <select
+            value={selectedCompetencyFilter}
+            onChange={(event) => setSelectedCompetencyFilter(event.target.value)}
+          >
+            <option value="all">All competencies</option>
+            {activeScheduleCompetencies.map((competency) => (
+              <option key={competency.id} value={competency.id}>
+                {competency.code} · {competency.label}
+              </option>
+            ))}
+          </select>
         </label>
         <div className="toolbar-status-wrap">
           {isMonthLoading ? <p className="toolbar-status">Loading month...</p> : null}
@@ -2467,6 +2934,7 @@ export function MonthlyScheduler({
                       timeCodeMap={timeCodeMap}
                       timeCodes={snapshot.timeCodes}
                       employeeMap={employeeMap}
+                      scheduleNameMap={scheduleNameMap}
                       completedSetDates={completedSetDates}
                       selectedCell={selectedCell}
                       dragRange={dragRange}
@@ -2493,6 +2961,34 @@ export function MonthlyScheduler({
                           setStatusMessage(
                             `This cell is managed by ${projectedAssignment.subScheduleName ?? "a sub-schedule"} and must be changed from Sub-Schedules.`,
                           );
+                          return;
+                        }
+
+                        const clickedEmployee = displayEmployeeMap[cell.employeeId] ?? null;
+                        const clickedShiftKind = shiftForDate(activeSchedule, cell.date);
+                        const clickedSelection = getSelectionForCell(
+                          activeSchedule.id,
+                          cell.employeeId,
+                          cell.date,
+                          clickedShiftKind,
+                          effectiveAssignments,
+                          snapshot.timeCodes,
+                        );
+                        const parsedLoan = parseTemporaryLoanAssignmentNote(clickedSelection.notes);
+
+                        if (parsedLoan.loanId) {
+                          setLoanCancelTarget({
+                            loanId: parsedLoan.loanId,
+                            employeeName: clickedEmployee?.name ?? "This worker",
+                            sourceScheduleName: parsedLoan.sourceScheduleId
+                              ? scheduleNameMap[parsedLoan.sourceScheduleId] ?? "their home shift"
+                              : "their home shift",
+                            targetScheduleName: parsedLoan.targetScheduleId
+                              ? scheduleNameMap[parsedLoan.targetScheduleId] ?? "the target shift"
+                              : "the target shift",
+                            date: cell.date,
+                          });
+                          setEditorCell(null);
                           return;
                         }
 
@@ -2535,6 +3031,27 @@ export function MonthlyScheduler({
           onCancel={() => setIsSetCompletionWarningOpen(false)}
           onConfirm={handleConfirmSetCompletionWarning}
           isSubmitting={isUpdatingSetCompletion}
+        />
+      ) : null}
+
+      {isTemporaryLoanModalOpen ? (
+        <TemporaryLoanModal
+          schedules={snapshot.schedules}
+          competencies={snapshot.competencies}
+          monthDays={monthDays}
+          defaultTargetScheduleId={activeSchedule.id}
+          onCancel={() => setIsTemporaryLoanModalOpen(false)}
+          onSubmit={handleCreateTemporaryLoan}
+          isSubmitting={isLoanTransition}
+        />
+      ) : null}
+
+      {loanCancelTarget ? (
+        <CancelTemporaryLoanModal
+          target={loanCancelTarget}
+          onCancel={() => setLoanCancelTarget(null)}
+          onConfirm={handleCancelTemporaryLoan}
+          isSubmitting={isLoanTransition}
         />
       ) : null}
 
@@ -2584,6 +3101,7 @@ function EmployeeRow({
   timeCodeMap,
   timeCodes,
   employeeMap,
+  scheduleNameMap,
   completedSetDates,
   selectedCell,
   dragRange,
@@ -2607,6 +3125,7 @@ function EmployeeRow({
   timeCodeMap: Record<string, TimeCode>;
   timeCodes: TimeCode[];
   employeeMap: Record<string, Employee>;
+  scheduleNameMap: Record<string, string>;
   completedSetDates: Set<string>;
   selectedCell: SelectedCell | null;
   dragRange: DragRange | null;
@@ -2628,6 +3147,8 @@ function EmployeeRow({
   const setDates = new Set(selectedSetDays.map((day) => day.date));
   const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
   const mutualDateSet = employee.mutualDates ? new Set(employee.mutualDates) : null;
+  const loanDateSet = employee.loanDates ? new Set(employee.loanDates) : null;
+  const hasLimitedBorrowedDates = Boolean(overtimeDateSet || mutualDateSet || loanDateSet);
 
   return (
     <div className="schedule-grid-row" style={rowStyle}>
@@ -2653,8 +3174,8 @@ function EmployeeRow({
 
       {monthDays.map((day, dayIndex) => {
         const isBorrowedCellVisible =
-          (!overtimeDateSet || overtimeDateSet.has(day.date)) &&
-          (!mutualDateSet || mutualDateSet.has(day.date));
+          !hasLimitedBorrowedDates ||
+          Boolean(overtimeDateSet?.has(day.date) || mutualDateSet?.has(day.date) || loanDateSet?.has(day.date));
         const isLockedCell = completedSetDates.has(day.date);
         const showLockedCell = isBorrowedCellVisible && isLockedCell;
         const projectedAssignment =
@@ -2675,6 +3196,7 @@ function EmployeeRow({
               timeCodeId: null,
               notes: null,
             };
+        const isTemporaryLoanCell = isTemporaryLoanManagedSelection(selection);
         const overtimeClaimCompetencyId =
           !selection.competencyId && !selection.timeCodeId
             ? employee.overtimeCompetencyByDate?.[day.date] ?? null
@@ -2710,6 +3232,7 @@ function EmployeeRow({
               employeeId: employee.sourceEmployeeId,
               scheduleId: schedule.id,
               employeeMap,
+              scheduleNameMap,
             });
 
         return (
@@ -2727,14 +3250,28 @@ function EmployeeRow({
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
             } ${hasCellNote ? "shift-cell--has-note" : ""} ${isProjectedCell ? "shift-cell--projected" : ""}`}
             onPointerDown={(event) => {
-              if (event.button !== 0 || !canEdit || !isBorrowedCellVisible || isLockedCell || isProjectedCell) {
+              if (
+                event.button !== 0 ||
+                !canEdit ||
+                !isBorrowedCellVisible ||
+                isLockedCell ||
+                isProjectedCell ||
+                isTemporaryLoanCell
+              ) {
                 return;
               }
 
               onCellPointerDown(employee.sourceEmployeeId, day.date, dayIndex, effectiveSelection);
             }}
             onPointerEnter={(event) => {
-              if (canEdit && isBorrowedCellVisible && !isLockedCell && dragRange && event.buttons === 1) {
+              if (
+                canEdit &&
+                isBorrowedCellVisible &&
+                !isLockedCell &&
+                !isTemporaryLoanCell &&
+                dragRange &&
+                event.buttons === 1
+              ) {
                 onDragHover(employee.sourceEmployeeId, dayIndex);
               }
             }}

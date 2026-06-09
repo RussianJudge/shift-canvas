@@ -1422,7 +1422,7 @@ button.workspace-nav-link {
 }
 
 .workspace-toolbar--scheduler {
-  grid-template-columns: repeat(2, minmax(0, 16rem)) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 16rem)) minmax(0, 1fr);
 }
 
 .workspace-copy--full {
@@ -2680,6 +2680,53 @@ button.workspace-nav-link {
 .modal-form-grid {
   display: grid;
   gap: 0.85rem;
+}
+
+.temporary-loan-modal {
+  width: min(48rem, 100%);
+}
+
+.temporary-loan-date-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+  max-height: min(18rem, 42vh);
+  overflow: auto;
+  padding: 0.15rem;
+}
+
+.temporary-loan-date {
+  display: grid;
+  gap: 0.1rem;
+  place-items: center;
+  min-height: 3rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.temporary-loan-date span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.temporary-loan-date strong {
+  font-size: 0.85rem;
+}
+
+.temporary-loan-date:hover:not(:disabled),
+.temporary-loan-date--selected {
+  border-color: color-mix(in srgb, var(--team-accent, #f97316) 55%, white);
+  background: color-mix(in srgb, var(--team-accent, #f97316) 16%, white);
+}
+
+.temporary-loan-date:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
 }
 
 .assignment-modal__note-input {

@@ -7,9 +7,11 @@ import type {
   ApplyToMutualPostingInput,
   ApproveMutualPostingInput,
   CancelAcceptedMutualInput,
+  CancelTemporaryLoanInput,
   ClaimOvertimePostingInput,
   CreateManualOvertimePostingInput,
   CreateMutualPostingInput,
+  CreateTemporaryLoanInput,
   DeleteSubScheduleInput,
   DeleteManualOvertimePostingInput,
   AcceptMutualApplicationInput,
@@ -40,6 +42,11 @@ import {
   parseMutualAssignmentNote,
   type MutualAssignmentRow,
 } from "@/lib/mutuals";
+import {
+  buildTemporaryLoanAssignmentRows,
+  parseTemporaryLoanAssignmentNote,
+  type TemporaryLoanAssignmentRow,
+} from "@/lib/temporary-loans";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -85,6 +92,13 @@ type RemovedOvertimeClaimNotification = {
   scheduleName: string;
   assignmentLabel: string;
   date: string;
+  scope: ActionScope;
+};
+type TemporaryLoanNotification = {
+  employeeId: string;
+  title: string;
+  body: string;
+  month: string;
   scope: ActionScope;
 };
 
@@ -212,6 +226,10 @@ function isMutualGeneratedAssignment(notes: string | null | undefined) {
   return notes?.startsWith("MUT|") ?? false;
 }
 
+function isTemporaryLoanAssignment(notes: string | null | undefined) {
+  return Boolean(parseTemporaryLoanAssignmentNote(notes).loanId);
+}
+
 function doesAssignmentFillManualPosting(
   assignment: StaffingAssignment,
   posting: {
@@ -255,6 +273,36 @@ async function createOvertimeRemovedNotifications(
     return {
       ok: false as const,
       message: `Could not create overtime notification: ${error.message}`,
+    };
+  }
+
+  return { ok: true as const };
+}
+
+async function createTemporaryLoanNotifications(
+  supabase: SupabaseAdminClient,
+  notifications: TemporaryLoanNotification[],
+) {
+  if (notifications.length === 0) {
+    return { ok: true as const };
+  }
+
+  const rows = notifications.map((notification) => ({
+    id: createNotificationId(),
+    recipient_employee_id: notification.employeeId,
+    type: "schedule_loan",
+    title: notification.title,
+    body: notification.body,
+    href: `/schedule?month=${notification.month}`,
+    ...toDatabaseScope(notification.scope),
+  }));
+
+  const { error } = await supabase.from("notifications").insert(rows);
+
+  if (error) {
+    return {
+      ok: false as const,
+      message: `Could not create temporary loan notification: ${error.message}`,
     };
   }
 
@@ -940,12 +988,33 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
 
     return Boolean(parseOvertimeAssignmentNote(existingAssignment?.notes).claimantEmployeeId);
   });
+  const temporaryLoanDeleteTargets = rowsToDelete.filter((row) => {
+    const existingAssignment = scopedAssignmentMap.get(
+      createAssignmentKey(row.schedule_id, row.employee_id, row.assignment_date),
+    );
+
+    return isTemporaryLoanAssignment(existingAssignment?.notes);
+  });
+  const temporaryLoanRewriteTargets = rowsToUpsert.filter((row) => {
+    const existingAssignment = scopedAssignmentMap.get(
+      createAssignmentKey(row.schedule_id, row.employee_id, row.assignment_date),
+    );
+
+    return isTemporaryLoanAssignment(existingAssignment?.notes) && existingAssignment?.notes !== row.notes;
+  });
 
   if (overtimeDeleteTargets.length > 0) {
     return {
       ok: false,
       message:
         "Overtime-filled cells cannot be cleared from the schedule directly. Release the posting from the Overtime page instead.",
+    };
+  }
+
+  if (temporaryLoanDeleteTargets.length > 0 || temporaryLoanRewriteTargets.length > 0) {
+    return {
+      ok: false,
+      message: "Temporary loan cells cannot be edited directly. Cancel the temporary loan first.",
     };
   }
 
@@ -1086,6 +1155,440 @@ export async function saveAssignments(input: SaveAssignmentsInput) {
         ? `Assignments saved. Removed ${cleanupResult.removedClaims} overtime claim${cleanupResult.removedClaims === 1 ? "" : "s"} that were no longer needed.`
         : "Assignments saved to Supabase."
       : cleanupResult.message,
+  };
+}
+
+export async function createTemporaryLoan(input: CreateTemporaryLoanInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to create temporary loans.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Temporary loans are unavailable.",
+    };
+  }
+
+  const dates = uniqueSortedDates(input.dates);
+
+  if (dates.length === 0) {
+    return {
+      ok: false,
+      message: "Choose at least one loan date.",
+    };
+  }
+
+  const month = dates[0].slice(0, 7);
+
+  if (dates.some((date) => date.slice(0, 7) !== month)) {
+    return {
+      ok: false,
+      message: "Temporary loans can only use dates from one visible month.",
+    };
+  }
+
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: true,
+    includeCompetencies: true,
+    includeTimeCodes: false,
+    includeSubSchedules: true,
+    includeAssignments: true,
+    includeSubScheduleAssignments: true,
+    includeOvertimeClaims: true,
+    includeCompletedSets: true,
+    assignmentWindow: "month",
+    completedSetWindow: "month",
+  });
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const employee = employeeMap[input.employeeId];
+  const sourceSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
+  const targetSchedule = getScheduleById(snapshot, input.targetScheduleId);
+  const competency = snapshot.competencies.find((entry) => entry.id === input.competencyId) ?? null;
+
+  if (!employee) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected worker.",
+    };
+  }
+
+  if (!sourceSchedule) {
+    return {
+      ok: false,
+      message: `${employee.name} does not have an assigned home shift for temporary loans.`,
+    };
+  }
+
+  if (!targetSchedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the target shift.",
+    };
+  }
+
+  if (sourceSchedule.id === targetSchedule.id) {
+    return {
+      ok: false,
+      message: "Choose a different target shift for the temporary loan.",
+    };
+  }
+
+  const sourceScope = {
+    companyId: sourceSchedule.companyId ?? employee.companyId ?? session.companyId ?? "",
+    siteId: sourceSchedule.siteId ?? employee.siteId ?? session.siteId ?? "",
+    businessAreaId: sourceSchedule.businessAreaId ?? employee.businessAreaId ?? session.businessAreaId ?? "",
+  };
+  const targetScope = {
+    companyId: targetSchedule.companyId ?? session.companyId ?? "",
+    siteId: targetSchedule.siteId ?? session.siteId ?? "",
+    businessAreaId: targetSchedule.businessAreaId ?? session.businessAreaId ?? "",
+  };
+
+  if (!canAccessScope(session, sourceScope) || !canAccessScope(session, targetScope)) {
+    return {
+      ok: false,
+      message: "You do not have permission to create a temporary loan for those shifts.",
+    };
+  }
+
+  if (!competency || !targetSchedule.competencyIds.includes(competency.id)) {
+    return {
+      ok: false,
+      message: "Choose a competency used by the target shift.",
+    };
+  }
+
+  if (!employee.competencyIds.includes(competency.id)) {
+    return {
+      ok: false,
+      message: `${employee.name} is not competent in ${competency.label}.`,
+    };
+  }
+
+  const assignmentMap = new Map(
+    snapshot.assignments.map((assignment) => [
+      createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date),
+      assignment,
+    ]),
+  );
+  const sourceExistingAssignments = new Map(
+    snapshot.assignments
+      .filter((assignment) => assignment.scheduleId === sourceSchedule.id && assignment.employeeId === employee.id)
+      .map((assignment) => [
+        createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date),
+        {
+          competency_id: assignment.competencyId,
+          time_code_id: assignment.timeCodeId,
+          notes: assignment.notes ?? null,
+        },
+      ]),
+  );
+  const completedDateKeys = new Set<string>();
+
+  for (const completedSet of snapshot.completedSets) {
+    for (const date of dates) {
+      if (date >= completedSet.startDate && date <= completedSet.endDate) {
+        completedDateKeys.add(`${completedSet.scheduleId}:${date}`);
+      }
+    }
+  }
+
+  for (const date of dates) {
+    const sourceShiftKind = shiftForDate(sourceSchedule, date);
+    const targetShiftKind = shiftForDate(targetSchedule, date);
+
+    if (sourceShiftKind === "OFF") {
+      return {
+        ok: false,
+        message: `${employee.name} is off on ${date}; temporary loans must be regular worked days.`,
+      };
+    }
+
+    if (targetShiftKind === "OFF") {
+      return {
+        ok: false,
+        message: `${targetSchedule.name} is off on ${date}; choose a target worked day.`,
+      };
+    }
+
+    if (completedDateKeys.has(`${sourceSchedule.id}:${date}`) || completedDateKeys.has(`${targetSchedule.id}:${date}`)) {
+      return {
+        ok: false,
+        message: "Reopen completed sets before creating a temporary loan for those dates.",
+      };
+    }
+
+    if (
+      snapshot.overtimeClaims.some((claim) => claim.employeeId === employee.id && claim.date === date) ||
+      snapshot.subScheduleAssignments.some(
+        (assignment) =>
+          assignment.employeeId === employee.id &&
+          assignment.date === date &&
+          Boolean(assignment.competencyId || assignment.timeCodeId || assignment.notes),
+      )
+    ) {
+      return {
+        ok: false,
+        message: `${employee.name} already has another assignment on ${date}.`,
+      };
+    }
+
+    for (const assignment of snapshot.assignments) {
+      if (assignment.employeeId !== employee.id || assignment.date !== date) {
+        continue;
+      }
+
+      const isSourceCell = assignment.scheduleId === sourceSchedule.id;
+      const isPlainSourceCell =
+        isSourceCell &&
+        !isOvertimeGeneratedAssignment(assignment.notes) &&
+        !isMutualGeneratedAssignment(assignment.notes) &&
+        !isTemporaryLoanAssignment(assignment.notes);
+
+      if (!isPlainSourceCell) {
+        return {
+          ok: false,
+          message: `${employee.name} already has a borrowed, overtime, mutual, or loan assignment on ${date}.`,
+        };
+      }
+    }
+
+    const targetKey = createAssignmentKey(targetSchedule.id, employee.id, date);
+    const targetAssignment = assignmentMap.get(targetKey);
+
+    if (targetAssignment && (targetAssignment.competencyId || targetAssignment.timeCodeId || targetAssignment.notes)) {
+      return {
+        ok: false,
+        message: `${employee.name} already has a target-shift row on ${date}.`,
+      };
+    }
+  }
+
+  const loanId = `loan-${targetSchedule.id}-${employee.id}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+  const loanRows = buildTemporaryLoanAssignmentRows({
+    loanId,
+    employeeId: employee.id,
+    sourceScheduleId: sourceSchedule.id,
+    targetScheduleId: targetSchedule.id,
+    targetCompetencyId: competency.id,
+    dates,
+    sourceShiftForDate: (date) => shiftForDate(sourceSchedule, date),
+    targetShiftForDate: (date) => shiftForDate(targetSchedule, date),
+    existingSourceAssignments: sourceExistingAssignments,
+  }).map((row) => ({
+    ...row,
+    ...toDatabaseScope(row.schedule_id === sourceSchedule.id ? sourceScope : targetScope),
+  }));
+
+  const { error: assignmentError } = await supabase.from("schedule_assignments").upsert(loanRows, {
+    onConflict: "schedule_id,employee_id,assignment_date",
+  });
+
+  if (assignmentError) {
+    return {
+      ok: false,
+      message: `Could not create temporary loan: ${assignmentError.message}`,
+    };
+  }
+
+  const notificationResult = await createTemporaryLoanNotifications(supabase, [
+    {
+      employeeId: employee.id,
+      title: "Temporary shift loan",
+      body: `You have been temporarily loaned from ${sourceSchedule.name} to ${targetSchedule.name} for ${dates.length} date${dates.length === 1 ? "" : "s"} starting ${dates[0]}.`,
+      month,
+      scope: sourceScope,
+    },
+  ]);
+  const cleanupResult = await removeStaleOvertimeClaims(supabase, [month], session);
+
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
+  revalidatePath("/overtime");
+  revalidatePath("/notifications");
+
+  const warnings = [
+    notificationResult.ok ? "" : ` Notification was not sent: ${notificationResult.message}`,
+    cleanupResult.ok ? "" : ` Overtime cleanup warning: ${cleanupResult.message}`,
+  ].join("");
+
+  return {
+    ok: true,
+    message: `${employee.name} was loaned to ${targetSchedule.name}.${warnings}`,
+  };
+}
+
+export async function cancelTemporaryLoan(input: CancelTemporaryLoanInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "You do not have permission to cancel temporary loans.",
+    };
+  }
+
+  if (isBlank(input.loanId)) {
+    return {
+      ok: false,
+      message: "Could not resolve that temporary loan.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Temporary loans are unavailable.",
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("schedule_assignments")
+    .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
+    .like("notes", `LOAN|id:${input.loanId}|%`);
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not load temporary loan rows: ${error.message}`,
+    };
+  }
+
+  const rows = ((data as Array<{
+    employee_id: string;
+    schedule_id: string;
+    assignment_date: string;
+    competency_id: string | null;
+    time_code_id: string | null;
+    notes: string | null;
+    shift_kind: ShiftKind;
+  } & ScopedDatabaseRow> | null) ?? [])
+    .map((row) => ({
+      ...row,
+      parsed: parseTemporaryLoanAssignmentNote(row.notes),
+    }))
+    .filter((row) => row.parsed.loanId === input.loanId);
+
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      message: "That temporary loan was not found.",
+    };
+  }
+
+  if (rows.some((row) => !canAccessScope(session, scopeFromRow(row)))) {
+    return {
+      ok: false,
+      message: "You do not have permission to cancel that temporary loan.",
+    };
+  }
+
+  const month = rows[0].assignment_date.slice(0, 7);
+  const snapshot = await getScheduleReferenceSnapshot(month, session, {
+    includeEmployeeCompetencies: true,
+    includeCompetencies: false,
+    includeTimeCodes: false,
+    includeSubSchedules: false,
+    includeAssignments: false,
+  });
+  const employeeMap = getEmployeeMap(snapshot.schedules);
+  const employee = employeeMap[rows[0].employee_id] ?? null;
+  const sourceScheduleId = rows.find((row) => row.parsed.sourceScheduleId)?.parsed.sourceScheduleId ?? null;
+  const targetScheduleId = rows.find((row) => row.parsed.targetScheduleId)?.parsed.targetScheduleId ?? null;
+  const sourceSchedule = sourceScheduleId ? getScheduleById(snapshot, sourceScheduleId) : null;
+  const targetSchedule = targetScheduleId ? getScheduleById(snapshot, targetScheduleId) : null;
+  const sourceRows = rows.filter((row) => row.parsed.role === "source");
+  const restoreRows = sourceRows.flatMap<TemporaryLoanAssignmentRow>((row) => {
+    if (!row.parsed.originalCompetencyId && !row.parsed.originalTimeCodeId && !row.parsed.originalNotes) {
+      return [];
+    }
+
+    return [{
+      employee_id: row.employee_id,
+      schedule_id: row.schedule_id,
+      assignment_date: row.assignment_date,
+      competency_id: row.parsed.originalCompetencyId,
+      time_code_id: row.parsed.originalTimeCodeId,
+      notes: row.parsed.originalNotes,
+      shift_kind: row.shift_kind,
+      company_id: row.company_id,
+      site_id: row.site_id,
+      business_area_id: row.business_area_id,
+    }];
+  });
+  const deleteResults = await Promise.all(
+    rows.map((row) =>
+      supabase
+        .from("schedule_assignments")
+        .delete()
+        .eq("employee_id", row.employee_id)
+        .eq("schedule_id", row.schedule_id)
+        .eq("assignment_date", row.assignment_date)
+        .like("notes", `LOAN|id:${input.loanId}|%`),
+    ),
+  );
+  const deleteError = deleteResults.find((result) => result.error)?.error;
+
+  if (deleteError) {
+    return {
+      ok: false,
+      message: `Could not cancel temporary loan: ${deleteError.message}`,
+    };
+  }
+
+  if (restoreRows.length > 0) {
+    const { error: restoreError } = await supabase.from("schedule_assignments").upsert(restoreRows, {
+      onConflict: "schedule_id,employee_id,assignment_date",
+    });
+
+    if (restoreError) {
+      return {
+        ok: false,
+        message: `Temporary loan was removed, but the home shift could not be restored: ${restoreError.message}`,
+      };
+    }
+  }
+
+  const notificationScope = rows.find((row) => row.parsed.role === "source");
+  const notificationResult =
+    employee && notificationScope
+      ? await createTemporaryLoanNotifications(supabase, [
+          {
+            employeeId: employee.id,
+            title: "Temporary shift loan cancelled",
+            body: `Your temporary loan${sourceSchedule && targetSchedule ? ` from ${sourceSchedule.name} to ${targetSchedule.name}` : ""} has been cancelled.`,
+            month,
+            scope: scopeFromRow(notificationScope),
+          },
+        ])
+      : { ok: true as const };
+  const cleanupResult = await removeStaleOvertimeClaims(supabase, [month], session);
+
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/print");
+  revalidatePath("/overtime");
+  revalidatePath("/notifications");
+
+  const warnings = [
+    notificationResult.ok ? "" : ` Notification was not sent: ${notificationResult.message}`,
+    cleanupResult.ok ? "" : ` Overtime cleanup warning: ${cleanupResult.message}`,
+  ].join("");
+
+  return {
+    ok: true,
+    message: `Temporary loan cancelled.${warnings}`,
   };
 }
 
