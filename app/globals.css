@@ -2074,7 +2074,8 @@ button.workspace-nav-link {
 }
 
 .overtime-calendar-modal {
-  width: min(90vw, 72rem);
+  width: 80vw;
+  max-width: 72rem;
   height: min(88vh, 54rem);
   max-height: 88vh;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -2129,23 +2130,32 @@ button.workspace-nav-link {
   gap: 0.35rem;
 }
 
-.overtime-calendar-entry {
-  display: grid;
-  justify-content: stretch;
-  gap: 0.18rem;
+.overtime-calendar-shift-pill {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.28rem;
   width: 100%;
-  border-radius: 0.7rem;
-  padding: 0.42rem 0.5rem;
-  white-space: normal;
+  min-height: 1.72rem;
+  border-radius: 999px;
+  padding: 0.28rem 0.48rem;
+  white-space: nowrap;
 }
 
-.overtime-calendar-entry strong,
-.overtime-calendar-entry span {
+.overtime-calendar-shift-pill strong,
+.overtime-calendar-shift-pill span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.overtime-calendar-entry span {
+.overtime-calendar-shift-pill strong {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+}
+
+.overtime-calendar-shift-pill span {
+  min-width: 0;
   font-size: 0.68rem;
   line-height: 1.2;
   opacity: 0.78;

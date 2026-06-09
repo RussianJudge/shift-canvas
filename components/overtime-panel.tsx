@@ -739,18 +739,13 @@ function OvertimeCalendarModal({
                         {dayPostings.map((posting) => (
                           <div
                             key={`${posting.id}:${day.date}`}
-                            className={`overtime-calendar-entry legend-pill legend-pill--${posting.colorToken.toLowerCase()}`}
+                            className={`overtime-calendar-shift-pill legend-pill legend-pill--${posting.colorToken.toLowerCase()}`}
+                            title={`${posting.scheduleName} · ${getShiftBadgeLabel(posting.shiftKind)} · ${posting.competencyCode} · ${posting.openShifts} open`}
                           >
-                            <strong>
-                              {posting.competencyCode.replace("Post ", "")}
-                              {posting.source === "manual" ? " · Manual" : ""}
-                            </strong>
+                            <strong>{getShiftBadgeLabel(posting.shiftKind)}</strong>
                             <span>
-                              {posting.targetMode === "main" ? `Shift ${posting.scheduleName}` : posting.scheduleName}
-                              {" · "}
-                              {getShiftBadgeLabel(posting.shiftKind)}
-                              {" · "}
-                              {posting.openShifts} open
+                              {posting.scheduleName} · {posting.competencyCode.replace("Post ", "")}
+                              {posting.source === "manual" ? " · M" : ""} · {posting.openShifts}
                             </span>
                           </div>
                         ))}

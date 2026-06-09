@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 
 import { saveTimeCodes } from "@/app/actions";
 import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate, TimeCodeUsageMode } from "@/lib/types";
@@ -14,6 +15,53 @@ type EditableTimeCode = {
   colorToken: string;
   usageMode: TimeCodeUsageMode;
 };
+
+function RemoveTimeCodeModal({
+  timeCode,
+  onCancel,
+  onConfirm,
+}: {
+  timeCode: EditableTimeCode;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section
+        className="assignment-modal mutual-modal"
+        aria-label="Remove time code confirmation"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Time Codes</span>
+            <h2 className="assignment-modal__title">Remove time code?</h2>
+            <p className="assignment-modal__context">
+              Remove {timeCode.code || "this time code"}? This change will not save until you click Save.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+            Remove time code
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
 
 /** Clones editable rows so revert/save baselines are never mutated in place. */
 function cloneTimeCodes(timeCodes: EditableTimeCode[]) {
@@ -71,6 +119,7 @@ export function TimeCodesPanel({
   const [timeCodes, setTimeCodes] = useState(initialTimeCodes);
   const [baselineTimeCodes, setBaselineTimeCodes] = useState(initialTimeCodes);
   const [deletedTimeCodeIds, setDeletedTimeCodeIds] = useState<string[]>([]);
+  const [pendingRemoveTimeCodeId, setPendingRemoveTimeCodeId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, startSaveTransition] = useTransition();
 
@@ -78,6 +127,7 @@ export function TimeCodesPanel({
     setTimeCodes(cloneTimeCodes(initialTimeCodes));
     setBaselineTimeCodes(cloneTimeCodes(initialTimeCodes));
     setDeletedTimeCodeIds([]);
+    setPendingRemoveTimeCodeId(null);
     setStatusMessage("");
   }, [initialTimeCodes]);
 
@@ -110,6 +160,9 @@ export function TimeCodesPanel({
     );
   const hasChanges = dirtyUpdates.length > 0 || deletedTimeCodeIds.length > 0;
   const hasValidationErrors = invalidTimeCodeIds.size > 0;
+  const pendingRemoveTimeCode = pendingRemoveTimeCodeId
+    ? timeCodes.find((timeCode) => timeCode.id === pendingRemoveTimeCodeId) ?? null
+    : null;
 
   function updateTimeCode(
     timeCodeId: string,
@@ -134,12 +187,24 @@ export function TimeCodesPanel({
   }
 
   function handleRemoveTimeCode(timeCodeId: string) {
+    setPendingRemoveTimeCodeId(timeCodeId);
+  }
+
+  function handleConfirmRemoveTimeCode() {
+    if (!pendingRemoveTimeCode) {
+      setPendingRemoveTimeCodeId(null);
+      return;
+    }
+
+    const timeCodeId = pendingRemoveTimeCode.id;
+
     setTimeCodes((current) => current.filter((timeCode) => timeCode.id !== timeCodeId));
 
     if (baselineMap.has(timeCodeId)) {
       setDeletedTimeCodeIds((current) => [...current, timeCodeId]);
     }
 
+    setPendingRemoveTimeCodeId(null);
     setStatusMessage("");
   }
 
@@ -314,6 +379,14 @@ export function TimeCodesPanel({
           </tbody>
         </table>
       </div>
+
+      {pendingRemoveTimeCode ? (
+        <RemoveTimeCodeModal
+          timeCode={pendingRemoveTimeCode}
+          onCancel={() => setPendingRemoveTimeCodeId(null)}
+          onConfirm={handleConfirmRemoveTimeCode}
+        />
+      ) : null}
     </section>
   );
 }
