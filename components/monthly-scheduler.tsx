@@ -103,6 +103,30 @@ function PrinterIcon() {
   );
 }
 
+function ShiftOrderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7.5 7.2A7 7 0 0 1 18.8 9" />
+      <path d="M18.8 9V4.8" />
+      <path d="M18.8 9h-4.2" />
+      <path d="M16.5 16.8A7 7 0 0 1 5.2 15" />
+      <path d="M5.2 15v4.2" />
+      <path d="M5.2 15h4.2" />
+    </svg>
+  );
+}
+
+function TemporaryLoanIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+      <path d="M3.8 19a4.2 4.2 0 0 1 8.4 0" />
+      <path d="M13 12h7" />
+      <path d="m17 8 4 4-4 4" />
+    </svg>
+  );
+}
+
 type DisplayEmployee = {
   rowId: string;
   sourceEmployeeId: string;
@@ -2798,21 +2822,25 @@ export function MonthlyScheduler({
             {canEdit && canManageSetBuilder ? (
               <button
                 type="button"
-                className="ghost-button"
+                className="ghost-button icon-button schedule-temporary-loan-button"
                 onClick={() => setIsTemporaryLoanModalOpen(true)}
                 disabled={isScheduleLocked}
+                aria-label="Temporary loan"
+                title="Temporary loan"
               >
-                Temporary loan
+                <TemporaryLoanIcon />
               </button>
             ) : null}
             {canManageSetBuilder ? (
               <button
                 type="button"
-                className="ghost-button"
+                className="ghost-button icon-button schedule-order-button"
                 onClick={() => setIsShiftOrderModalOpen(true)}
                 disabled={isScheduleLocked}
+                aria-label="Shift order"
+                title="Shift order"
               >
-                Shift order
+                <ShiftOrderIcon />
               </button>
             ) : null}
             <button

@@ -1063,9 +1063,20 @@ button.workspace-nav-link {
   justify-content: flex-end;
 }
 
+.schedule-temporary-loan-button svg,
+.schedule-order-button svg,
 .schedule-print-button svg {
   width: 1.55rem;
   height: 1.55rem;
+}
+
+.schedule-temporary-loan-button svg,
+.schedule-order-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .planner-actions {
