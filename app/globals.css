@@ -354,12 +354,6 @@ button.workspace-nav-link {
   margin-top: auto;
 }
 
-.workspace-notifications--top {
-  margin: 0 0 0.45rem;
-  padding-bottom: 0.65rem;
-  border-bottom: 1px solid var(--line);
-}
-
 .workspace-notifications + .workspace-session {
   margin-top: 0;
 }
@@ -386,7 +380,7 @@ button.workspace-nav-link {
 .workspace-notifications-popover {
   position: absolute;
   left: calc(100% + 0.9rem);
-  top: 0;
+  bottom: 0;
   z-index: 35;
   width: min(22rem, calc(100vw - 2rem));
   display: grid;
@@ -2125,8 +2119,8 @@ button.workspace-nav-link {
 }
 
 .overtime-calendar-modal {
-  width: 90vw;
-  max-width: 86rem;
+  width: 80vw;
+  max-width: 80rem;
   height: min(88vh, 54rem);
   max-height: 88vh;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -2179,37 +2173,30 @@ button.workspace-nav-link {
 .overtime-calendar-day__postings {
   display: grid;
   gap: 0.35rem;
+  min-width: 0;
 }
 
 .overtime-calendar-shift-pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 0.28rem;
-  width: 100%;
-  min-height: 1.72rem;
+  justify-content: center;
+  justify-self: start;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 1.35rem;
   border-radius: 999px;
-  padding: 0.28rem 0.48rem;
+  padding: 0.14rem 0.4rem;
+  font-size: 0.66rem;
+  line-height: 1.1;
   white-space: nowrap;
 }
 
-.overtime-calendar-shift-pill strong,
 .overtime-calendar-shift-pill span {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.overtime-calendar-shift-pill strong {
-  flex: 0 0 auto;
-  font-size: 0.64rem;
-  letter-spacing: 0.04em;
-}
-
-.overtime-calendar-shift-pill span {
-  min-width: 0;
-  font-size: 0.68rem;
-  line-height: 1.2;
-  opacity: 0.78;
 }
 
 .mutuals-create-action {
@@ -4583,10 +4570,6 @@ button.workspace-nav-link {
 
   .workspace-notifications {
     margin-top: auto;
-  }
-
-  .workspace-notifications--top {
-    margin: 0 0 0.35rem;
   }
 
   .workspace-notifications + .workspace-session {

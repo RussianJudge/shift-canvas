@@ -742,11 +742,7 @@ function OvertimeCalendarModal({
                             className={`overtime-calendar-shift-pill legend-pill legend-pill--${posting.colorToken.toLowerCase()}`}
                             title={`${posting.scheduleName} · ${getShiftBadgeLabel(posting.shiftKind)} · ${posting.competencyCode} · ${posting.openShifts} open`}
                           >
-                            <strong>{getShiftBadgeLabel(posting.shiftKind)}</strong>
-                            <span>
-                              {posting.scheduleName} · {posting.competencyCode.replace("Post ", "")}
-                              {posting.source === "manual" ? " · M" : ""} · {posting.openShifts}
-                            </span>
+                            <span>{posting.competencyCode}</span>
                           </div>
                         ))}
                       </div>
