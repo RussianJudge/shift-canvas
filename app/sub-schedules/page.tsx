@@ -16,12 +16,14 @@ function isMonthKey(value: string | undefined) {
 async function SubSchedulesBoard({
   session,
   month,
+  selectedSubScheduleId,
 }: {
   session: Awaited<ReturnType<typeof requireAppSession>>;
   month: string;
+  selectedSubScheduleId: string;
 }) {
   const snapshot = await getSubSchedulesSnapshot(month, session);
-  return <SubSchedulesPanel snapshot={snapshot} />;
+  return <SubSchedulesPanel snapshot={snapshot} initialSelectedSubScheduleId={selectedSubScheduleId} />;
 }
 
 function SubSchedulesBoardFallback({ month }: { month: string }) {
@@ -60,17 +62,18 @@ function SubSchedulesBoardFallback({ month }: { month: string }) {
 export default async function SubSchedulesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ month?: string }>;
+  searchParams?: Promise<{ month?: string; subSchedule?: string }>;
 }) {
   const session = await requireAppSession(["admin", "leader"]);
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
+  const selectedSubScheduleId = resolvedSearchParams?.subSchedule ?? "";
 
   return (
     <WorkspaceShellFrame viewer={session}>
       <Suspense key={month} fallback={<SubSchedulesBoardFallback month={month} />}>
-        <SubSchedulesBoard session={session} month={month} />
+        <SubSchedulesBoard session={session} month={month} selectedSubScheduleId={selectedSubScheduleId} />
       </Suspense>
     </WorkspaceShellFrame>
   );

@@ -542,8 +542,10 @@ function AddSubScheduleEmployeeModal({
 /** Dedicated planner for overlay schedules that project summary codes back home. */
 export function SubSchedulesPanel({
   snapshot,
+  initialSelectedSubScheduleId = "",
 }: {
   snapshot: SchedulerSnapshot;
+  initialSelectedSubScheduleId?: string;
 }) {
   const router = useRouter();
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
@@ -576,7 +578,9 @@ export function SubSchedulesPanel({
   const [subSchedules, setSubSchedules] = useState(initialSubSchedules);
   const [baselineSubSchedules, setBaselineSubSchedules] = useState(initialSubSchedules);
   const [selectedSubScheduleId, setSelectedSubScheduleId] = useState(
-    initialSubSchedules.find((subSchedule) => !subSchedule.isArchived)?.id ?? initialSubSchedules[0]?.id ?? "",
+    initialSubSchedules.some((subSchedule) => subSchedule.id === initialSelectedSubScheduleId)
+      ? initialSelectedSubScheduleId
+      : initialSubSchedules.find((subSchedule) => !subSchedule.isArchived)?.id ?? initialSubSchedules[0]?.id ?? "",
   );
   const [statusMessage, setStatusMessage] = useState("");
   const [assignmentMessage, setAssignmentMessage] = useState("");
@@ -599,6 +603,10 @@ export function SubSchedulesPanel({
         return current;
       }
 
+      if (initialSubSchedules.some((subSchedule) => subSchedule.id === initialSelectedSubScheduleId)) {
+        return initialSelectedSubScheduleId;
+      }
+
       return initialSubSchedules.find((subSchedule) => !subSchedule.isArchived)?.id ?? initialSubSchedules[0]?.id ?? "";
     });
     setAddedEmployeeIds([]);
@@ -607,7 +615,7 @@ export function SubSchedulesPanel({
     setIsSettingsModalOpen(false);
     setStatusMessage("");
     setAssignmentMessage("");
-  }, [initialSubSchedules]);
+  }, [initialSelectedSubScheduleId, initialSubSchedules]);
 
   const activeSubSchedule =
     subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleId) ?? null;
@@ -879,7 +887,13 @@ export function SubSchedulesPanel({
 
   function handleMonthChange(delta: number) {
     const nextMonth = shiftMonthKey(snapshot.month, delta);
-    router.push(`/sub-schedules?month=${nextMonth}`, { scroll: false });
+    const params = new URLSearchParams({ month: nextMonth });
+
+    if (selectedSubScheduleId) {
+      params.set("subSchedule", selectedSubScheduleId);
+    }
+
+    router.push(`/sub-schedules?${params.toString()}`, { scroll: false });
   }
 
   function handleAddEmployeeRow() {

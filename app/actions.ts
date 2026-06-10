@@ -1292,15 +1292,61 @@ export async function createTemporaryLoan(input: CreateTemporaryLoanInput) {
         },
       ]),
   );
-  const completedDateKeys = new Set<string>();
-
-  for (const completedSet of snapshot.completedSets) {
-    for (const date of dates) {
-      if (date >= completedSet.startDate && date <= completedSet.endDate) {
-        completedDateKeys.add(`${completedSet.scheduleId}:${date}`);
-      }
+  const lockedCompletedSets = Array.from(
+    new Map(
+      snapshot.completedSets
+        .filter(
+          (completedSet) =>
+            (completedSet.scheduleId === sourceSchedule.id || completedSet.scheduleId === targetSchedule.id) &&
+            dates.some((date) => date >= completedSet.startDate && date <= completedSet.endDate),
+        )
+        .map((completedSet) => [
+          `${completedSet.month}:${createSetRangeKey(completedSet.scheduleId, completedSet.startDate, completedSet.endDate)}`,
+          completedSet,
+        ]),
+    ).values(),
+  );
+  const unlockCompletedSets = async () => {
+    if (lockedCompletedSets.length === 0) {
+      return null;
     }
-  }
+
+    const results = await Promise.all(
+      lockedCompletedSets.map((completedSet) =>
+        supabase
+          .from("completed_sets")
+          .delete()
+          .eq("schedule_id", completedSet.scheduleId)
+          .eq("month_key", completedSet.month)
+          .eq("start_date", completedSet.startDate)
+          .eq("end_date", completedSet.endDate),
+      ),
+    );
+
+    return results.find((result) => result.error)?.error ?? null;
+  };
+  const relockCompletedSets = async () => {
+    if (lockedCompletedSets.length === 0) {
+      return null;
+    }
+
+    const { error } = await supabase.from("completed_sets").upsert(
+      lockedCompletedSets.map((completedSet) => ({
+        schedule_id: completedSet.scheduleId,
+        month_key: completedSet.month,
+        start_date: completedSet.startDate,
+        end_date: completedSet.endDate,
+        company_id: completedSet.companyId ?? "",
+        site_id: completedSet.siteId ?? "",
+        business_area_id: completedSet.businessAreaId ?? "",
+      })),
+      {
+        onConflict: "schedule_id,month_key,start_date,end_date",
+      },
+    );
+
+    return error ?? null;
+  };
 
   for (const date of dates) {
     const sourceShiftKind = shiftForDate(sourceSchedule, date);
@@ -1317,13 +1363,6 @@ export async function createTemporaryLoan(input: CreateTemporaryLoanInput) {
       return {
         ok: false,
         message: `${targetSchedule.name} is off on ${date}; choose a target worked day.`,
-      };
-    }
-
-    if (completedDateKeys.has(`${sourceSchedule.id}:${date}`) || completedDateKeys.has(`${targetSchedule.id}:${date}`)) {
-      return {
-        ok: false,
-        message: "Reopen completed sets before creating a temporary loan for those dates.",
       };
     }
 
@@ -1391,14 +1430,36 @@ export async function createTemporaryLoan(input: CreateTemporaryLoanInput) {
     ...toDatabaseScope(row.schedule_id === sourceSchedule.id ? sourceScope : targetScope),
   }));
 
+  const unlockError = await unlockCompletedSets();
+
+  if (unlockError) {
+    return {
+      ok: false,
+      message: `Could not temporarily unlock completed sets for the loan: ${unlockError.message}`,
+    };
+  }
+
   const { error: assignmentError } = await supabase.from("schedule_assignments").upsert(loanRows, {
     onConflict: "schedule_id,employee_id,assignment_date",
   });
 
   if (assignmentError) {
+    const relockError = await relockCompletedSets();
+
     return {
       ok: false,
-      message: `Could not create temporary loan: ${assignmentError.message}`,
+      message: relockError
+        ? `Could not create temporary loan: ${assignmentError.message} Also could not relock completed sets: ${relockError.message}`
+        : `Could not create temporary loan: ${assignmentError.message}`,
+    };
+  }
+
+  const relockError = await relockCompletedSets();
+
+  if (relockError) {
+    return {
+      ok: false,
+      message: `Temporary loan was created, but completed sets could not be relocked: ${relockError.message}`,
     };
   }
 
