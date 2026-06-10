@@ -687,7 +687,6 @@ export function SubSchedulesPanel({
       !activeSubSchedule ||
       !isPersistedActiveSubSchedule ||
       activeSubSchedule.isArchived ||
-      activeSubSchedule.competencyIds.length === 0 ||
       !hasAssignmentChanges ||
       isSavingAssignments ||
       assignmentUpdateSignature === lastAssignmentSaveSignatureRef.current
@@ -1102,12 +1101,12 @@ export function SubSchedulesPanel({
                   <p className="toolbar-status">Save this new sub-schedule definition before staffing it.</p>
                 ) : activeSubSchedule.isArchived ? (
                   <p className="toolbar-status">Archived sub-schedules stay visible for history but cannot be edited.</p>
-                ) : activeSubSchedule.competencyIds.length === 0 ? (
-                  <p className="toolbar-status">Assign competencies to this sub-schedule first, then staff its monthly builder.</p>
                 ) : isSavingAssignments ? (
                   <p className="toolbar-status">Saving changes automatically...</p>
                 ) : assignmentMessage ? (
                   <p className="toolbar-status">{assignmentMessage}</p>
+                ) : activeSubSchedule.competencyIds.length === 0 ? (
+                  <p className="toolbar-status">No posts are assigned to this sub-schedule yet, but time codes and notes can still be saved.</p>
                 ) : null}
               </div>
             </div>
