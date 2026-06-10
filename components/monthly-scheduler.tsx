@@ -15,6 +15,7 @@ import {
   setScheduleSetCompletion,
 } from "@/app/actions";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
+import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import { parseTemporaryLoanAssignmentNote } from "@/lib/temporary-loans";
 import {
   buildProjectedAssignmentIndex,
@@ -1157,6 +1158,17 @@ function getScheduleCellComment({
     return isBorrowedMutualCell
       ? `${employeeName} is covering ${partnerName} via mutual.`
       : `${partnerName} is covering ${employeeName} via mutual.`;
+  }
+
+  const parsedOvertime = parseOvertimeAssignmentNote(notes);
+
+  if (parsedOvertime.claimantEmployeeId) {
+    const claimantName = employeeMap[parsedOvertime.claimantEmployeeId]?.name ?? employeeName;
+    const swapName = parsedOvertime.swapEmployeeId ? employeeMap[parsedOvertime.swapEmployeeId]?.name : null;
+
+    return swapName
+      ? `${claimantName} is covering overtime via competency swap with ${swapName}.`
+      : `${claimantName} is covering overtime.`;
   }
 
   return notes ?? undefined;

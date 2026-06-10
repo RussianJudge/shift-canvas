@@ -9,6 +9,7 @@ import {
   saveSubScheduleAssignments,
   saveSubSchedules,
 } from "@/app/actions";
+import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
   formatMonthLabel,
   getCompetencyMap,
@@ -208,6 +209,16 @@ function getCellCode(
   }
 
   return getCompactCode(competencyMap[selection.competencyId]?.code ?? "");
+}
+
+function getCellTitle(notes: string | null) {
+  const parsedOvertime = parseOvertimeAssignmentNote(notes);
+
+  if (parsedOvertime.claimantEmployeeId) {
+    return "Overtime assignment";
+  }
+
+  return notes ?? undefined;
 }
 
 function SubScheduleCellModal({
@@ -1214,7 +1225,7 @@ export function SubSchedulesPanel({
                               colorToken ? `legend-pill--${colorToken.toLowerCase()}` : ""
                             }`}
                             disabled={!isPersistedActiveSubSchedule || activeSubSchedule.isArchived}
-                            title={selection.notes ?? undefined}
+                            title={getCellTitle(selection.notes)}
                             onClick={() => setEditorCell({ employeeId: employee.id, date: day.date })}
                           >
                             {getCellCode(selection, competencyMap, timeCodeMap)}

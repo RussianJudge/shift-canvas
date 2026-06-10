@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
+import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import { buildProjectedAssignmentIndex } from "@/lib/sub-schedules";
 import {
   buildAssignmentIndex,
@@ -101,6 +102,17 @@ function getScheduleCellComment({
   if (parsedMutual.partnerEmployeeId) {
     const partnerName = employeeMap[parsedMutual.partnerEmployeeId]?.name ?? "their mutual partner";
     return `${employeeName} working for ${partnerName}`;
+  }
+
+  const parsedOvertime = parseOvertimeAssignmentNote(notes);
+
+  if (parsedOvertime.claimantEmployeeId) {
+    const claimantName = employeeMap[parsedOvertime.claimantEmployeeId]?.name ?? employeeName;
+    const swapName = parsedOvertime.swapEmployeeId ? employeeMap[parsedOvertime.swapEmployeeId]?.name : null;
+
+    return swapName
+      ? `${claimantName} covering overtime via competency swap with ${swapName}`
+      : `${claimantName} covering overtime`;
   }
 
   return notes ?? undefined;

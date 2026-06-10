@@ -10,6 +10,8 @@ import {
   deleteManualOvertimePosting,
   releaseOvertimePosting,
 } from "@/app/actions";
+import { parseMutualAssignmentNote } from "@/lib/mutuals";
+import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -31,6 +33,9 @@ import type { AppSession, Employee, OvertimeClaim, SchedulerSnapshot, ShiftKind 
 type OvertimeTargetMode = "main" | "sub";
 type OvertimeTargetKey = "all" | "main" | `sub:${string}`;
 type OvertimeAvailabilityFilter = "all" | "available";
+type ClaimActionState = { postingId: string; action: "claim" | "release" } | null;
+
+const CLAIM_ACTION_TIMEOUT_MS = 25000;
 
 function CreatePostingIcon() {
   return (
@@ -105,6 +110,8 @@ type OvertimePosting = {
 };
 
 type AssignmentMeta = {
+  claimantEmployeeId: string | null;
+  claimedCompetencyId: string | null;
   coverageCompetencyId: string | null;
   swapEmployeeId: string | null;
   originalCompetencyId: string | null;
@@ -112,26 +119,60 @@ type AssignmentMeta = {
 
 /** Parses overtime note metadata off assignment rows for claimed postings. */
 function parseAssignmentMeta(note: string | null | undefined): AssignmentMeta {
-  if (!note?.startsWith("OT|")) {
-    return {
-      coverageCompetencyId: null,
-      swapEmployeeId: null,
-      originalCompetencyId: null,
-    };
-  }
+  return parseOvertimeAssignmentNote(note);
+}
 
-  const parts = note.split("|").slice(1);
-  const values = new Map(
-    parts.map((part) => {
-      const [key, value] = part.split(":");
-      return [key, value ?? ""];
-    }),
-  );
+function safePostingText(value: string, fallback: string) {
+  return value.startsWith("OT|") ? fallback : value;
+}
+
+async function withClaimTimeout<T>(promise: Promise<T>) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error("The overtime request is taking longer than expected."));
+        }, CLAIM_ACTION_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function sanitizePostingLabels(
+  posting: OvertimePosting,
+  competencyMap: Record<string, { code: string; label: string }>,
+  timeCodeMap: Record<string, { code: string; label: string }>,
+): OvertimePosting {
+  const claimedAssignment = posting.competencyId
+    ? competencyMap[posting.competencyId]
+    : posting.timeCodeId
+      ? timeCodeMap[posting.timeCodeId]
+      : null;
+  const coverageAssignment = posting.coverageCompetencyId
+    ? competencyMap[posting.coverageCompetencyId]
+    : posting.timeCodeId
+      ? timeCodeMap[posting.timeCodeId]
+      : null;
 
   return {
-    coverageCompetencyId: values.get("coverage") || null,
-    swapEmployeeId: values.get("swap") || null,
-    originalCompetencyId: values.get("orig") || null,
+    ...posting,
+    competencyCode: safePostingText(posting.competencyCode, claimedAssignment?.code ?? "Overtime"),
+    competencyLabel: safePostingText(posting.competencyLabel, claimedAssignment?.label ?? "Overtime"),
+    coverageCompetencyCode: safePostingText(
+      posting.coverageCompetencyCode,
+      coverageAssignment?.code ?? claimedAssignment?.code ?? "Overtime",
+    ),
+    coverageCompetencyLabel: safePostingText(
+      posting.coverageCompetencyLabel,
+      coverageAssignment?.label ?? claimedAssignment?.label ?? "Overtime",
+    ),
   };
 }
 
@@ -243,6 +284,15 @@ function getCellSelection(
   };
 }
 
+function hasMutualAssignmentOnDate(snapshot: SchedulerSnapshot, employeeId: string, date: string) {
+  return snapshot.assignments.some(
+    (assignment) =>
+      assignment.employeeId === employeeId &&
+      assignment.date === date &&
+      Boolean(parseMutualAssignmentNote(assignment.notes).postingId),
+  );
+}
+
 function countScheduleAssignmentsForTarget({
   assignments,
   scheduleId,
@@ -308,6 +358,10 @@ function getClaimStatus(
   const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
 
   for (const date of posting.dates) {
+    if (hasMutualAssignmentOnDate(snapshot, employee.id, date)) {
+      return { canClaim: false, reason: "Employee has a mutual scheduled on one or more posting dates." };
+    }
+
     const hasExistingAssignment = snapshot.assignments.some(
       (assignment) =>
         assignment.employeeId === employee.id &&
@@ -1021,7 +1075,7 @@ export function OvertimePanel({
   const [availabilityFilter, setAvailabilityFilter] = useState<OvertimeAvailabilityFilter>("available");
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
-  const [isClaiming, startClaimTransition] = useTransition();
+  const [claimActionState, setClaimActionState] = useState<ClaimActionState>(null);
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [isMyClaimsModalOpen, setIsMyClaimsModalOpen] = useState(false);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
@@ -1053,6 +1107,7 @@ export function OvertimePanel({
   const [manualPostingDates, setManualPostingDates] = useState<string[]>([]);
   const [isManagingManual, startManualTransition] = useTransition();
   const canManageManualPostings = viewer.role !== "worker";
+  const isClaiming = Boolean(claimActionState);
 
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
@@ -1585,19 +1640,22 @@ export function OvertimePanel({
       });
     }
 
-    return nextPostings.sort((left, right) =>
-      Number(Boolean(right.claimedEmployeeId)) - Number(Boolean(left.claimedEmployeeId)) ||
-      Number(right.source === "manual") - Number(left.source === "manual") ||
-      Number(right.targetMode === "sub") - Number(left.targetMode === "sub") ||
-      left.scheduleName.localeCompare(right.scheduleName) ||
-      left.dates[0].localeCompare(right.dates[0]) ||
-      left.shiftKind.localeCompare(right.shiftKind) ||
-      left.competencyCode.localeCompare(right.competencyCode) ||
-      (left.claimedByName ?? "").localeCompare(right.claimedByName ?? ""),
-    );
+    return nextPostings
+      .map((posting) => sanitizePostingLabels(posting, competencyMap, timeCodeMap))
+      .sort((left, right) =>
+        Number(Boolean(right.claimedEmployeeId)) - Number(Boolean(left.claimedEmployeeId)) ||
+        Number(right.source === "manual") - Number(left.source === "manual") ||
+        Number(right.targetMode === "sub") - Number(left.targetMode === "sub") ||
+        left.scheduleName.localeCompare(right.scheduleName) ||
+        left.dates[0].localeCompare(right.dates[0]) ||
+        left.shiftKind.localeCompare(right.shiftKind) ||
+        left.competencyCode.localeCompare(right.competencyCode) ||
+        (left.claimedByName ?? "").localeCompare(right.claimedByName ?? ""),
+      );
   }, [
     assignmentIndex,
     completedSetRangeKeys,
+    competencyMap,
     employeeMap,
     extendedMonthDays,
     monthDays,
@@ -1607,6 +1665,7 @@ export function OvertimePanel({
     snapshot.month,
     snapshot.overtimeClaims,
     snapshot.schedules,
+    timeCodeMap,
   ]);
   const filteredPostings = useMemo(
     () =>
@@ -1750,26 +1809,43 @@ export function OvertimePanel({
       return;
     }
 
-    startClaimTransition(async () => {
-      const result = await claimOvertimePosting({
-        scheduleId: posting.scheduleId,
-        subScheduleId: posting.subScheduleId,
-        employeeId: claimingEmployeeId,
-        competencyId: posting.competencyId,
-        timeCodeId: posting.timeCodeId,
-        coverageCompetencyId: posting.coverageCompetencyId,
-        swapEmployeeId: posting.swapEmployeeId,
-        manualPostingId: posting.manualPostingId,
-        dates: posting.dates,
-        confirmedNightShiftTurnaround,
-      });
+    setClaimActionState({ postingId: posting.id, action: "claim" });
+    setStatusMessage("");
 
-      setStatusMessage(result.message);
+    void (async () => {
+      try {
+        const result = await withClaimTimeout(
+          claimOvertimePosting({
+            scheduleId: posting.scheduleId,
+            subScheduleId: posting.subScheduleId,
+            employeeId: claimingEmployeeId,
+            competencyId: posting.competencyId,
+            timeCodeId: posting.timeCodeId,
+            coverageCompetencyId: posting.coverageCompetencyId,
+            swapEmployeeId: posting.swapEmployeeId,
+            manualPostingId: posting.manualPostingId,
+            dates: posting.dates,
+            confirmedNightShiftTurnaround,
+          }),
+        );
 
-      if (result.ok) {
+        setStatusMessage(result.message);
+
+        if (result.ok) {
+          router.refresh();
+        }
+      } catch (error) {
+        console.error("Could not claim overtime posting", error);
+        setStatusMessage(
+          error instanceof Error
+            ? `${error.message} Refresh and check whether the claim was saved before trying again.`
+            : "Could not claim that overtime posting. Refresh and try again.",
+        );
         router.refresh();
+      } finally {
+        setClaimActionState(null);
       }
-    });
+    })();
   }
 
   function handleClaim(posting: OvertimePosting) {
@@ -1803,22 +1879,39 @@ export function OvertimePanel({
       return;
     }
 
-    startClaimTransition(async () => {
-      const result = await releaseOvertimePosting({
-        scheduleId: posting.scheduleId,
-        subScheduleId: posting.subScheduleId,
-        employeeId: claimingEmployeeId,
-        competencyId: posting.competencyId,
-        timeCodeId: posting.timeCodeId,
-        dates: posting.dates,
-      });
+    setClaimActionState({ postingId: posting.id, action: "release" });
+    setStatusMessage("");
 
-      setStatusMessage(result.message);
+    void (async () => {
+      try {
+        const result = await withClaimTimeout(
+          releaseOvertimePosting({
+            scheduleId: posting.scheduleId,
+            subScheduleId: posting.subScheduleId,
+            employeeId: claimingEmployeeId,
+            competencyId: posting.competencyId,
+            timeCodeId: posting.timeCodeId,
+            dates: posting.dates,
+          }),
+        );
 
-      if (result.ok) {
+        setStatusMessage(result.message);
+
+        if (result.ok) {
+          router.refresh();
+        }
+      } catch (error) {
+        console.error("Could not release overtime posting", error);
+        setStatusMessage(
+          error instanceof Error
+            ? `${error.message} Refresh and check whether the release was saved before trying again.`
+            : "Could not release that overtime posting. Refresh and try again.",
+        );
         router.refresh();
+      } finally {
+        setClaimActionState(null);
       }
-    });
+    })();
   }
 
   function toggleManualPostingDate(date: string) {
@@ -2070,6 +2163,10 @@ export function OvertimePanel({
             const selectedPostingClaimedByViewer = selectedPosting
               ? selectedPosting.claimedEmployeeIds.includes(claimingEmployeeId)
               : false;
+            const selectedPostingClaimAction =
+              selectedPosting && claimActionState?.postingId === selectedPosting.id
+                ? claimActionState.action
+                : null;
 
             return (
               <section key={group.key} className="overtime-group">
@@ -2192,8 +2289,8 @@ export function OvertimePanel({
                               (!selectedPostingClaimedByViewer && !claimStatus.canClaim)
                             }
                           >
-                            {isClaiming
-                              ? selectedPostingClaimedByViewer
+                            {selectedPostingClaimAction
+                              ? selectedPostingClaimAction === "release"
                                 ? "Releasing..."
                                 : "Claiming..."
                               : selectedPostingClaimedByViewer

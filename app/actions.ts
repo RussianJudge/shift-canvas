@@ -227,6 +227,19 @@ function isMutualGeneratedAssignment(notes: string | null | undefined) {
   return notes?.startsWith("MUT|") ?? false;
 }
 
+function hasMutualAssignmentOnDate(
+  assignments: Array<{ employeeId: string; date: string; notes?: string | null }>,
+  employeeId: string,
+  date: string,
+) {
+  return assignments.some(
+    (assignment) =>
+      assignment.employeeId === employeeId &&
+      assignment.date === date &&
+      isMutualGeneratedAssignment(assignment.notes),
+  );
+}
+
 function isTemporaryLoanAssignment(notes: string | null | undefined) {
   return Boolean(parseTemporaryLoanAssignmentNote(notes).loanId);
 }
@@ -2509,6 +2522,13 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     }
 
     for (const date of normalizedDates) {
+      if (hasMutualAssignmentOnDate(snapshot.assignments, employee.id, date)) {
+        return {
+          ok: false,
+          message: `${employee.name} has a mutual scheduled on one or more posting dates.`,
+        };
+      }
+
       const hasMainAssignment = snapshot.assignments.some(
         (assignment) =>
           assignment.employeeId === employee.id &&
@@ -2774,6 +2794,14 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
 
   for (const date of normalizedDates) {
     const shiftKind = shiftForDate(employeeSchedule, date);
+
+    if (hasMutualAssignmentOnDate(snapshot.assignments, employee.id, date)) {
+      return {
+        ok: false,
+        message: `${employee.name} has a mutual scheduled on one or more posting dates.`,
+      };
+    }
+
     const hasExistingAssignment = snapshot.assignments.some(
       (assignment) =>
         assignment.employeeId === employee.id &&
@@ -5473,14 +5501,61 @@ export async function saveSubScheduleAssignments(input: SaveSubScheduleAssignmen
       };
     }
 
-    const conflictingScheduleDeletes = await Promise.all(
+    const conflictingScheduleReads = await Promise.all(
       rowsToUpsert.map((row) =>
         supabase
           .from("schedule_assignments")
-          .delete()
+          .select("employee_id, schedule_id, assignment_date, notes")
           .eq("employee_id", row.employee_id)
           .eq("assignment_date", row.assignment_date),
       ),
+    );
+
+    const conflictingScheduleReadError = conflictingScheduleReads.find((result) => result.error)?.error;
+
+    if (conflictingScheduleReadError) {
+      return {
+        ok: false,
+        message: `Could not check conflicting main-schedule work: ${conflictingScheduleReadError.message}`,
+      };
+    }
+
+    const conflictingScheduleRows = conflictingScheduleReads.flatMap(
+      (result) =>
+        ((result.data as Array<{
+          employee_id: string;
+          schedule_id: string | null;
+          assignment_date: string;
+          notes: string | null;
+        }> | null) ?? []),
+    );
+    const protectedScheduleConflict = conflictingScheduleRows.find(
+      (row) =>
+        isMutualGeneratedAssignment(row.notes) ||
+        isOvertimeGeneratedAssignment(row.notes) ||
+        isTemporaryLoanAssignment(row.notes),
+    );
+
+    if (protectedScheduleConflict) {
+      return {
+        ok: false,
+        message:
+          "That sub-schedule change conflicts with protected main-schedule work. Cancel the mutual, overtime, or temporary loan assignment first.",
+      };
+    }
+
+    const conflictingScheduleDeletes = await Promise.all(
+      conflictingScheduleRows.map((row) => {
+        let query = supabase
+          .from("schedule_assignments")
+          .delete()
+          .eq("employee_id", row.employee_id)
+          .eq("assignment_date", row.assignment_date);
+
+        query = row.schedule_id ? query.eq("schedule_id", row.schedule_id) : query.is("schedule_id", null);
+
+        return query;
+      }),
     );
 
     const conflictingScheduleError = conflictingScheduleDeletes.find((result) => result.error)?.error;

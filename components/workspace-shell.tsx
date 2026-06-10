@@ -436,6 +436,73 @@ export function WorkspaceShell({
     setIsMobileSidebarOpen(false);
   };
 
+  const notificationsNavItem = (
+    <div className="workspace-nav-notifications">
+      <div className="workspace-notifications" ref={notificationPopoverRef}>
+        <button
+          type="button"
+          className={`workspace-nav-link workspace-notifications__button ${
+            isNotificationsOpen ? "workspace-nav-link--active" : ""
+          }`}
+          onClick={() => setIsNotificationsOpen((current) => !current)}
+          aria-expanded={isNotificationsOpen}
+          aria-haspopup="dialog"
+        >
+          <span className="workspace-nav-icon">
+            <NotificationsIcon />
+          </span>
+          <strong>Notifications</strong>
+          {notifications.length > 0 ? (
+            <span className="workspace-notifications__badge">{notifications.length}</span>
+          ) : null}
+        </button>
+
+        {isNotificationsOpen ? (
+          <section className="workspace-notifications-popover" role="dialog" aria-label="Notifications">
+            <div className="workspace-notifications-popover__header">
+              <div>
+                <strong>Notifications</strong>
+                <span>{notifications.length} unread</span>
+              </div>
+              <Link href="/notifications" onClick={() => setIsNotificationsOpen(false)}>
+                View all
+              </Link>
+            </div>
+
+            <div className="workspace-notifications-popover__list">
+              {notifications.length > 0 ? (
+                notifications.map((notification) => (
+                  <article key={notification.id} className="workspace-notification-item">
+                    <strong>{notification.title}</strong>
+                    <span>{notification.body}</span>
+                    <small>{notification.createdAt.slice(0, 10)}</small>
+                  </article>
+                ))
+              ) : (
+                <div className="workspace-notifications-empty">
+                  <strong>No notifications yet</strong>
+                  <span>Schedule alerts, overtime updates, and mutual approvals will appear here.</span>
+                </div>
+              )}
+            </div>
+
+            <div className="workspace-notifications-popover__footer">
+              <Link
+                href="/notifications/settings"
+                className="icon-button workspace-notifications-popover__settings"
+                aria-label="Notification settings"
+                title="Notification settings"
+                onClick={() => setIsNotificationsOpen(false)}
+              >
+                <NotificationSettingsIcon />
+              </Link>
+            </div>
+          </section>
+        ) : null}
+      </div>
+    </div>
+  );
+
   return (
     <main className="shell">
       <section
@@ -485,72 +552,10 @@ export function WorkspaceShell({
                 />
               );
             })}
+            {notificationsNavItem}
           </nav>
 
           <div className="workspace-sidebar-bottom">
-            <div className="workspace-notifications" ref={notificationPopoverRef}>
-              <button
-                type="button"
-                className={`workspace-nav-link workspace-notifications__button ${
-                  isNotificationsOpen ? "workspace-nav-link--active" : ""
-                }`}
-                onClick={() => setIsNotificationsOpen((current) => !current)}
-                aria-expanded={isNotificationsOpen}
-                aria-haspopup="dialog"
-              >
-                <span className="workspace-nav-icon">
-                  <NotificationsIcon />
-                </span>
-                <strong>Notifications</strong>
-                {notifications.length > 0 ? (
-                  <span className="workspace-notifications__badge">{notifications.length}</span>
-                ) : null}
-              </button>
-
-              {isNotificationsOpen ? (
-                <section className="workspace-notifications-popover" role="dialog" aria-label="Notifications">
-                  <div className="workspace-notifications-popover__header">
-                    <div>
-                      <strong>Notifications</strong>
-                      <span>{notifications.length} unread</span>
-                    </div>
-                    <Link href="/notifications" onClick={() => setIsNotificationsOpen(false)}>
-                      View all
-                    </Link>
-                  </div>
-
-                  <div className="workspace-notifications-popover__list">
-                    {notifications.length > 0 ? (
-                      notifications.map((notification) => (
-                        <article key={notification.id} className="workspace-notification-item">
-                          <strong>{notification.title}</strong>
-                          <span>{notification.body}</span>
-                          <small>{notification.createdAt.slice(0, 10)}</small>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="workspace-notifications-empty">
-                        <strong>No notifications yet</strong>
-                        <span>Schedule alerts, overtime updates, and mutual approvals will appear here.</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="workspace-notifications-popover__footer">
-                    <Link
-                      href="/notifications/settings"
-                      className="icon-button workspace-notifications-popover__settings"
-                      aria-label="Notification settings"
-                      title="Notification settings"
-                      onClick={() => setIsNotificationsOpen(false)}
-                    >
-                      <NotificationSettingsIcon />
-                    </Link>
-                  </div>
-                </section>
-              ) : null}
-            </div>
-
             {viewer.role === "admin" && adminScope ? (
               <section
                 className={`workspace-admin-scope ${

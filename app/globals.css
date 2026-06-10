@@ -140,7 +140,6 @@ select {
   margin-top: auto;
 }
 
-.workspace-sidebar-bottom .workspace-notifications,
 .workspace-sidebar-bottom .workspace-session {
   margin-top: 0;
 }
@@ -349,12 +348,14 @@ button.workspace-nav-link {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
-.workspace-notifications {
-  position: relative;
-  margin-top: auto;
+.workspace-nav-notifications {
+  margin-top: 0.15rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
 }
 
-.workspace-notifications + .workspace-session {
+.workspace-notifications {
+  position: relative;
   margin-top: 0;
 }
 
@@ -4566,14 +4567,6 @@ button.workspace-nav-link {
     gap: 0.5rem;
     padding: 0.75rem 0.1rem 0;
     border-top: 1px solid var(--line);
-  }
-
-  .workspace-notifications {
-    margin-top: auto;
-  }
-
-  .workspace-notifications + .workspace-session {
-    margin-top: 0;
   }
 
   .workspace-notifications-popover {
