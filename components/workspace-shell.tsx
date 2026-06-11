@@ -10,7 +10,10 @@ import type { AppNotification, AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
+const WORKSPACE_PREFETCH_DELAY_MS = 200;
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
+const PREFETCH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals"]);
+const prefetchedWorkspaceHrefs = new Set<string>();
 
 function isNotification(value: unknown): value is AppNotification {
   return (
@@ -32,6 +35,14 @@ function isValidMonthParam(value: string | null) {
   return Boolean(value && /^\d{4}-\d{2}$/.test(value));
 }
 
+function canUseDesktopIntentPrefetch() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+}
+
 function resolveWorkspaceRouteTargets({
   href,
   fallbackMonth,
@@ -46,6 +57,7 @@ function resolveWorkspaceRouteTargets({
 
   return {
     navigationHref,
+    prefetchHref: PREFETCH_ROUTE_HREFS.has(href) ? navigationHref : null,
   };
 }
 
@@ -64,6 +76,8 @@ type NavLinkProps = {
   label: string;
   icon: React.ReactNode;
   onNavigate: () => void;
+  prefetchHref?: string | null;
+  onIntentPrefetch?: (href: string) => void;
 };
 
 /** Small presentational wrapper so nav link semantics stay consistent everywhere. */
@@ -73,9 +87,46 @@ function NavLink({
   label,
   icon,
   onNavigate,
+  prefetchHref = null,
+  onIntentPrefetch,
 }: NavLinkProps) {
   const pathname = usePathname();
   const isActive = isWorkspaceRouteActive(pathname, activeHref);
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPendingPrefetch = () => {
+    if (prefetchTimerRef.current === null) {
+      return;
+    }
+
+    clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = null;
+  };
+
+  const scheduleIntentPrefetch = () => {
+    if (!prefetchHref || !onIntentPrefetch) {
+      return;
+    }
+
+    if (!canUseDesktopIntentPrefetch()) {
+      return;
+    }
+
+    clearPendingPrefetch();
+    prefetchTimerRef.current = setTimeout(() => {
+      prefetchTimerRef.current = null;
+      onIntentPrefetch(prefetchHref);
+    }, WORKSPACE_PREFETCH_DELAY_MS);
+  };
+
+  useEffect(
+    () => () => {
+      if (prefetchTimerRef.current !== null) {
+        clearTimeout(prefetchTimerRef.current);
+      }
+    },
+    [],
+  );
 
   return (
     <Link
@@ -85,6 +136,10 @@ function NavLink({
       title={label}
       aria-current={isActive ? "page" : undefined}
       onClick={onNavigate}
+      onMouseEnter={scheduleIntentPrefetch}
+      onMouseLeave={clearPendingPrefetch}
+      onFocus={scheduleIntentPrefetch}
+      onBlur={clearPendingPrefetch}
     >
       <span className="workspace-nav-icon">{icon}</span>
       <strong>{label}</strong>
@@ -436,6 +491,15 @@ export function WorkspaceShell({
     setIsMobileSidebarOpen(false);
   };
 
+  const handleNavLinkPrefetch = (href: string) => {
+    if (prefetchedWorkspaceHrefs.has(href)) {
+      return;
+    }
+
+    prefetchedWorkspaceHrefs.add(href);
+    router.prefetch(href);
+  };
+
   const notificationsNavItem = (
     <div className="workspace-nav-notifications">
       <div className="workspace-notifications" ref={notificationPopoverRef}>
@@ -535,7 +599,7 @@ export function WorkspaceShell({
 
           <nav id="workspace-primary-navigation" className="workspace-nav" aria-label="Primary">
             {navItems.map((item) => {
-              const { navigationHref } = resolveWorkspaceRouteTargets({
+              const { navigationHref, prefetchHref } = resolveWorkspaceRouteTargets({
                 href: item.href,
                 fallbackMonth: currentMonthKey,
                 selectedMonth,
@@ -549,6 +613,8 @@ export function WorkspaceShell({
                   label={item.label}
                   icon={item.icon}
                   onNavigate={handleNavLinkNavigate}
+                  prefetchHref={isMobileSidebarMode ? null : prefetchHref}
+                  onIntentPrefetch={handleNavLinkPrefetch}
                 />
               );
             })}
