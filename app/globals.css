@@ -2114,6 +2114,18 @@ button.workspace-nav-link {
   gap: 0.2rem;
 }
 
+.overtime-my-claims-modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.overtime-my-claims-modal__actions .ghost-button {
+  padding-inline: 0.75rem;
+}
+
 .overtime-my-claims-modal__row span:not(.legend-pill) {
   color: var(--muted);
   font-size: 0.86rem;

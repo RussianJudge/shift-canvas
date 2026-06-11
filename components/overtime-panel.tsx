@@ -34,6 +34,11 @@ type OvertimeTargetMode = "main" | "sub";
 type OvertimeTargetKey = "all" | "main" | `sub:${string}`;
 type OvertimeAvailabilityFilter = "all" | "available";
 type ClaimActionState = { postingId: string; action: "claim" | "release" } | null;
+type OptimisticClaimOverride = {
+  action: "claim" | "release";
+  employeeId: string;
+  employeeName: string;
+};
 
 const CLAIM_ACTION_TIMEOUT_MS = 25000;
 
@@ -173,6 +178,64 @@ function sanitizePostingLabels(
       posting.coverageCompetencyLabel,
       coverageAssignment?.label ?? claimedAssignment?.label ?? "Overtime",
     ),
+  };
+}
+
+function applyOptimisticClaimOverride(
+  posting: OvertimePosting,
+  override: OptimisticClaimOverride | undefined,
+): OvertimePosting {
+  if (!override) {
+    return posting;
+  }
+
+  const claimShiftCount = posting.dates.length;
+
+  if (override.action === "claim") {
+    if (posting.claimedEmployeeIds.includes(override.employeeId)) {
+      return posting;
+    }
+
+    const claimedEmployeeIds = [...posting.claimedEmployeeIds, override.employeeId];
+    const claimedByNames = [...posting.claimedByNames, override.employeeName];
+
+    return {
+      ...posting,
+      openShifts: Math.max(0, posting.openShifts - claimShiftCount),
+      claimedEmployeeId: posting.claimedEmployeeId ?? override.employeeId,
+      claimedByName: posting.claimedByName ?? override.employeeName,
+      claimedEmployeeIds,
+      claimedByNames,
+    };
+  }
+
+  if (!posting.claimedEmployeeIds.includes(override.employeeId)) {
+    return posting;
+  }
+
+  const retainedClaims = posting.claimedEmployeeIds.reduce<Array<{ employeeId: string; name: string }>>(
+    (claims, employeeId, index) => {
+      if (employeeId !== override.employeeId) {
+        claims.push({
+          employeeId,
+          name: posting.claimedByNames[index] ?? "Unknown worker",
+        });
+      }
+
+      return claims;
+    },
+    [],
+  );
+  const claimedEmployeeIds = retainedClaims.map((claim) => claim.employeeId);
+  const claimedByNames = retainedClaims.map((claim) => claim.name);
+
+  return {
+    ...posting,
+    openShifts: posting.openShifts + claimShiftCount,
+    claimedEmployeeId: claimedEmployeeIds[0] ?? null,
+    claimedByName: claimedByNames[0] ?? null,
+    claimedEmployeeIds,
+    claimedByNames,
   };
 }
 
@@ -637,6 +700,11 @@ function DeleteOvertimePostingModal({
 
 type MyOvertimeClaimRow = {
   id: string;
+  scheduleId: string | null;
+  subScheduleId: string | null;
+  employeeId: string;
+  competencyId: string | null;
+  timeCodeId: string | null;
   date: string;
   targetLabel: string;
   assignmentLabel: string;
@@ -657,9 +725,13 @@ type OvertimeCalendarPosting = {
 function MyOvertimeClaimsModal({
   claims,
   onClose,
+  onRelease,
+  releasingClaimId,
 }: {
   claims: MyOvertimeClaimRow[];
   onClose: () => void;
+  onRelease: (claim: MyOvertimeClaimRow) => void;
+  releasingClaimId: string | null;
 }) {
   return createPortal(
     <div className="assignment-modal-backdrop" onClick={onClose}>
@@ -687,7 +759,17 @@ function MyOvertimeClaimsModal({
                   <strong>{formatShortDate(claim.date)}</strong>
                   <span>{claim.targetLabel}</span>
                 </div>
-                <span className="legend-pill legend-pill--slate">{claim.assignmentLabel}</span>
+                <div className="overtime-my-claims-modal__actions">
+                  <span className="legend-pill legend-pill--slate">{claim.assignmentLabel}</span>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => onRelease(claim)}
+                    disabled={releasingClaimId === claim.id}
+                  >
+                    {releasingClaimId === claim.id ? "Releasing..." : "Release"}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1076,6 +1158,9 @@ export function OvertimePanel({
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [claimActionState, setClaimActionState] = useState<ClaimActionState>(null);
+  const [optimisticClaimOverrides, setOptimisticClaimOverrides] = useState<Record<string, OptimisticClaimOverride>>({});
+  const [releasingClaimId, setReleasingClaimId] = useState<string | null>(null);
+  const [optimisticallyReleasedClaimIds, setOptimisticallyReleasedClaimIds] = useState<string[]>([]);
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [isMyClaimsModalOpen, setIsMyClaimsModalOpen] = useState(false);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
@@ -1150,9 +1235,14 @@ export function OvertimePanel({
     () => Object.fromEntries(snapshot.timeCodes.map((timeCode) => [timeCode.id, timeCode])),
     [snapshot.timeCodes],
   );
+  useEffect(() => {
+    setOptimisticClaimOverrides({});
+    setOptimisticallyReleasedClaimIds([]);
+  }, [snapshot.assignments, snapshot.manualOvertimePostings, snapshot.overtimeClaims]);
   const futureClaimRows = useMemo<MyOvertimeClaimRow[]>(
     () =>
       futureOvertimeClaims
+        .filter((claim) => !optimisticallyReleasedClaimIds.includes(claim.id))
         .map((claim) => {
           const schedule = claim.scheduleId ? scheduleMap[claim.scheduleId] : null;
           const subSchedule = claim.subScheduleId ? subScheduleMap[claim.subScheduleId] : null;
@@ -1161,13 +1251,18 @@ export function OvertimePanel({
 
           return {
             id: claim.id,
+            scheduleId: claim.scheduleId,
+            subScheduleId: claim.subScheduleId ?? null,
+            employeeId: claim.employeeId,
+            competencyId: claim.competencyId,
+            timeCodeId: claim.timeCodeId ?? null,
             date: claim.date,
             targetLabel: subSchedule?.name ?? (schedule ? `Shift ${schedule.name}` : "Overtime"),
             assignmentLabel: competency?.code ?? timeCode?.code ?? "Overtime",
           };
         })
         .sort((left, right) => left.date.localeCompare(right.date) || left.assignmentLabel.localeCompare(right.assignmentLabel)),
-    [competencyMap, futureOvertimeClaims, scheduleMap, subScheduleMap, timeCodeMap],
+    [competencyMap, futureOvertimeClaims, optimisticallyReleasedClaimIds, scheduleMap, subScheduleMap, timeCodeMap],
   );
   const availableSubSchedules = useMemo(
     () => snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived),
@@ -1667,9 +1762,16 @@ export function OvertimePanel({
     snapshot.schedules,
     timeCodeMap,
   ]);
+  const displayPostings = useMemo(
+    () =>
+      postings.map((posting) =>
+        applyOptimisticClaimOverride(posting, optimisticClaimOverrides[posting.id]),
+      ),
+    [optimisticClaimOverrides, postings],
+  );
   const filteredPostings = useMemo(
     () =>
-      postings.filter((posting) => {
+      displayPostings.filter((posting) => {
         if (selectedTargetMode !== "all" && selectedTargetMode !== posting.targetMode) {
           return false;
         }
@@ -1692,7 +1794,7 @@ export function OvertimePanel({
 
         return true;
       }),
-    [availabilityFilter, postings, selectedAssignmentFilter, selectedSubScheduleFilter, selectedTargetMode],
+    [availabilityFilter, displayPostings, selectedAssignmentFilter, selectedSubScheduleFilter, selectedTargetMode],
   );
   const calendarPostings = useMemo<OvertimeCalendarPosting[]>(
     () =>
@@ -1757,16 +1859,16 @@ export function OvertimePanel({
 
   const claimingEmployee = claimingEmployeeId ? employeeMap[claimingEmployeeId] ?? null : null;
   const selectedEligibilityReportPosting = useMemo(
-    () => postings.find((posting) => posting.id === eligibilityReportPostingId) ?? null,
-    [eligibilityReportPostingId, postings],
+    () => displayPostings.find((posting) => posting.id === eligibilityReportPostingId) ?? null,
+    [displayPostings, eligibilityReportPostingId],
   );
   const selectedTurnaroundConfirmationPosting = useMemo(
-    () => postings.find((posting) => posting.id === turnaroundConfirmationPostingId) ?? null,
-    [postings, turnaroundConfirmationPostingId],
+    () => displayPostings.find((posting) => posting.id === turnaroundConfirmationPostingId) ?? null,
+    [displayPostings, turnaroundConfirmationPostingId],
   );
   const selectedDeletePosting = useMemo(
-    () => postings.find((posting) => posting.id === deletePostingId) ?? null,
-    [deletePostingId, postings],
+    () => displayPostings.find((posting) => posting.id === deletePostingId) ?? null,
+    [deletePostingId, displayPostings],
   );
   const eligibleEmployeesForReport = useMemo(
     () =>
@@ -1809,6 +1911,9 @@ export function OvertimePanel({
       return;
     }
 
+    const actingEmployeeId = claimingEmployeeId;
+    const actingEmployeeName = employeeMap[actingEmployeeId]?.name ?? viewer.displayName;
+
     setClaimActionState({ postingId: posting.id, action: "claim" });
     setStatusMessage("");
 
@@ -1818,7 +1923,7 @@ export function OvertimePanel({
           claimOvertimePosting({
             scheduleId: posting.scheduleId,
             subScheduleId: posting.subScheduleId,
-            employeeId: claimingEmployeeId,
+            employeeId: actingEmployeeId,
             competencyId: posting.competencyId,
             timeCodeId: posting.timeCodeId,
             coverageCompetencyId: posting.coverageCompetencyId,
@@ -1832,6 +1937,14 @@ export function OvertimePanel({
         setStatusMessage(result.message);
 
         if (result.ok) {
+          setOptimisticClaimOverrides((current) => ({
+            ...current,
+            [posting.id]: {
+              action: "claim",
+              employeeId: actingEmployeeId,
+              employeeName: actingEmployeeName,
+            },
+          }));
           router.refresh();
         }
       } catch (error) {
@@ -1879,6 +1992,9 @@ export function OvertimePanel({
       return;
     }
 
+    const actingEmployeeId = claimingEmployeeId;
+    const actingEmployeeName = employeeMap[actingEmployeeId]?.name ?? viewer.displayName;
+
     setClaimActionState({ postingId: posting.id, action: "release" });
     setStatusMessage("");
 
@@ -1888,7 +2004,7 @@ export function OvertimePanel({
           releaseOvertimePosting({
             scheduleId: posting.scheduleId,
             subScheduleId: posting.subScheduleId,
-            employeeId: claimingEmployeeId,
+            employeeId: actingEmployeeId,
             competencyId: posting.competencyId,
             timeCodeId: posting.timeCodeId,
             dates: posting.dates,
@@ -1898,6 +2014,14 @@ export function OvertimePanel({
         setStatusMessage(result.message);
 
         if (result.ok) {
+          setOptimisticClaimOverrides((current) => ({
+            ...current,
+            [posting.id]: {
+              action: "release",
+              employeeId: actingEmployeeId,
+              employeeName: actingEmployeeName,
+            },
+          }));
           router.refresh();
         }
       } catch (error) {
@@ -1910,6 +2034,45 @@ export function OvertimePanel({
         router.refresh();
       } finally {
         setClaimActionState(null);
+      }
+    })();
+  }
+
+  function handleReleaseClaimRow(claim: MyOvertimeClaimRow) {
+    setReleasingClaimId(claim.id);
+    setStatusMessage("");
+
+    void (async () => {
+      try {
+        const result = await withClaimTimeout(
+          releaseOvertimePosting({
+            scheduleId: claim.scheduleId,
+            subScheduleId: claim.subScheduleId,
+            employeeId: claim.employeeId,
+            competencyId: claim.competencyId,
+            timeCodeId: claim.timeCodeId,
+            dates: [claim.date],
+          }),
+        );
+
+        setStatusMessage(result.message);
+
+        if (result.ok) {
+          setOptimisticallyReleasedClaimIds((current) =>
+            current.includes(claim.id) ? current : [...current, claim.id],
+          );
+          router.refresh();
+        }
+      } catch (error) {
+        console.error("Could not release overtime claim", error);
+        setStatusMessage(
+          error instanceof Error
+            ? `${error.message} Refresh and check whether the release was saved before trying again.`
+            : "Could not release that overtime claim. Refresh and try again.",
+        );
+        router.refresh();
+      } finally {
+        setReleasingClaimId(null);
       }
     })();
   }
@@ -2391,6 +2554,8 @@ export function OvertimePanel({
         <MyOvertimeClaimsModal
           claims={futureClaimRows}
           onClose={() => setIsMyClaimsModalOpen(false)}
+          onRelease={handleReleaseClaimRow}
+          releasingClaimId={releasingClaimId}
         />
       ) : null}
 
