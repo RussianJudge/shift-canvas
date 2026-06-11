@@ -2907,6 +2907,49 @@ button.workspace-nav-link {
   gap: 0.65rem;
 }
 
+.personnel-cleanup-modal {
+  width: min(44rem, 100%);
+}
+
+.personnel-cleanup-modal__list {
+  display: grid;
+  gap: 0.65rem;
+  max-height: min(24rem, 52vh);
+  overflow-y: auto;
+  padding: 0.1rem;
+}
+
+.personnel-cleanup-modal__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.personnel-cleanup-modal__row div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.personnel-cleanup-modal__row div:last-child {
+  justify-items: end;
+  text-align: right;
+}
+
+.personnel-cleanup-modal__row strong {
+  font-size: 0.78rem;
+}
+
+.personnel-cleanup-modal__row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .set-completion-modal__list {
   display: grid;
   gap: 0.65rem;

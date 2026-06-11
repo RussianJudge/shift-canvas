@@ -62,6 +62,22 @@ type PendingAccountLink = {
   lastName: string;
 };
 
+type CompetencyCleanupImpact = {
+  id: string;
+  type: "Primary schedule" | "Sub-schedule" | "Overtime claim";
+  date: string;
+  targetLabel: string;
+  competencyLabel: string;
+};
+
+type PendingCompetencyRemoval = {
+  employeeId: string;
+  employeeName: string;
+  competencyId: string;
+  competencyLabel: string;
+  impacts: CompetencyCleanupImpact[];
+};
+
 const PERSONNEL_AUTO_SAVE_DEBOUNCE_MS = 2500;
 
 /** Creates the unsaved row shown at the top of the table before add/save. */
@@ -85,6 +101,14 @@ function createInviteDraft(): InviteDraft {
     lastName: "",
     email: "",
   };
+}
+
+function formatShortDate(isoDate: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
 function RemoveEmployeeModal({
@@ -126,6 +150,69 @@ function RemoveEmployeeModal({
           </button>
           <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
             Remove employee
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function CompetencyCleanupWarningModal({
+  removal,
+  onCancel,
+  onConfirm,
+}: {
+  removal: PendingCompetencyRemoval;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onCancel}>
+      <section
+        className="assignment-modal personnel-cleanup-modal"
+        aria-label="Removed competency cleanup warning"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Personnel</span>
+            <h2 className="assignment-modal__title">Remove competency?</h2>
+            <p className="assignment-modal__context">
+              Removing {removal.competencyLabel} from {removal.employeeName} will delete the following saved
+              shifts or overtime records.
+            </p>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+
+        <div className="personnel-cleanup-modal__list">
+          {removal.impacts.map((impact) => (
+            <div key={impact.id} className="personnel-cleanup-modal__row">
+              <div>
+                <strong>{impact.type}</strong>
+                <span>{impact.targetLabel}</span>
+              </div>
+              <div>
+                <strong>{impact.competencyLabel}</strong>
+                <span>{formatShortDate(impact.date)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            Keep competency
+          </button>
+          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+            Remove and delete listed records
           </button>
         </div>
       </section>
@@ -489,6 +576,7 @@ export function PersonnelPanel({
   const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
   const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
   const [pendingRemoveEmployeeId, setPendingRemoveEmployeeId] = useState<string | null>(null);
+  const [pendingCompetencyRemoval, setPendingCompetencyRemoval] = useState<PendingCompetencyRemoval | null>(null);
   const [showInviteBuilder, setShowInviteBuilder] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [inviteDraft, setInviteDraft] = useState<InviteDraft>(createInviteDraft);
@@ -504,6 +592,20 @@ export function PersonnelPanel({
   const scheduleNameById = useMemo(
     () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
     [snapshot.schedules],
+  );
+  const subScheduleNameById = useMemo(
+    () => Object.fromEntries(snapshot.subSchedules.map((subSchedule) => [subSchedule.id, subSchedule.name])),
+    [snapshot.subSchedules],
+  );
+  const competencyLabelById = useMemo(
+    () =>
+      Object.fromEntries(
+        snapshot.competencies.map((competency) => [
+          competency.id,
+          `${competency.code}${competency.label && competency.label !== competency.code ? ` · ${competency.label}` : ""}`,
+        ]),
+      ),
+    [snapshot.competencies],
   );
   const employeeOptions = useMemo(
     () =>
@@ -609,6 +711,7 @@ export function PersonnelPanel({
     setPendingCsvImport(null);
     setDraftEmployee(null);
     setPendingRemoveEmployeeId(null);
+    setPendingCompetencyRemoval(null);
     setShowInviteBuilder(false);
     setShowActionsMenu(false);
     setInviteDraft(createInviteDraft());
@@ -740,17 +843,89 @@ export function PersonnelPanel({
     );
   }
 
-  function toggleCompetency(employeeId: string, competencyId: string) {
-    updateEmployee(employeeId, (employee) => {
-      const isSelected = employee.competencyIds.includes(competencyId);
+  function getCompetencyRemovalImpacts(employeeId: string, competencyId: string) {
+    const competencyLabel = competencyLabelById[competencyId] ?? "Removed competency";
+    const mainScheduleImpacts = snapshot.assignments
+      .filter((assignment) => assignment.employeeId === employeeId && assignment.competencyId === competencyId)
+      .map<CompetencyCleanupImpact>((assignment) => ({
+        id: `main:${assignment.scheduleId}:${assignment.date}:${assignment.competencyId}`,
+        type: "Primary schedule",
+        date: assignment.date,
+        targetLabel: assignment.scheduleId ? `Shift ${scheduleNameById[assignment.scheduleId] ?? assignment.scheduleId}` : "Main schedule",
+        competencyLabel,
+      }));
+    const subScheduleImpacts = snapshot.subScheduleAssignments
+      .filter((assignment) => assignment.employeeId === employeeId && assignment.competencyId === competencyId)
+      .map<CompetencyCleanupImpact>((assignment) => ({
+        id: `sub:${assignment.subScheduleId}:${assignment.date}:${assignment.competencyId}`,
+        type: "Sub-schedule",
+        date: assignment.date,
+        targetLabel: subScheduleNameById[assignment.subScheduleId] ?? "Sub-schedule",
+        competencyLabel,
+      }));
+    const overtimeImpacts = snapshot.overtimeClaims
+      .filter((claim) => claim.employeeId === employeeId && claim.competencyId === competencyId)
+      .map<CompetencyCleanupImpact>((claim) => ({
+        id: `ot:${claim.id}`,
+        type: "Overtime claim",
+        date: claim.date,
+        targetLabel: claim.subScheduleId
+          ? subScheduleNameById[claim.subScheduleId] ?? "Sub-schedule"
+          : claim.scheduleId
+            ? `Shift ${scheduleNameById[claim.scheduleId] ?? claim.scheduleId}`
+            : "Overtime",
+        competencyLabel,
+      }));
 
-      return {
-        ...employee,
-        competencyIds: isSelected
-          ? employee.competencyIds.filter((id) => id !== competencyId)
-          : [...employee.competencyIds, competencyId],
-      };
-    });
+    return [...mainScheduleImpacts, ...subScheduleImpacts, ...overtimeImpacts].sort(
+      (left, right) => left.date.localeCompare(right.date) || left.type.localeCompare(right.type),
+    );
+  }
+
+  function toggleCompetency(employeeId: string, competencyId: string) {
+    const employee = employees.find((entry) => entry.id === employeeId);
+
+    if (!employee) {
+      return;
+    }
+
+    const isSelected = employee.competencyIds.includes(competencyId);
+
+    if (isSelected) {
+      const impacts = getCompetencyRemovalImpacts(employeeId, competencyId);
+
+      if (impacts.length > 0) {
+        setPendingCompetencyRemoval({
+          employeeId,
+          employeeName: getEditableEmployeeDisplayName(employee),
+          competencyId,
+          competencyLabel: competencyLabelById[competencyId] ?? "Removed competency",
+          impacts,
+        });
+        return;
+      }
+    }
+
+    updateEmployee(employeeId, (current) => ({
+      ...current,
+      competencyIds: isSelected
+        ? current.competencyIds.filter((id) => id !== competencyId)
+        : [...current.competencyIds, competencyId],
+    }));
+  }
+
+  function confirmCompetencyRemoval() {
+    if (!pendingCompetencyRemoval) {
+      return;
+    }
+
+    const { employeeId, competencyId } = pendingCompetencyRemoval;
+
+    setPendingCompetencyRemoval(null);
+    updateEmployee(employeeId, (employee) => ({
+      ...employee,
+      competencyIds: employee.competencyIds.filter((id) => id !== competencyId),
+    }));
   }
 
   useEffect(() => {
@@ -1702,6 +1877,13 @@ export function PersonnelPanel({
         employeeName={getEditableEmployeeDisplayName(pendingRemoveEmployee)}
         onCancel={() => setPendingRemoveEmployeeId(null)}
         onConfirm={handleConfirmRemoveEmployee}
+      />
+    ) : null}
+    {pendingCompetencyRemoval ? (
+      <CompetencyCleanupWarningModal
+        removal={pendingCompetencyRemoval}
+        onCancel={() => setPendingCompetencyRemoval(null)}
+        onConfirm={confirmCompetencyRemoval}
       />
     ) : null}
     {pendingAccountLink ? (
