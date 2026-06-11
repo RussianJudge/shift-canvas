@@ -1446,7 +1446,7 @@ export async function getFutureOvertimeClaimsForEmployee(
   today: string,
   session?: AppSession | null,
 ) {
-  if (!employeeId) {
+  if (session?.role === "worker" && !employeeId) {
     return [];
   }
 
@@ -1457,18 +1457,21 @@ export async function getFutureOvertimeClaimsForEmployee(
     return [];
   }
 
-  const result = await fetchAllRows<OvertimeClaimRow>(
-    applySessionScope(
-      supabase
-        .from("overtime_claims")
-        .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
-      session,
-    )
-      .eq("employee_id", employeeId)
+  let query = applySessionScope(
+    supabase
+      .from("overtime_claims")
+      .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+    session,
+  )
       .gt("assignment_date", today)
       .order("assignment_date")
-      .order("id"),
-  );
+      .order("id");
+
+  if (session?.role === "worker") {
+    query = query.eq("employee_id", employeeId ?? "");
+  }
+
+  const result = await fetchAllRows<OvertimeClaimRow>(query);
 
   if (result.error) {
     return [];

@@ -724,11 +724,13 @@ type OvertimeCalendarPosting = {
 
 function MyOvertimeClaimsModal({
   claims,
+  employeeName,
   onClose,
   onRelease,
   releasingClaimId,
 }: {
   claims: MyOvertimeClaimRow[];
+  employeeName: string;
   onClose: () => void;
   onRelease: (claim: MyOvertimeClaimRow) => void;
   releasingClaimId: string | null;
@@ -744,7 +746,7 @@ function MyOvertimeClaimsModal({
           <div>
             <span className="assignment-modal__eyebrow">Overtime</span>
             <h2 className="assignment-modal__title">My claims</h2>
-            <p className="assignment-modal__context">Future overtime claims after today.</p>
+            <p className="assignment-modal__context">Future overtime claims for {employeeName} after today.</p>
           </div>
           <button type="button" className="ghost-button" onClick={onClose}>
             Close
@@ -1242,6 +1244,7 @@ export function OvertimePanel({
   const futureClaimRows = useMemo<MyOvertimeClaimRow[]>(
     () =>
       futureOvertimeClaims
+        .filter((claim) => claim.employeeId === claimingEmployeeId)
         .filter((claim) => !optimisticallyReleasedClaimIds.includes(claim.id))
         .map((claim) => {
           const schedule = claim.scheduleId ? scheduleMap[claim.scheduleId] : null;
@@ -1262,7 +1265,15 @@ export function OvertimePanel({
           };
         })
         .sort((left, right) => left.date.localeCompare(right.date) || left.assignmentLabel.localeCompare(right.assignmentLabel)),
-    [competencyMap, futureOvertimeClaims, optimisticallyReleasedClaimIds, scheduleMap, subScheduleMap, timeCodeMap],
+    [
+      claimingEmployeeId,
+      competencyMap,
+      futureOvertimeClaims,
+      optimisticallyReleasedClaimIds,
+      scheduleMap,
+      subScheduleMap,
+      timeCodeMap,
+    ],
   );
   const availableSubSchedules = useMemo(
     () => snapshot.subSchedules.filter((subSchedule) => !subSchedule.isArchived),
@@ -2553,6 +2564,7 @@ export function OvertimePanel({
       {isMyClaimsModalOpen ? (
         <MyOvertimeClaimsModal
           claims={futureClaimRows}
+          employeeName={claimingEmployee?.name ?? viewer.displayName}
           onClose={() => setIsMyClaimsModalOpen(false)}
           onRelease={handleReleaseClaimRow}
           releasingClaimId={releasingClaimId}

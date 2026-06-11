@@ -567,6 +567,252 @@ async function clearClaimantAssignmentsForClaims(
   return { ok: true as const };
 }
 
+type RemovedEmployeeCompetencyCleanup = {
+  employeeId: string;
+  removedCompetencyIds: string[];
+};
+
+async function cleanupRemovedEmployeeCompetencyWork(
+  supabase: SupabaseAdminClient,
+  removals: RemovedEmployeeCompetencyCleanup[],
+) {
+  const effectiveRemovals = removals
+    .map((removal) => ({
+      employeeId: removal.employeeId,
+      removedCompetencyIds: Array.from(new Set(removal.removedCompetencyIds.filter(Boolean))),
+    }))
+    .filter((removal) => removal.removedCompetencyIds.length > 0);
+
+  if (effectiveRemovals.length === 0) {
+    return {
+      ok: true as const,
+      removedAssignments: 0,
+      removedSubScheduleAssignments: 0,
+      removedClaims: 0,
+      touchedMonths: [] as string[],
+    };
+  }
+
+  const removedCompetencyIdsByEmployee = new Map(
+    effectiveRemovals.map((removal) => [removal.employeeId, new Set(removal.removedCompetencyIds)]),
+  );
+  const employeeIds = effectiveRemovals.map((removal) => removal.employeeId);
+  const allRemovedCompetencyIds = Array.from(
+    new Set(effectiveRemovals.flatMap((removal) => removal.removedCompetencyIds)),
+  );
+  const touchedMonths = new Set<string>();
+  let removedAssignments = 0;
+  let removedSubScheduleAssignments = 0;
+  let removedClaims = 0;
+
+  const claimsResult = await supabase
+    .from("overtime_claims")
+    .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, company_id, site_id, business_area_id")
+    .in("employee_id", employeeIds)
+    .in("competency_id", allRemovedCompetencyIds);
+
+  if (claimsResult.error) {
+    return {
+      ok: false as const,
+      message: `Could not load overtime claims for removed competencies: ${claimsResult.error.message}`,
+      removedAssignments,
+      removedSubScheduleAssignments,
+      removedClaims,
+      touchedMonths: Array.from(touchedMonths),
+    };
+  }
+
+  const claimsToRemove = ((claimsResult.data as Array<{
+    id: string;
+    schedule_id: string | null;
+    sub_schedule_id: string | null;
+    employee_id: string;
+    competency_id: string | null;
+    time_code_id: string | null;
+    assignment_date: string;
+    company_id: string;
+    site_id: string;
+    business_area_id: string;
+  }> | null) ?? []).filter((claim) =>
+    Boolean(claim.competency_id && removedCompetencyIdsByEmployee.get(claim.employee_id)?.has(claim.competency_id)),
+  );
+
+  for (const claim of claimsToRemove) {
+    touchedMonths.add(claim.assignment_date.slice(0, 7));
+  }
+
+  const mainScheduleClaimsToRemove = claimsToRemove.filter(
+    (claim): claim is (typeof claimsToRemove)[number] & { schedule_id: string; competency_id: string } =>
+      Boolean(claim.schedule_id && claim.competency_id),
+  );
+  const subScheduleClaimsToRemove = claimsToRemove.filter(
+    (claim): claim is (typeof claimsToRemove)[number] & { sub_schedule_id: string; competency_id: string } =>
+      Boolean(claim.sub_schedule_id && claim.competency_id),
+  );
+
+  const restoreResult = await restoreSwappedAssignmentsForClaims(
+    supabase,
+    mainScheduleClaimsToRemove.map((claim) => ({
+      scheduleId: claim.schedule_id,
+      employeeId: claim.employee_id,
+      competencyId: claim.competency_id,
+      date: claim.assignment_date,
+    })),
+  );
+
+  if (!restoreResult.ok) {
+    return {
+      ok: false as const,
+      message: restoreResult.message,
+      removedAssignments,
+      removedSubScheduleAssignments,
+      removedClaims,
+      touchedMonths: Array.from(touchedMonths),
+    };
+  }
+
+  if (claimsToRemove.length > 0) {
+    const notificationRows = claimsToRemove.map<RemovedOvertimeClaimNotification>((claim) => ({
+      employeeId: claim.employee_id,
+      scheduleName: "Your",
+      assignmentLabel: "posting",
+      date: claim.assignment_date,
+      scope: {
+        companyId: claim.company_id,
+        siteId: claim.site_id,
+        businessAreaId: claim.business_area_id,
+      },
+    }));
+    const notificationResult = await createOvertimeRemovedNotifications(supabase, notificationRows);
+
+    if (!notificationResult.ok) {
+      console.error(notificationResult.message);
+    }
+
+    const claimDeleteResult = await supabase
+      .from("overtime_claims")
+      .delete()
+      .in("id", claimsToRemove.map((claim) => claim.id));
+
+    if (claimDeleteResult.error) {
+      return {
+        ok: false as const,
+        message: `Could not remove overtime claims for removed competencies: ${claimDeleteResult.error.message}`,
+        removedAssignments,
+        removedSubScheduleAssignments,
+        removedClaims,
+        touchedMonths: Array.from(touchedMonths),
+      };
+    }
+
+    removedClaims += claimsToRemove.length;
+  }
+
+  const clearMainOvertimeAssignmentsResult = await clearClaimantAssignmentsForClaims(
+    supabase,
+    mainScheduleClaimsToRemove.map((claim) => ({
+      scheduleId: claim.schedule_id,
+      employeeId: claim.employee_id,
+      competencyId: claim.competency_id,
+      date: claim.assignment_date,
+    })),
+  );
+
+  if (!clearMainOvertimeAssignmentsResult.ok) {
+    return {
+      ok: false as const,
+      message: clearMainOvertimeAssignmentsResult.message,
+      removedAssignments,
+      removedSubScheduleAssignments,
+      removedClaims,
+      touchedMonths: Array.from(touchedMonths),
+    };
+  }
+
+  const subOvertimeAssignmentDeleteResults = await Promise.all(
+    subScheduleClaimsToRemove.map((claim) =>
+      supabase
+        .from("sub_schedule_assignments")
+        .delete()
+        .eq("sub_schedule_id", claim.sub_schedule_id)
+        .eq("employee_id", claim.employee_id)
+        .eq("assignment_date", claim.assignment_date)
+        .eq("competency_id", claim.competency_id),
+    ),
+  );
+  const subOvertimeAssignmentDeleteError = subOvertimeAssignmentDeleteResults.find((result) => result.error)?.error;
+
+  if (subOvertimeAssignmentDeleteError) {
+    return {
+      ok: false as const,
+      message: `Could not clear sub-schedule overtime assignments for removed competencies: ${subOvertimeAssignmentDeleteError.message}`,
+      removedAssignments,
+      removedSubScheduleAssignments,
+      removedClaims,
+      touchedMonths: Array.from(touchedMonths),
+    };
+  }
+
+  const mainAssignmentDeleteResults = await Promise.all(
+    effectiveRemovals.map((removal) =>
+      supabase
+        .from("schedule_assignments")
+        .delete({ count: "exact" })
+        .eq("employee_id", removal.employeeId)
+        .in("competency_id", removal.removedCompetencyIds),
+    ),
+  );
+  const mainAssignmentDeleteError = mainAssignmentDeleteResults.find((result) => result.error)?.error;
+
+  if (mainAssignmentDeleteError) {
+    return {
+      ok: false as const,
+      message: `Could not clear main schedule assignments for removed competencies: ${mainAssignmentDeleteError.message}`,
+      removedAssignments,
+      removedSubScheduleAssignments,
+      removedClaims,
+      touchedMonths: Array.from(touchedMonths),
+    };
+  }
+
+  removedAssignments += mainAssignmentDeleteResults.reduce((count, result) => count + (result.count ?? 0), 0);
+
+  const subScheduleAssignmentDeleteResults = await Promise.all(
+    effectiveRemovals.map((removal) =>
+      supabase
+        .from("sub_schedule_assignments")
+        .delete({ count: "exact" })
+        .eq("employee_id", removal.employeeId)
+        .in("competency_id", removal.removedCompetencyIds),
+    ),
+  );
+  const subScheduleAssignmentDeleteError = subScheduleAssignmentDeleteResults.find((result) => result.error)?.error;
+
+  if (subScheduleAssignmentDeleteError) {
+    return {
+      ok: false as const,
+      message: `Could not clear sub-schedule assignments for removed competencies: ${subScheduleAssignmentDeleteError.message}`,
+      removedAssignments,
+      removedSubScheduleAssignments,
+      removedClaims,
+      touchedMonths: Array.from(touchedMonths),
+    };
+  }
+
+  removedSubScheduleAssignments += subScheduleAssignmentDeleteResults.reduce(
+    (count, result) => count + (result.count ?? 0),
+    0,
+  );
+
+  return {
+    ok: true as const,
+    removedAssignments,
+    removedSubScheduleAssignments,
+    removedClaims,
+    touchedMonths: Array.from(touchedMonths),
+  };
+}
+
 /** Shared role gate for server actions. Returns null instead of redirecting. */
 async function requireActionRole(allowedRoles: AppRole[]) {
   const session = await getAppSession();
@@ -4403,9 +4649,10 @@ export async function savePersonnel(input: SavePersonnelInput) {
   const competencyIds = Array.from(
     new Set(input.updates.flatMap((update) => update.competencyIds).filter(Boolean)),
   );
+  const employeeIdsToUpdate = Array.from(new Set(input.updates.map((update) => update.employeeId).filter(Boolean)));
   const employeeIdsToDelete = Array.from(new Set(input.deletedEmployeeIds.filter(Boolean)));
 
-  const [scheduleRowsResult, competencyRowsResult, deleteEmployeeRowsResult] = await Promise.all([
+  const [scheduleRowsResult, competencyRowsResult, existingEmployeeCompetenciesResult, deleteEmployeeRowsResult] = await Promise.all([
     scheduleIds.length > 0
       ? supabase
           .from("schedules")
@@ -4418,6 +4665,12 @@ export async function savePersonnel(input: SavePersonnelInput) {
           .select("id, company_id, site_id, business_area_id")
           .in("id", competencyIds)
       : Promise.resolve({ data: [], error: null }),
+    employeeIdsToUpdate.length > 0
+      ? supabase
+          .from("employee_competencies")
+          .select("employee_id, competency_id")
+          .in("employee_id", employeeIdsToUpdate)
+      : Promise.resolve({ data: [], error: null }),
     employeeIdsToDelete.length > 0
       ? supabase
           .from("employees")
@@ -4428,6 +4681,8 @@ export async function savePersonnel(input: SavePersonnelInput) {
 
   const scheduleScopeRows = (scheduleRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
   const competencyScopeRows = (competencyRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+  const existingEmployeeCompetencyRows =
+    (existingEmployeeCompetenciesResult.data as Array<{ employee_id: string; competency_id: string }> | null) ?? [];
   const deleteEmployeeScopeRows = (deleteEmployeeRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
 
   if (scheduleRowsResult.error || scheduleScopeRows.length !== scheduleIds.length) {
@@ -4444,6 +4699,13 @@ export async function savePersonnel(input: SavePersonnelInput) {
     };
   }
 
+  if (existingEmployeeCompetenciesResult.error) {
+    return {
+      ok: false,
+      message: "Could not load current employee competencies for cleanup.",
+    };
+  }
+
   if (deleteEmployeeRowsResult.error || deleteEmployeeScopeRows.length !== employeeIdsToDelete.length) {
     return {
       ok: false,
@@ -4453,6 +4715,21 @@ export async function savePersonnel(input: SavePersonnelInput) {
 
   const scheduleScopeMap = new Map(scheduleScopeRows.map((row) => [row.id, scopeFromRow(row)]));
   const competencyScopeMap = new Map(competencyScopeRows.map((row) => [row.id, scopeFromRow(row)]));
+  const existingCompetencyIdsByEmployee = existingEmployeeCompetencyRows.reduce<Record<string, string[]>>((map, row) => {
+    map[row.employee_id] ??= [];
+    map[row.employee_id].push(row.competency_id);
+    return map;
+  }, {});
+  const removedCompetencyCleanup = input.updates.map<RemovedEmployeeCompetencyCleanup>((update) => {
+    const nextCompetencyIds = new Set(update.competencyIds);
+
+    return {
+      employeeId: update.employeeId,
+      removedCompetencyIds: (existingCompetencyIdsByEmployee[update.employeeId] ?? []).filter(
+        (competencyId) => !nextCompetencyIds.has(competencyId),
+      ),
+    };
+  });
 
   for (const scheduleScope of scheduleScopeMap.values()) {
     if (!canAccessScope(session, scheduleScope)) {
@@ -4575,6 +4852,18 @@ export async function savePersonnel(input: SavePersonnelInput) {
     };
   }
 
+  const removedCompetencyCleanupResult = await cleanupRemovedEmployeeCompetencyWork(
+    supabase,
+    removedCompetencyCleanup,
+  );
+
+  if (!removedCompetencyCleanupResult.ok) {
+    return {
+      ok: false,
+      message: `Personnel competencies were saved, but cleanup failed: ${removedCompetencyCleanupResult.message}`,
+    };
+  }
+
   if (input.deletedEmployeeIds.length > 0) {
     const { error: deleteError } = await supabase
       .from("employees")
@@ -4590,11 +4879,30 @@ export async function savePersonnel(input: SavePersonnelInput) {
   }
 
   revalidatePath("/schedule");
+  revalidatePath("/sub-schedules");
+  revalidatePath("/overtime");
+  revalidatePath("/metrics");
+  revalidatePath("/notifications");
   revalidatePath("/personnel");
+
+  const cleanupSummaryParts = [
+    removedCompetencyCleanupResult.removedClaims > 0
+      ? `${removedCompetencyCleanupResult.removedClaims} overtime claim${removedCompetencyCleanupResult.removedClaims === 1 ? "" : "s"}`
+      : "",
+    removedCompetencyCleanupResult.removedAssignments > 0
+      ? `${removedCompetencyCleanupResult.removedAssignments} main schedule assignment${removedCompetencyCleanupResult.removedAssignments === 1 ? "" : "s"}`
+      : "",
+    removedCompetencyCleanupResult.removedSubScheduleAssignments > 0
+      ? `${removedCompetencyCleanupResult.removedSubScheduleAssignments} sub-schedule assignment${removedCompetencyCleanupResult.removedSubScheduleAssignments === 1 ? "" : "s"}`
+      : "",
+  ].filter(Boolean);
 
   return {
     ok: true,
-    message: "Personnel changes saved to Supabase.",
+    message:
+      cleanupSummaryParts.length > 0
+        ? `Personnel changes saved to Supabase. Cleaned up ${cleanupSummaryParts.join(", ")} tied to removed competencies.`
+        : "Personnel changes saved to Supabase.",
   };
 }
 
