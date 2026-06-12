@@ -12,7 +12,18 @@ const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
 const WORKSPACE_PREFETCH_DELAY_MS = 200;
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
-const PREFETCH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals"]);
+const PREFETCH_ROUTE_HREFS = new Set([
+  "/schedule",
+  "/overtime",
+  "/mutuals",
+  "/sub-schedules",
+  "/personnel",
+  "/schedules",
+  "/competencies",
+  "/time-codes",
+  "/metrics",
+  "/profile",
+]);
 const prefetchedWorkspaceHrefs = new Set<string>();
 
 function isNotification(value: unknown): value is AppNotification {
