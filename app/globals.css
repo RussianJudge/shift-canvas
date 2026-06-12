@@ -2004,6 +2004,7 @@ button.workspace-nav-link {
 .metrics-transfer-modal__body {
   display: grid;
   gap: 1rem;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding-right: 0.25rem;
@@ -2083,6 +2084,37 @@ button.workspace-nav-link {
   align-items: center;
   justify-content: space-between;
   gap: 0.85rem;
+}
+
+.metrics-transfer-competency-group {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.metrics-transfer-competency-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.metrics-transfer-competency-summary {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.metrics-transfer-competency-toggle {
+  min-height: 2.1rem;
+  padding: 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.metrics-transfer-competency-options {
+  padding-top: 0.65rem;
 }
 
 .metrics-transfer-competency-option {

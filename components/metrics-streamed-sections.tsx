@@ -50,6 +50,10 @@ function areMetricOptionsEqual<T extends { id: string }>(left: T[], right: T[]) 
   return left.length === right.length && left.every((entry, index) => entry.id === right[index]?.id);
 }
 
+function areIdArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
 function SettingsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -61,9 +65,10 @@ function SettingsIcon() {
 
 function useMetricsSettings(snapshot: SchedulerSnapshot) {
   const settings = useContext(MetricsSettingsContext);
+  const { registerSettingsOptions } = settings;
 
   useEffect(() => {
-    settings.registerSettingsOptions({
+    registerSettingsOptions({
       schedules: snapshot.schedules.map((schedule) => ({
         id: schedule.id,
         name: schedule.name,
@@ -75,7 +80,7 @@ function useMetricsSettings(snapshot: SchedulerSnapshot) {
         colorToken: competency.colorToken,
       })),
     });
-  }, [settings, snapshot.competencies, snapshot.schedules]);
+  }, [registerSettingsOptions, snapshot.competencies, snapshot.schedules]);
 
   return settings;
 }
@@ -142,12 +147,22 @@ export function MetricsPageFrame({
       setTeamOptions((current) => (areMetricOptionsEqual(current, schedules) ? current : schedules));
       setCompetencyOptions((current) => (areMetricOptionsEqual(current, competencies) ? current : competencies));
       setIncludedTeamIds((current) =>
-        current === null ? current : current.filter((teamId) => schedules.some((schedule) => schedule.id === teamId)),
+        current === null
+          ? current
+          : (() => {
+              const nextIds = current.filter((teamId) => schedules.some((schedule) => schedule.id === teamId));
+              return areIdArraysEqual(current, nextIds) ? current : nextIds;
+            })(),
       );
       setIncludedCompetencyIds((current) =>
         current === null
           ? current
-          : current.filter((competencyId) => competencies.some((competency) => competency.id === competencyId)),
+          : (() => {
+              const nextIds = current.filter((competencyId) =>
+                competencies.some((competency) => competency.id === competencyId),
+              );
+              return areIdArraysEqual(current, nextIds) ? current : nextIds;
+            })(),
       );
     },
     [],
@@ -345,6 +360,7 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
   const [sourceScheduleId, setSourceScheduleId] = useState(snapshot.schedules[0]?.id ?? "");
   const [targetScheduleId, setTargetScheduleId] = useState(snapshot.schedules[1]?.id ?? snapshot.schedules[0]?.id ?? "");
   const [selectedTransferCompetencyIds, setSelectedTransferCompetencyIds] = useState<string[]>([]);
+  const [areTransferCompetenciesCollapsed, setAreTransferCompetenciesCollapsed] = useState(false);
   const [transferSuggestions, setTransferSuggestions] = useState<TransferSuggestion[]>([]);
   const [selectedTransferSuggestionIndex, setSelectedTransferSuggestionIndex] = useState(0);
   const [transferMessage, setTransferMessage] = useState("");
@@ -383,6 +399,8 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
   }
 
   function handleCalculateTransfer() {
+    setAreTransferCompetenciesCollapsed(true);
+
     if (!sourceScheduleId || !targetScheduleId || sourceScheduleId === targetScheduleId) {
       setTransferSuggestions([]);
       setSelectedTransferSuggestionIndex(0);
@@ -431,7 +449,14 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
       <div className="metrics-section__header">
         <div className="metrics-section__title-group">
           <h2 className="metrics-section__title">Competencies By Team</h2>
-          <button type="button" className="ghost-button" onClick={() => setIsTransferModalOpen(true)}>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => {
+              setAreTransferCompetenciesCollapsed(false);
+              setIsTransferModalOpen(true);
+            }}
+          >
             Shift Transfer
           </button>
         </div>
@@ -596,30 +621,47 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                     </label>
                   </div>
 
-                  <div className="assignment-modal__group">
-                    <span className="assignment-modal__label">Include competencies</span>
-                    <div className="assignment-modal__options">
-                      {snapshot.competencies.map((competency) => {
-                        const isSelected = selectedTransferCompetencyIds.includes(competency.id);
-
-                        return (
-                          <button
-                            key={competency.id}
-                            type="button"
-                            className={`metrics-transfer-competency-option ${
-                              isSelected ? "metrics-transfer-competency-option--active" : ""
-                            }`}
-                            aria-pressed={isSelected}
-                            onClick={() => toggleTransferCompetency(competency.id)}
-                          >
-                            <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
-                              {competency.code}
-                            </span>
-                            <span>{competency.label}</span>
-                          </button>
-                        );
-                      })}
+                  <div className="assignment-modal__group metrics-transfer-competency-group">
+                    <div className="metrics-transfer-competency-header">
+                      <div>
+                        <span className="assignment-modal__label">Include competencies</span>
+                        <p className="metrics-transfer-competency-summary">
+                          {selectedTransferCompetencyIds.length} selected
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="ghost-button metrics-transfer-competency-toggle"
+                        onClick={() => setAreTransferCompetenciesCollapsed((current) => !current)}
+                      >
+                        {areTransferCompetenciesCollapsed ? "Show" : "Hide"}
+                      </button>
                     </div>
+
+                    {!areTransferCompetenciesCollapsed ? (
+                      <div className="assignment-modal__options metrics-transfer-competency-options">
+                        {snapshot.competencies.map((competency) => {
+                          const isSelected = selectedTransferCompetencyIds.includes(competency.id);
+
+                          return (
+                            <button
+                              key={competency.id}
+                              type="button"
+                              className={`metrics-transfer-competency-option ${
+                                isSelected ? "metrics-transfer-competency-option--active" : ""
+                              }`}
+                              aria-pressed={isSelected}
+                              onClick={() => toggleTransferCompetency(competency.id)}
+                            >
+                              <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
+                                {competency.code}
+                              </span>
+                              <span>{competency.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="assignment-modal__actions">
