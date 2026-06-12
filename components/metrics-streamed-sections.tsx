@@ -352,33 +352,24 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
     scheduleId: string;
     competencyId: string;
   } | null>(null);
-  const visibleSchedules = useMemo(
-    () => snapshot.schedules.filter((schedule) => includedTeamIds.has(schedule.id)),
-    [includedTeamIds, snapshot.schedules],
-  );
-  const visibleCompetencies = useMemo(
-    () => snapshot.competencies.filter((competency) => includedCompetencyIds.has(competency.id)),
-    [includedCompetencyIds, snapshot.competencies],
-  );
-
   useEffect(() => {
     setSourceScheduleId((current) =>
-      visibleSchedules.some((schedule) => schedule.id === current) ? current : visibleSchedules[0]?.id ?? "",
+      snapshot.schedules.some((schedule) => schedule.id === current) ? current : snapshot.schedules[0]?.id ?? "",
     );
     setTargetScheduleId((current) => {
-      if (visibleSchedules.some((schedule) => schedule.id === current)) {
+      if (snapshot.schedules.some((schedule) => schedule.id === current)) {
         return current;
       }
 
-      return visibleSchedules[1]?.id ?? visibleSchedules[0]?.id ?? "";
+      return snapshot.schedules[1]?.id ?? snapshot.schedules[0]?.id ?? "";
     });
     setSelectedTransferCompetencyIds((current) =>
-      current.filter((competencyId) => visibleCompetencies.some((competency) => competency.id === competencyId)),
+      current.filter((competencyId) => snapshot.competencies.some((competency) => competency.id === competencyId)),
     );
     setTransferSuggestions([]);
     setSelectedTransferSuggestionIndex(0);
     setTransferMessage("");
-  }, [snapshot, visibleCompetencies, visibleSchedules]);
+  }, [snapshot]);
 
   function toggleTransferCompetency(competencyId: string) {
     setSelectedTransferCompetencyIds((current) =>
@@ -577,7 +568,7 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                           setTransferMessage("");
                         }}
                       >
-                        {visibleSchedules.map((schedule) => (
+                        {snapshot.schedules.map((schedule) => (
                           <option key={schedule.id} value={schedule.id}>
                             {schedule.name}
                           </option>
@@ -596,7 +587,7 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                           setTransferMessage("");
                         }}
                       >
-                        {visibleSchedules.map((schedule) => (
+                        {snapshot.schedules.map((schedule) => (
                           <option key={schedule.id} value={schedule.id}>
                             {schedule.name}
                           </option>
@@ -608,7 +599,7 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                   <div className="assignment-modal__group">
                     <span className="assignment-modal__label">Include competencies</span>
                     <div className="assignment-modal__options">
-                      {visibleCompetencies.map((competency) => {
+                      {snapshot.competencies.map((competency) => {
                         const isSelected = selectedTransferCompetencyIds.includes(competency.id);
 
                         return (
