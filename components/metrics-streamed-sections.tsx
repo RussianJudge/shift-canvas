@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
@@ -26,7 +26,95 @@ import {
   type TransferSuggestion,
 } from "@/components/metrics-panel";
 import { formatMonthLabel, shiftMonthKey } from "@/lib/scheduling";
-import type { OvertimeClaim, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
+import type { Competency, OvertimeClaim, Schedule, SchedulerSnapshot, StoredAssignment } from "@/lib/types";
+
+type MetricsSettingsTeamOption = Pick<Schedule, "id" | "name">;
+type MetricsSettingsCompetencyOption = Pick<Competency, "id" | "code" | "label" | "colorToken">;
+type MetricsSettingsContextValue = {
+  includedTeamIds: Set<string>;
+  includedCompetencyIds: Set<string>;
+  registerSettingsOptions: (input: {
+    schedules: MetricsSettingsTeamOption[];
+    competencies: MetricsSettingsCompetencyOption[];
+  }) => void;
+};
+
+const EMPTY_METRICS_SETTINGS: MetricsSettingsContextValue = {
+  includedTeamIds: new Set<string>(),
+  includedCompetencyIds: new Set<string>(),
+  registerSettingsOptions: () => {},
+};
+const MetricsSettingsContext = createContext<MetricsSettingsContextValue>(EMPTY_METRICS_SETTINGS);
+
+function areMetricOptionsEqual<T extends { id: string }>(left: T[], right: T[]) {
+  return left.length === right.length && left.every((entry, index) => entry.id === right[index]?.id);
+}
+
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8.25a3.75 3.75 0 1 1 0 7.5a3.75 3.75 0 0 1 0-7.5Z" />
+      <path d="M19.5 12a7.46 7.46 0 0 0-.15-1.5l2.1-1.62l-2-3.46l-2.48 1a7.6 7.6 0 0 0-2.6-1.5L14 2.25h-4l-.38 2.67a7.6 7.6 0 0 0-2.6 1.5l-2.48-1l-2 3.46l2.1 1.62a7.4 7.4 0 0 0 0 3l-2.1 1.62l2 3.46l2.48-1a7.6 7.6 0 0 0 2.6 1.5l.38 2.67h4l.38-2.67a7.6 7.6 0 0 0 2.6-1.5l2.48 1l2-3.46l-2.1-1.62c.1-.49.15-.99.15-1.5Z" />
+    </svg>
+  );
+}
+
+function useMetricsSettings(snapshot: SchedulerSnapshot) {
+  const settings = useContext(MetricsSettingsContext);
+
+  useEffect(() => {
+    settings.registerSettingsOptions({
+      schedules: snapshot.schedules.map((schedule) => ({
+        id: schedule.id,
+        name: schedule.name,
+      })),
+      competencies: snapshot.competencies.map((competency) => ({
+        id: competency.id,
+        code: competency.code,
+        label: competency.label,
+        colorToken: competency.colorToken,
+      })),
+    });
+  }, [settings, snapshot.competencies, snapshot.schedules]);
+
+  return settings;
+}
+
+function filterTeamMetricsBySettings<T extends { scheduleId: string }>(
+  teamMetrics: T[],
+  includedTeamIds: Set<string>,
+  includedCompetencyIds: Set<string>,
+): T[] {
+  return teamMetrics
+    .filter((team) => includedTeamIds.has(team.scheduleId))
+    .map((team) => {
+      const nextTeam = { ...team } as T & {
+        competencyMetrics?: Array<{ competencyId: string }>;
+        shiftFragilityMetrics?: Array<{ competencyId: string }>;
+        topOvertimeCompetencies?: Array<{ competencyId: string }>;
+      };
+
+      if (Array.isArray(nextTeam.competencyMetrics)) {
+        nextTeam.competencyMetrics = nextTeam.competencyMetrics.filter((metric) =>
+          includedCompetencyIds.has(metric.competencyId),
+        );
+      }
+
+      if (Array.isArray(nextTeam.shiftFragilityMetrics)) {
+        nextTeam.shiftFragilityMetrics = nextTeam.shiftFragilityMetrics.filter((metric) =>
+          includedCompetencyIds.has(metric.competencyId),
+        );
+      }
+
+      if (Array.isArray(nextTeam.topOvertimeCompetencies)) {
+        nextTeam.topOvertimeCompetencies = nextTeam.topOvertimeCompetencies.filter((metric) =>
+          includedCompetencyIds.has(metric.competencyId),
+        );
+      }
+
+      return nextTeam;
+    });
+}
 
 export function MetricsPageFrame({
   month,
@@ -36,47 +124,218 @@ export function MetricsPageFrame({
   children: ReactNode;
 }) {
   const router = useRouter();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [teamOptions, setTeamOptions] = useState<MetricsSettingsTeamOption[]>([]);
+  const [competencyOptions, setCompetencyOptions] = useState<MetricsSettingsCompetencyOption[]>([]);
+  const [includedTeamIds, setIncludedTeamIds] = useState<string[] | null>(null);
+  const [includedCompetencyIds, setIncludedCompetencyIds] = useState<string[] | null>(null);
+  const effectiveIncludedTeamIds = useMemo(
+    () => new Set(includedTeamIds ?? teamOptions.map((team) => team.id)),
+    [includedTeamIds, teamOptions],
+  );
+  const effectiveIncludedCompetencyIds = useMemo(
+    () => new Set(includedCompetencyIds ?? competencyOptions.map((competency) => competency.id)),
+    [competencyOptions, includedCompetencyIds],
+  );
+  const registerSettingsOptions = useCallback<MetricsSettingsContextValue["registerSettingsOptions"]>(
+    ({ schedules, competencies }) => {
+      setTeamOptions((current) => (areMetricOptionsEqual(current, schedules) ? current : schedules));
+      setCompetencyOptions((current) => (areMetricOptionsEqual(current, competencies) ? current : competencies));
+      setIncludedTeamIds((current) =>
+        current === null ? current : current.filter((teamId) => schedules.some((schedule) => schedule.id === teamId)),
+      );
+      setIncludedCompetencyIds((current) =>
+        current === null
+          ? current
+          : current.filter((competencyId) => competencies.some((competency) => competency.id === competencyId)),
+      );
+    },
+    [],
+  );
+  const metricsSettings = useMemo<MetricsSettingsContextValue>(
+    () => ({
+      includedTeamIds: effectiveIncludedTeamIds,
+      includedCompetencyIds: effectiveIncludedCompetencyIds,
+      registerSettingsOptions,
+    }),
+    [effectiveIncludedCompetencyIds, effectiveIncludedTeamIds, registerSettingsOptions],
+  );
 
   function navigateMonth(delta: number) {
     const nextMonth = shiftMonthKey(month, delta);
     router.push(`/metrics?month=${nextMonth}`, { scroll: false });
   }
 
-  return (
-    <section className="panel-frame">
-      <div className="panel-heading panel-heading--split">
-        <h1 className="panel-title">Metrics</h1>
-        <div className="schedule-heading-month metrics-month-pager" aria-label="Metrics month">
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--previous"
-            onClick={() => navigateMonth(-1)}
-            aria-label="Previous month"
-          >
-            ‹
-          </button>
-          <strong className="panel-title schedule-heading-month__label">{formatMonthLabel(month)}</strong>
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--next"
-            onClick={() => navigateMonth(1)}
-            aria-label="Next month"
-          >
-            ›
-          </button>
-        </div>
-      </div>
+  function toggleTeam(teamId: string) {
+    setIncludedTeamIds((current) => {
+      const allIds = teamOptions.map((team) => team.id);
+      const nextIds = new Set(current ?? allIds);
 
-      <div className="metrics-grid">{children}</div>
-    </section>
+      if (nextIds.has(teamId)) {
+        nextIds.delete(teamId);
+      } else {
+        nextIds.add(teamId);
+      }
+
+      return allIds.filter((id) => nextIds.has(id));
+    });
+  }
+
+  function toggleCompetency(competencyId: string) {
+    setIncludedCompetencyIds((current) => {
+      const allIds = competencyOptions.map((competency) => competency.id);
+      const nextIds = new Set(current ?? allIds);
+
+      if (nextIds.has(competencyId)) {
+        nextIds.delete(competencyId);
+      } else {
+        nextIds.add(competencyId);
+      }
+
+      return allIds.filter((id) => nextIds.has(id));
+    });
+  }
+
+  return (
+    <MetricsSettingsContext.Provider value={metricsSettings}>
+      <section className="panel-frame">
+        <div className="panel-heading panel-heading--split">
+          <div className="metrics-page-title">
+            <h1 className="panel-title">Metrics</h1>
+            <button
+              type="button"
+              className="ghost-button icon-button metrics-settings-button"
+              onClick={() => setIsSettingsOpen(true)}
+              aria-label="Metrics settings"
+              title="Metrics settings"
+            >
+              <SettingsIcon />
+            </button>
+          </div>
+          <div className="schedule-heading-month metrics-month-pager" aria-label="Metrics month">
+            <button
+              type="button"
+              className="schedule-heading-month__button schedule-heading-month__button--previous"
+              onClick={() => navigateMonth(-1)}
+              aria-label="Previous month"
+            >
+              ‹
+            </button>
+            <strong className="panel-title schedule-heading-month__label">{formatMonthLabel(month)}</strong>
+            <button
+              type="button"
+              className="schedule-heading-month__button schedule-heading-month__button--next"
+              onClick={() => navigateMonth(1)}
+              aria-label="Next month"
+            >
+              ›
+            </button>
+          </div>
+        </div>
+
+        <div className="metrics-grid">{children}</div>
+
+        {isSettingsOpen && typeof document !== "undefined"
+          ? createPortal(
+              <div className="assignment-modal-backdrop" onClick={() => setIsSettingsOpen(false)}>
+                <section
+                  className="assignment-modal metrics-settings-modal"
+                  aria-label="Metrics settings"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="assignment-modal__header">
+                    <div>
+                      <h2 className="assignment-modal__title">Metrics settings</h2>
+                      <p className="assignment-modal__context">
+                        Choose which teams and competencies are included in the Metrics cards.
+                      </p>
+                    </div>
+                    <button type="button" className="ghost-button" onClick={() => setIsSettingsOpen(false)}>
+                      Close
+                    </button>
+                  </div>
+
+                  {teamOptions.length === 0 && competencyOptions.length === 0 ? (
+                    <p className="metrics-top-list__empty">Metrics settings will be available once the page data loads.</p>
+                  ) : (
+                    <>
+                      <div className="assignment-modal__group">
+                        <div className="metrics-settings-modal__group-heading">
+                          <span className="assignment-modal__label">Included teams</span>
+                          <button type="button" className="ghost-button" onClick={() => setIncludedTeamIds(null)}>
+                            Select all
+                          </button>
+                        </div>
+                        <div className="metrics-settings-modal__options">
+                          {teamOptions.map((team) => {
+                            const isSelected = effectiveIncludedTeamIds.has(team.id);
+
+                            return (
+                              <button
+                                key={team.id}
+                                type="button"
+                                className={`metrics-settings-option ${isSelected ? "metrics-settings-option--active" : ""}`}
+                                aria-pressed={isSelected}
+                                onClick={() => toggleTeam(team.id)}
+                              >
+                                <span>{isSelected ? "Included" : "Hidden"}</span>
+                                <strong>Shift {team.name}</strong>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="assignment-modal__group">
+                        <div className="metrics-settings-modal__group-heading">
+                          <span className="assignment-modal__label">Included competencies</span>
+                          <button type="button" className="ghost-button" onClick={() => setIncludedCompetencyIds(null)}>
+                            Select all
+                          </button>
+                        </div>
+                        <div className="metrics-settings-modal__options">
+                          {competencyOptions.map((competency) => {
+                            const isSelected = effectiveIncludedCompetencyIds.has(competency.id);
+
+                            return (
+                              <button
+                                key={competency.id}
+                                type="button"
+                                className={`metrics-settings-option ${isSelected ? "metrics-settings-option--active" : ""}`}
+                                aria-pressed={isSelected}
+                                onClick={() => toggleCompetency(competency.id)}
+                              >
+                                <span className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()}`}>
+                                  {competency.code}
+                                </span>
+                                <strong>{competency.label}</strong>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </section>
+              </div>,
+              document.body,
+            )
+          : null}
+      </section>
+    </MetricsSettingsContext.Provider>
   );
 }
 
 export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSnapshot }) {
+  const { includedTeamIds, includedCompetencyIds } = useMetricsSettings(snapshot);
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
-  const teamMetrics = useMemo(
+  const allTeamMetrics = useMemo(
     () => getTeamMetrics(snapshot, [], [], metricsAnchorDate),
     [metricsAnchorDate, snapshot],
+  );
+  const teamMetrics = useMemo(
+    () => filterTeamMetricsBySettings(allTeamMetrics, includedTeamIds, includedCompetencyIds),
+    [allTeamMetrics, includedCompetencyIds, includedTeamIds],
   );
   const maxQualifiedPeople = Math.max(
     1,
@@ -93,25 +352,33 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
     scheduleId: string;
     competencyId: string;
   } | null>(null);
+  const visibleSchedules = useMemo(
+    () => snapshot.schedules.filter((schedule) => includedTeamIds.has(schedule.id)),
+    [includedTeamIds, snapshot.schedules],
+  );
+  const visibleCompetencies = useMemo(
+    () => snapshot.competencies.filter((competency) => includedCompetencyIds.has(competency.id)),
+    [includedCompetencyIds, snapshot.competencies],
+  );
 
   useEffect(() => {
     setSourceScheduleId((current) =>
-      snapshot.schedules.some((schedule) => schedule.id === current) ? current : snapshot.schedules[0]?.id ?? "",
+      visibleSchedules.some((schedule) => schedule.id === current) ? current : visibleSchedules[0]?.id ?? "",
     );
     setTargetScheduleId((current) => {
-      if (snapshot.schedules.some((schedule) => schedule.id === current)) {
+      if (visibleSchedules.some((schedule) => schedule.id === current)) {
         return current;
       }
 
-      return snapshot.schedules[1]?.id ?? snapshot.schedules[0]?.id ?? "";
+      return visibleSchedules[1]?.id ?? visibleSchedules[0]?.id ?? "";
     });
     setSelectedTransferCompetencyIds((current) =>
-      current.filter((competencyId) => snapshot.competencies.some((competency) => competency.id === competencyId)),
+      current.filter((competencyId) => visibleCompetencies.some((competency) => competency.id === competencyId)),
     );
     setTransferSuggestions([]);
     setSelectedTransferSuggestionIndex(0);
     setTransferMessage("");
-  }, [snapshot]);
+  }, [snapshot, visibleCompetencies, visibleSchedules]);
 
   function toggleTransferCompetency(competencyId: string) {
     setSelectedTransferCompetencyIds((current) =>
@@ -310,7 +577,7 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                           setTransferMessage("");
                         }}
                       >
-                        {snapshot.schedules.map((schedule) => (
+                        {visibleSchedules.map((schedule) => (
                           <option key={schedule.id} value={schedule.id}>
                             {schedule.name}
                           </option>
@@ -329,7 +596,7 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                           setTransferMessage("");
                         }}
                       >
-                        {snapshot.schedules.map((schedule) => (
+                        {visibleSchedules.map((schedule) => (
                           <option key={schedule.id} value={schedule.id}>
                             {schedule.name}
                           </option>
@@ -341,7 +608,7 @@ export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSn
                   <div className="assignment-modal__group">
                     <span className="assignment-modal__label">Include competencies</span>
                     <div className="assignment-modal__options">
-                      {snapshot.competencies.map((competency) => {
+                      {visibleCompetencies.map((competency) => {
                         const isSelected = selectedTransferCompetencyIds.includes(competency.id);
 
                         return (
@@ -473,6 +740,7 @@ export function MetricsOvertimeSection({
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
 }) {
+  const { includedTeamIds, includedCompetencyIds } = useMetricsSettings(snapshot);
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
   const [selectedOvertimeTeamId, setSelectedOvertimeTeamId] = useState<string | null>(null);
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
@@ -488,9 +756,22 @@ export function MetricsOvertimeSection({
     () => getOvertimeMetricEntries(snapshot, filteredOvertimeHistory, filteredAssignmentHistory),
     [filteredAssignmentHistory, filteredOvertimeHistory, snapshot],
   );
+  const settingsFilteredEntries = useMemo(
+    () =>
+      filteredEntries.filter(
+        (entry) =>
+          includedTeamIds.has(entry.scheduleId) &&
+          (!entry.competencyId || includedCompetencyIds.has(entry.competencyId)),
+      ),
+    [filteredEntries, includedCompetencyIds, includedTeamIds],
+  );
+  const allTeamMetrics = useMemo(
+    () => getTeamMetrics(snapshot, settingsFilteredEntries, [], metricsAnchorDate),
+    [metricsAnchorDate, settingsFilteredEntries, snapshot],
+  );
   const teamMetrics = useMemo(
-    () => getTeamMetrics(snapshot, filteredEntries, [], metricsAnchorDate),
-    [filteredEntries, metricsAnchorDate, snapshot],
+    () => filterTeamMetricsBySettings(allTeamMetrics, includedTeamIds, includedCompetencyIds),
+    [allTeamMetrics, includedCompetencyIds, includedTeamIds],
   );
   const maxOvertimeShifts = Math.max(1, ...teamMetrics.map((team) => team.overtimeShifts));
   const selectedOvertimeTeam = useMemo(
@@ -663,7 +944,8 @@ export function MetricsFatigueSection({
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
 }) {
-  const teamFatigueMetrics = useMemo(
+  const { includedTeamIds } = useMetricsSettings(snapshot);
+  const allTeamFatigueMetrics = useMemo(
     () =>
       getTeamFatigueMetrics({
         snapshot,
@@ -672,6 +954,10 @@ export function MetricsFatigueSection({
         month: snapshot.month,
       }),
     [assignmentHistory, overtimeHistory, snapshot],
+  );
+  const teamFatigueMetrics = useMemo(
+    () => allTeamFatigueMetrics.filter((team) => includedTeamIds.has(team.scheduleId)),
+    [allTeamFatigueMetrics, includedTeamIds],
   );
 
   return (
@@ -762,6 +1048,7 @@ export function MetricsFragilitySection({
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
 }) {
+  const { includedTeamIds, includedCompetencyIds } = useMetricsSettings(snapshot);
   const [fragilityWindow, setFragilityWindow] = useState<FragilityWindow>("1y");
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
   const filteredOvertimeHistory = useMemo(() => {
@@ -776,9 +1063,22 @@ export function MetricsFragilitySection({
     () => getOvertimeMetricEntries(snapshot, filteredOvertimeHistory, filteredAssignmentHistory),
     [filteredAssignmentHistory, filteredOvertimeHistory, snapshot],
   );
+  const settingsFilteredEntries = useMemo(
+    () =>
+      filteredEntries.filter(
+        (entry) =>
+          includedTeamIds.has(entry.scheduleId) &&
+          (!entry.competencyId || includedCompetencyIds.has(entry.competencyId)),
+      ),
+    [filteredEntries, includedCompetencyIds, includedTeamIds],
+  );
+  const allTeamMetrics = useMemo(
+    () => getTeamMetrics(snapshot, [], settingsFilteredEntries, metricsAnchorDate),
+    [metricsAnchorDate, settingsFilteredEntries, snapshot],
+  );
   const teamMetrics = useMemo(
-    () => getTeamMetrics(snapshot, [], filteredEntries, metricsAnchorDate),
-    [filteredEntries, metricsAnchorDate, snapshot],
+    () => filterTeamMetricsBySettings(allTeamMetrics, includedTeamIds, includedCompetencyIds),
+    [allTeamMetrics, includedCompetencyIds, includedTeamIds],
   );
   const maxFragilityScore = Math.max(
     1,
@@ -880,6 +1180,7 @@ export function MetricsTimeCodeSection({
   snapshot: SchedulerSnapshot;
   assignmentHistory: StoredAssignment[];
 }) {
+  const { includedTeamIds } = useMetricsSettings(snapshot);
   const [timeCodeWindow, setTimeCodeWindow] = useState<TimeCodeWindow>("30d");
   const [selectedTimeCodeId, setSelectedTimeCodeId] = useState(snapshot.timeCodes[0]?.id ?? "");
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
@@ -894,9 +1195,13 @@ export function MetricsTimeCodeSection({
     const start = getTimeCodeWindowStart(metricsAnchorDate, timeCodeWindow);
     return assignmentHistory.filter((assignment) => assignment.date >= start && assignment.date <= metricsAnchorDate);
   }, [assignmentHistory, metricsAnchorDate, timeCodeWindow]);
-  const teamTimeCodeMetrics = useMemo(
+  const allTeamTimeCodeMetrics = useMemo(
     () => getTeamTimeCodeMetrics(snapshot, filteredAssignmentHistory, selectedTimeCodeId),
     [filteredAssignmentHistory, selectedTimeCodeId, snapshot],
+  );
+  const teamTimeCodeMetrics = useMemo(
+    () => allTeamTimeCodeMetrics.filter((team) => includedTeamIds.has(team.scheduleId)),
+    [allTeamTimeCodeMetrics, includedTeamIds],
   );
   const maxTimeCodeShifts = Math.max(1, ...teamTimeCodeMetrics.map((team) => team.entryCount));
 

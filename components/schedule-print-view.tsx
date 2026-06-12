@@ -2,6 +2,7 @@ import { Fragment } from "react";
 
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
+import { parseTemporaryLoanAssignmentNote } from "@/lib/temporary-loans";
 import { buildProjectedAssignmentIndex } from "@/lib/sub-schedules";
 import {
   buildAssignmentIndex,
@@ -34,6 +35,7 @@ type DisplayEmployee = {
   overtimeDates?: string[];
   overtimeCompetencyByDate?: Record<string, string | null>;
   mutualDates?: string[];
+  loanDates?: string[];
 };
 
 function getShiftTone(shift: ShiftKind) {
@@ -69,6 +71,12 @@ function getSelectionCode(
   competencyMap: Record<string, Competency>,
   timeCodeMap: Record<string, TimeCode>,
 ) {
+  const parsedLoan = parseTemporaryLoanAssignmentNote(selection.notes);
+
+  if (parsedLoan.role === "source") {
+    return "LN";
+  }
+
   if (selection.timeCodeId) {
     const timeCode = timeCodeMap[selection.timeCodeId];
     const baseCode = timeCode?.code ?? "";
@@ -92,11 +100,28 @@ function getScheduleCellComment({
   notes,
   employeeName,
   employeeMap,
+  scheduleNameMap,
 }: {
   notes: string | null | undefined;
   employeeName: string;
   employeeMap: Record<string, Employee>;
+  scheduleNameMap: Record<string, string>;
 }) {
+  const parsedLoan = parseTemporaryLoanAssignmentNote(notes);
+
+  if (parsedLoan.loanId) {
+    const sourceScheduleName = parsedLoan.sourceScheduleId
+      ? scheduleNameMap[parsedLoan.sourceScheduleId] ?? "their home shift"
+      : "their home shift";
+    const targetScheduleName = parsedLoan.targetScheduleId
+      ? scheduleNameMap[parsedLoan.targetScheduleId] ?? "the target shift"
+      : "the target shift";
+
+    return parsedLoan.role === "source"
+      ? `${employeeName} is loaned to ${targetScheduleName}.`
+      : `${employeeName} is loaned from ${sourceScheduleName}.`;
+  }
+
   const parsedMutual = parseMutualAssignmentNote(notes);
 
   if (parsedMutual.partnerEmployeeId) {
@@ -196,6 +221,7 @@ function buildDisplayEmployeesForSchedule({
     }
 
     const parsed = parseMutualAssignmentNote(assignment.notes);
+    const parsedLoan = parseTemporaryLoanAssignmentNote(assignment.notes);
 
     if (parsed.targetScheduleId === schedule.id) {
       continue;
@@ -203,6 +229,27 @@ function buildDisplayEmployeesForSchedule({
 
     const homeSchedule = getScheduleById(snapshot, employee.scheduleId);
     const existingDates = borrowedRowsByEmployee[employee.id]?.overtimeDates ?? [];
+    const existingLoanDates = borrowedRowsByEmployee[employee.id]?.loanDates ?? [];
+
+    if (parsedLoan.role === "target" && parsedLoan.targetScheduleId === schedule.id) {
+      borrowedRowsByEmployee[employee.id] = {
+        rowId: borrowedRowsByEmployee[employee.id]?.rowId ?? `loan:${schedule.id}:${employee.id}`,
+        sourceEmployeeId: employee.id,
+        name: employee.name,
+        role: borrowedRowsByEmployee[employee.id]?.role ?? `${employee.role} · Loan from ${homeSchedule.name}`,
+        competencyIds: employee.competencyIds,
+        overtimeDates: borrowedRowsByEmployee[employee.id]?.overtimeDates,
+        overtimeCompetencyByDate: borrowedRowsByEmployee[employee.id]?.overtimeCompetencyByDate,
+        loanDates: existingLoanDates.includes(assignment.date)
+          ? existingLoanDates
+          : [...existingLoanDates, assignment.date].sort(),
+      };
+      continue;
+    }
+
+    if (parsedLoan.loanId) {
+      continue;
+    }
 
     borrowedRowsByEmployee[employee.id] = {
       rowId: borrowedRowsByEmployee[employee.id]?.rowId ?? `manual:${schedule.id}:${employee.id}`,
@@ -290,6 +337,7 @@ function PrintScheduleSheet({
   competencyMap,
   timeCodeMap,
   employeeMap,
+  scheduleNameMap,
   employees,
 }: {
   schedule: Schedule;
@@ -299,6 +347,7 @@ function PrintScheduleSheet({
   competencyMap: Record<string, Competency>;
   timeCodeMap: Record<string, TimeCode>;
   employeeMap: Record<string, Employee>;
+  scheduleNameMap: Record<string, string>;
   employees: DisplayEmployee[];
 }) {
   const monthDays = getMonthDays(monthKey);
@@ -332,6 +381,8 @@ function PrintScheduleSheet({
         {employees.map((employee) => {
           const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
           const mutualDateSet = employee.mutualDates ? new Set(employee.mutualDates) : null;
+          const loanDateSet = employee.loanDates ? new Set(employee.loanDates) : null;
+          const hasLimitedBorrowedDates = Boolean(overtimeDateSet || mutualDateSet || loanDateSet);
 
           return (
             <Fragment key={`print-${schedule.id}-${employee.rowId}`}>
@@ -343,8 +394,8 @@ function PrintScheduleSheet({
 
               {monthDays.map((day) => {
                 const isBorrowedCellVisible =
-                  (!overtimeDateSet || overtimeDateSet.has(day.date)) &&
-                  (!mutualDateSet || mutualDateSet.has(day.date));
+                  !hasLimitedBorrowedDates ||
+                  Boolean(overtimeDateSet?.has(day.date) || mutualDateSet?.has(day.date) || loanDateSet?.has(day.date));
                 const shiftKind = isBorrowedCellVisible ? shiftForDate(schedule, day.date) : "OFF";
                 const selection = isBorrowedCellVisible
                   ? getSelectionForCell(schedule.id, employee.sourceEmployeeId, day.date, assignments)
@@ -377,6 +428,7 @@ function PrintScheduleSheet({
                       notes: selection.notes,
                       employeeName: employee.name,
                       employeeMap,
+                      scheduleNameMap,
                     });
 
                 return (
@@ -428,6 +480,7 @@ export function SchedulePrintView({
   const competencyMap = getCompetencyMap(snapshot.competencies);
   const timeCodeMap = getTimeCodeMap(snapshot.timeCodes);
   const employeeMap = getEmployeeMap(snapshot.schedules);
+  const scheduleNameMap = Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name]));
 
   return (
     <section className="print-preview-stack">
@@ -441,6 +494,7 @@ export function SchedulePrintView({
           competencyMap={competencyMap}
           timeCodeMap={timeCodeMap}
           employeeMap={employeeMap}
+          scheduleNameMap={scheduleNameMap}
           employees={buildDisplayEmployeesForSchedule({
             schedule,
             snapshot,

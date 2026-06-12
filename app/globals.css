@@ -1601,6 +1601,82 @@ button.workspace-nav-link {
   padding: 0 1.5rem 1.5rem;
 }
 
+.metrics-page-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.metrics-settings-button svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.metrics-settings-modal {
+  width: min(46rem, 100%);
+}
+
+.metrics-settings-modal__group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.metrics-settings-modal__group-heading .ghost-button {
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.74rem;
+}
+
+.metrics-settings-modal__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.45rem;
+}
+
+.metrics-settings-option {
+  min-height: 3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.metrics-settings-option:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--team-accent, #f97316) 34%, var(--line));
+}
+
+.metrics-settings-option--active {
+  border-color: color-mix(in srgb, var(--team-accent, #f97316) 58%, white);
+  background: color-mix(in srgb, var(--team-accent, #f97316) 10%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--team-accent, #f97316) 20%, transparent);
+}
+
+.metrics-settings-option > span:not(.legend-pill) {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.metrics-settings-option strong {
+  min-width: 0;
+  font-size: 0.82rem;
+}
+
 .metrics-section {
   display: grid;
   gap: 0.85rem;
@@ -3482,6 +3558,12 @@ button.workspace-nav-link {
   line-height: 1.1;
 }
 
+.employee-cell--selected {
+  outline: 2px solid var(--team-accent);
+  outline-offset: -2px;
+  z-index: 4;
+}
+
 .shift-cell {
   position: relative;
   display: grid;
@@ -4193,6 +4275,11 @@ button.workspace-nav-link {
   .metrics-grid,
   .mutuals-section {
     padding-inline: 1rem;
+  }
+
+  .metrics-page-title {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .metrics-section__header,

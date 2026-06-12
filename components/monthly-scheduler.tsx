@@ -2946,15 +2946,6 @@ export function MonthlyScheduler({
     });
   }
 
-  function handlePrintSchedules() {
-    const target = `/schedule/print?month=${currentMonth}`;
-    const printWindow = window.open(target, "_blank");
-
-    if (!printWindow) {
-      router.push(target);
-    }
-  }
-
   function handleRetryAutosave() {
     startSaveTransition(async () => {
       await saveActiveScheduleDrafts({ reason: "retry" });
@@ -3030,15 +3021,16 @@ export function MonthlyScheduler({
                 <ShiftOrderIcon />
               </button>
             ) : null}
-            <button
-              type="button"
+            <a
+              href={`/schedule/print?month=${currentMonth}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="ghost-button icon-button schedule-print-button"
-              onClick={handlePrintSchedules}
               aria-label="Print schedules"
               title="Print schedules"
             >
               <PrinterIcon />
-            </button>
+            </a>
           </div>
         </div>
       </div>
@@ -3533,10 +3525,11 @@ function EmployeeRow({
     [employee.loanDates],
   );
   const hasLimitedBorrowedDates = Boolean(overtimeDateSet || mutualDateSet || loanDateSet);
+  const isSelectedEmployee = selectedCell?.employeeId === employee.sourceEmployeeId;
 
   return (
     <div className="schedule-grid-row" style={rowStyle}>
-      <div className="employee-cell sticky-column">
+      <div className={`employee-cell sticky-column ${isSelectedEmployee ? "employee-cell--selected" : ""}`}>
         <div className="employee-cell__main">
           <strong title={employee.name}>
             <span className="employee-name-full">{employee.name}</span>
