@@ -33,7 +33,7 @@ import type { AppSession, Employee, OvertimeClaim, SchedulerSnapshot, ShiftKind 
 type OvertimeTargetMode = "main" | "sub";
 type OvertimeTargetKey = "all" | "main" | `sub:${string}`;
 type OvertimeAvailabilityFilter = "all" | "available";
-type ClaimActionState = { postingId: string; action: "claim" | "release" } | null;
+type ClaimActionState = Record<string, "claim" | "release">;
 type OptimisticClaimOverride = {
   action: "claim" | "release";
   employeeId: string;
@@ -1159,7 +1159,7 @@ export function OvertimePanel({
   const [availabilityFilter, setAvailabilityFilter] = useState<OvertimeAvailabilityFilter>("available");
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
-  const [claimActionState, setClaimActionState] = useState<ClaimActionState>(null);
+  const [claimActionState, setClaimActionState] = useState<ClaimActionState>({});
   const [optimisticClaimOverrides, setOptimisticClaimOverrides] = useState<Record<string, OptimisticClaimOverride>>({});
   const [releasingClaimId, setReleasingClaimId] = useState<string | null>(null);
   const [optimisticallyReleasedClaimIds, setOptimisticallyReleasedClaimIds] = useState<string[]>([]);
@@ -1193,8 +1193,8 @@ export function OvertimePanel({
   const [manualSlotCount, setManualSlotCount] = useState(1);
   const [manualPostingDates, setManualPostingDates] = useState<string[]>([]);
   const [isManagingManual, startManualTransition] = useTransition();
+  const [, startRouteRefreshTransition] = useTransition();
   const canManageManualPostings = viewer.role !== "worker";
-  const isClaiming = Boolean(claimActionState);
 
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const assignmentIndex = useMemo(() => buildAssignmentIndex(snapshot.assignments), [snapshot.assignments]);
@@ -1877,6 +1877,9 @@ export function OvertimePanel({
     () => displayPostings.find((posting) => posting.id === turnaroundConfirmationPostingId) ?? null,
     [displayPostings, turnaroundConfirmationPostingId],
   );
+  const selectedTurnaroundClaimAction = selectedTurnaroundConfirmationPosting
+    ? claimActionState[selectedTurnaroundConfirmationPosting.id] ?? null
+    : null;
   const selectedDeletePosting = useMemo(
     () => displayPostings.find((posting) => posting.id === deletePostingId) ?? null,
     [deletePostingId, displayPostings],
@@ -1916,6 +1919,12 @@ export function OvertimePanel({
     }
   }, [deletePostingId, selectedDeletePosting]);
 
+  function refreshOvertimeBoard() {
+    startRouteRefreshTransition(() => {
+      router.refresh();
+    });
+  }
+
   function submitClaim(posting: OvertimePosting, confirmedNightShiftTurnaround = false) {
     if (!claimingEmployeeId) {
       setStatusMessage("Select an employee first.");
@@ -1925,7 +1934,7 @@ export function OvertimePanel({
     const actingEmployeeId = claimingEmployeeId;
     const actingEmployeeName = employeeMap[actingEmployeeId]?.name ?? viewer.displayName;
 
-    setClaimActionState({ postingId: posting.id, action: "claim" });
+    setClaimActionState((current) => ({ ...current, [posting.id]: "claim" }));
     setStatusMessage("");
 
     void (async () => {
@@ -1956,7 +1965,7 @@ export function OvertimePanel({
               employeeName: actingEmployeeName,
             },
           }));
-          router.refresh();
+          refreshOvertimeBoard();
         }
       } catch (error) {
         console.error("Could not claim overtime posting", error);
@@ -1965,9 +1974,13 @@ export function OvertimePanel({
             ? `${error.message} Refresh and check whether the claim was saved before trying again.`
             : "Could not claim that overtime posting. Refresh and try again.",
         );
-        router.refresh();
+        refreshOvertimeBoard();
       } finally {
-        setClaimActionState(null);
+        setClaimActionState((current) => {
+          const remainingActions = { ...current };
+          delete remainingActions[posting.id];
+          return remainingActions;
+        });
       }
     })();
   }
@@ -2006,7 +2019,7 @@ export function OvertimePanel({
     const actingEmployeeId = claimingEmployeeId;
     const actingEmployeeName = employeeMap[actingEmployeeId]?.name ?? viewer.displayName;
 
-    setClaimActionState({ postingId: posting.id, action: "release" });
+    setClaimActionState((current) => ({ ...current, [posting.id]: "release" }));
     setStatusMessage("");
 
     void (async () => {
@@ -2033,7 +2046,7 @@ export function OvertimePanel({
               employeeName: actingEmployeeName,
             },
           }));
-          router.refresh();
+          refreshOvertimeBoard();
         }
       } catch (error) {
         console.error("Could not release overtime posting", error);
@@ -2042,9 +2055,13 @@ export function OvertimePanel({
             ? `${error.message} Refresh and check whether the release was saved before trying again.`
             : "Could not release that overtime posting. Refresh and try again.",
         );
-        router.refresh();
+        refreshOvertimeBoard();
       } finally {
-        setClaimActionState(null);
+        setClaimActionState((current) => {
+          const remainingActions = { ...current };
+          delete remainingActions[posting.id];
+          return remainingActions;
+        });
       }
     })();
   }
@@ -2072,7 +2089,7 @@ export function OvertimePanel({
           setOptimisticallyReleasedClaimIds((current) =>
             current.includes(claim.id) ? current : [...current, claim.id],
           );
-          router.refresh();
+          refreshOvertimeBoard();
         }
       } catch (error) {
         console.error("Could not release overtime claim", error);
@@ -2081,7 +2098,7 @@ export function OvertimePanel({
             ? `${error.message} Refresh and check whether the release was saved before trying again.`
             : "Could not release that overtime claim. Refresh and try again.",
         );
-        router.refresh();
+        refreshOvertimeBoard();
       } finally {
         setReleasingClaimId(null);
       }
@@ -2119,7 +2136,7 @@ export function OvertimePanel({
       if (result.ok) {
         setManualPostingDates([]);
         setIsManualModalOpen(false);
-        router.refresh();
+        refreshOvertimeBoard();
       }
     });
   }
@@ -2145,7 +2162,7 @@ export function OvertimePanel({
 
       if (result.ok) {
         setDeletePostingId(null);
-        router.refresh();
+        refreshOvertimeBoard();
       }
     });
   }
@@ -2337,10 +2354,9 @@ export function OvertimePanel({
             const selectedPostingClaimedByViewer = selectedPosting
               ? selectedPosting.claimedEmployeeIds.includes(claimingEmployeeId)
               : false;
-            const selectedPostingClaimAction =
-              selectedPosting && claimActionState?.postingId === selectedPosting.id
-                ? claimActionState.action
-                : null;
+            const selectedPostingClaimAction = selectedPosting
+              ? claimActionState[selectedPosting.id] ?? null
+              : null;
 
             return (
               <section key={group.key} className="overtime-group">
@@ -2459,7 +2475,7 @@ export function OvertimePanel({
                                 : handleClaim(selectedPosting)
                             }
                             disabled={
-                              isClaiming ||
+                              Boolean(selectedPostingClaimAction) ||
                               (!selectedPostingClaimedByViewer && !claimStatus.canClaim)
                             }
                           >
@@ -2594,7 +2610,7 @@ export function OvertimePanel({
           posting={selectedTurnaroundConfirmationPosting}
           onCancel={() => setTurnaroundConfirmationPostingId(null)}
           onConfirm={handleConfirmTurnaroundClaim}
-          isSubmitting={isClaiming}
+          isSubmitting={Boolean(selectedTurnaroundClaimAction)}
         />
       ) : null}
 

@@ -7,6 +7,7 @@ import { saveTimeCodes } from "@/app/actions";
 import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate, TimeCodeUsageMode } from "@/lib/types";
 
 const COLOR_TOKENS = ["amber", "teal", "violet", "rose", "blue", "lime", "orange", "slate"];
+const OFF_TIME_CODE_CODES = new Set(["V", "TR", "SB", "OFF", "ILL"]);
 
 type EditableTimeCode = {
   id: string;
@@ -98,6 +99,10 @@ function getTimeCodeIssues(timeCode: EditableTimeCode) {
   return issues;
 }
 
+function isOffTimeCode(timeCode: EditableTimeCode) {
+  return OFF_TIME_CODE_CODES.has(timeCode.code.trim().toUpperCase());
+}
+
 /** CRUD editor for the time codes that can be assigned on the scheduler. */
 export function TimeCodesPanel({
   snapshot,
@@ -163,6 +168,8 @@ export function TimeCodesPanel({
   const pendingRemoveTimeCode = pendingRemoveTimeCodeId
     ? timeCodes.find((timeCode) => timeCode.id === pendingRemoveTimeCodeId) ?? null
     : null;
+  const workingTimeCodes = timeCodes.filter((timeCode) => !isOffTimeCode(timeCode));
+  const offTimeCodes = timeCodes.filter(isOffTimeCode);
 
   function updateTimeCode(
     timeCodeId: string,
@@ -234,6 +241,138 @@ export function TimeCodesPanel({
     setStatusMessage("Changes reverted.");
   }
 
+  function renderTimeCodeRows(groupedTimeCodes: EditableTimeCode[], emptyMessage: string) {
+    if (groupedTimeCodes.length === 0) {
+      return (
+        <tr>
+          <td colSpan={6}>
+            <div className="empty-state">
+              <strong>{emptyMessage}</strong>
+              <span>Add or rename a code to place it in this group.</span>
+            </div>
+          </td>
+        </tr>
+      );
+    }
+
+    return groupedTimeCodes.map((timeCode) => (
+      <tr
+        key={timeCode.id}
+        className={`${dirtyTimeCodeIds.has(timeCode.id) ? "table-row--dirty" : ""} ${
+          invalidTimeCodeIds.has(timeCode.id) ? "table-row--invalid" : ""
+        }`}
+      >
+        <td>
+          <input
+            className="table-input"
+            value={timeCode.code}
+            maxLength={5}
+            onChange={(event) =>
+              updateTimeCode(timeCode.id, (current) => ({
+                ...current,
+                code: event.target.value.toUpperCase(),
+              }))
+            }
+          />
+        </td>
+        <td>
+          <input
+            className="table-input"
+            value={timeCode.label}
+            onChange={(event) =>
+              updateTimeCode(timeCode.id, (current) => ({
+                ...current,
+                label: event.target.value,
+              }))
+            }
+          />
+        </td>
+        <td>
+          <select
+            className="table-select"
+            value={timeCode.colorToken}
+            onChange={(event) =>
+              updateTimeCode(timeCode.id, (current) => ({
+                ...current,
+                colorToken: event.target.value,
+              }))
+            }
+          >
+            {COLOR_TOKENS.map((token) => (
+              <option key={token} value={token}>
+                {token}
+              </option>
+            ))}
+          </select>
+        </td>
+        <td>
+          <select
+            className="table-select"
+            value={timeCode.usageMode}
+            onChange={(event) =>
+              updateTimeCode(timeCode.id, (current) => ({
+                ...current,
+                usageMode: event.target.value as TimeCodeUsageMode,
+              }))
+            }
+          >
+            <option value="manual">Manual</option>
+            <option value="projected_only">Projected only</option>
+            <option value="both">Both</option>
+          </select>
+        </td>
+        <td>
+          <span className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()}`}>
+            {timeCode.code}
+          </span>
+        </td>
+        <td>
+          <div className="table-actions-cell">
+            {invalidTimeCodeIds.has(timeCode.id) ? (
+              <p className="row-issue">{getTimeCodeIssues(timeCode).join(" · ")}</p>
+            ) : null}
+            <button
+              type="button"
+              className="table-action table-action--danger"
+              onClick={() => handleRemoveTimeCode(timeCode.id)}
+            >
+              Remove
+            </button>
+          </div>
+        </td>
+      </tr>
+    ));
+  }
+
+  function renderTimeCodeTable(title: string, description: string, groupedTimeCodes: EditableTimeCode[], emptyMessage: string) {
+    return (
+      <section className="time-code-section">
+        <div className="metrics-section__header">
+          <div className="metrics-section__title-group">
+            <h2 className="metrics-section__title">{title}</h2>
+            <p>{description}</p>
+          </div>
+        </div>
+
+        <div className="personnel-table-wrap">
+          <table className="personnel-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Label</th>
+                <th>Color</th>
+                <th>Usage</th>
+                <th>Preview</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>{renderTimeCodeRows(groupedTimeCodes, emptyMessage)}</tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="panel-frame">
       <div className="panel-heading panel-heading--simple">
@@ -266,118 +405,19 @@ export function TimeCodesPanel({
         </div>
       </div>
 
-      <div className="personnel-table-wrap">
-        <table className="personnel-table">
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Label</th>
-              <th>Color</th>
-              <th>Usage</th>
-              <th>Preview</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {timeCodes.map((timeCode) => (
-              <tr
-                key={timeCode.id}
-                className={`${dirtyTimeCodeIds.has(timeCode.id) ? "table-row--dirty" : ""} ${
-                  invalidTimeCodeIds.has(timeCode.id) ? "table-row--invalid" : ""
-                }`}
-              >
-                <td>
-                  <input
-                    className="table-input"
-                    value={timeCode.code}
-                    maxLength={5}
-                    onChange={(event) =>
-                      updateTimeCode(timeCode.id, (current) => ({
-                        ...current,
-                        code: event.target.value.toUpperCase(),
-                      }))
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    className="table-input"
-                    value={timeCode.label}
-                    onChange={(event) =>
-                      updateTimeCode(timeCode.id, (current) => ({
-                        ...current,
-                        label: event.target.value,
-                      }))
-                    }
-                  />
-                </td>
-                <td>
-                  <select
-                    className="table-select"
-                    value={timeCode.colorToken}
-                    onChange={(event) =>
-                      updateTimeCode(timeCode.id, (current) => ({
-                        ...current,
-                        colorToken: event.target.value,
-                      }))
-                    }
-                  >
-                    {COLOR_TOKENS.map((token) => (
-                      <option key={token} value={token}>
-                        {token}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    className="table-select"
-                    value={timeCode.usageMode}
-                    onChange={(event) =>
-                      updateTimeCode(timeCode.id, (current) => ({
-                        ...current,
-                        usageMode: event.target.value as TimeCodeUsageMode,
-                      }))
-                    }
-                  >
-                    <option value="manual">Manual</option>
-                    <option value="projected_only">Projected only</option>
-                    <option value="both">Both</option>
-                  </select>
-                </td>
-                <td>
-                  <span className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()}`}>
-                    {timeCode.code}
-                  </span>
-                </td>
-                <td>
-                  <div className="table-actions-cell">
-                    {invalidTimeCodeIds.has(timeCode.id) ? (
-                      <p className="row-issue">{getTimeCodeIssues(timeCode).join(" · ")}</p>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="table-action table-action--danger"
-                      onClick={() => handleRemoveTimeCode(timeCode.id)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {timeCodes.length === 0 ? (
-              <tr>
-                <td colSpan={5}>
-                  <div className="empty-state">
-                    <strong>No time codes yet.</strong>
-                    <span>Add a code to use it in the shift grid.</span>
-                  </div>
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+      <div className="time-code-sections">
+        {renderTimeCodeTable(
+          "Working Time Codes",
+          "Codes used for worked time, coverage, and active shift tracking.",
+          workingTimeCodes,
+          "No working time codes yet.",
+        )}
+        {renderTimeCodeTable(
+          "Off Time Codes",
+          "V, TR, SB, OFF, and ILL are grouped here as non-working time.",
+          offTimeCodes,
+          "No off time codes yet.",
+        )}
       </div>
 
       {pendingRemoveTimeCode ? (
