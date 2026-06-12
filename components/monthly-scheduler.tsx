@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -17,12 +17,11 @@ import {
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import { parseTemporaryLoanAssignmentNote } from "@/lib/temporary-loans";
+import { useWorkspaceNavigationGuard } from "@/components/workspace-shell";
 import {
-  buildProjectedAssignmentIndex,
   getManualEntryTimeCodes,
 } from "@/lib/sub-schedules";
 import {
-  buildAssignmentIndex,
   createAssignmentKey,
   formatMonthLabel,
   getCompetencyMap,
@@ -42,6 +41,7 @@ import {
 import type {
   Competency,
   Employee,
+  OvertimeClaim,
   SaveAssignmentsInput,
   Schedule,
   SchedulePageSnapshot,
@@ -68,7 +68,8 @@ import type {
  */
 const STORAGE_KEY = "shift-canvas-drafts-v2";
 const COLUMN_COPY_STORAGE_KEY = "shift-canvas-column-copy-v1";
-const AUTO_SAVE_DEBOUNCE_MS = 2500;
+const AUTO_SAVE_DEBOUNCE_MS = 5000;
+const AUTO_SAVE_SUCCESS_VISIBLE_MS = 2200;
 const STALE_SNAPSHOT_PROTECTION_MS = 12000;
 const SCHEDULE_ROW_HEIGHT_PX = 51;
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes: string | null };
@@ -92,6 +93,36 @@ type DragRange = {
   currentIndex: number;
   selection: AssignmentSelection;
 };
+type AutosaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
+type AutosaveState = {
+  status: AutosaveStatus;
+  message: string;
+};
+type SaveActiveScheduleDraftsOptions = {
+  reason: "auto" | "navigation" | "retry" | "bulk-action";
+  updates?: StoredAssignment[];
+  draftSnapshot?: Record<string, AssignmentSelection>;
+};
+
+function resolveInitialScheduleSelection(
+  snapshot: SchedulePageSnapshot,
+  forcedScheduleId: string | null,
+  initialSelectedScheduleId?: string | null,
+) {
+  if (forcedScheduleId && snapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)) {
+    return forcedScheduleId;
+  }
+
+  if (snapshot.selectedScheduleId && snapshot.schedules.some((schedule) => schedule.id === snapshot.selectedScheduleId)) {
+    return snapshot.selectedScheduleId;
+  }
+
+  if (initialSelectedScheduleId && snapshot.schedules.some((schedule) => schedule.id === initialSelectedScheduleId)) {
+    return initialSelectedScheduleId;
+  }
+
+  return snapshot.schedules[0]?.id ?? "";
+}
 
 function PrinterIcon() {
   return (
@@ -1417,20 +1448,20 @@ export function MonthlyScheduler({
   const router = useRouter();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
-    forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
-      ? forcedScheduleId
-      : initialSnapshot.schedules.some((schedule) => schedule.id === initialSelectedScheduleId)
-      ? initialSelectedScheduleId ?? ""
-      : initialSnapshot.schedules[0]?.id ?? "",
+    resolveInitialScheduleSelection(initialSnapshot, forcedScheduleId, initialSelectedScheduleId),
   );
   const [search, setSearch] = useState("");
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [baselineAssignments, setBaselineAssignments] = useState(() =>
-    buildAssignmentIndex(initialSnapshot.assignments),
+    cloneAssignments(initialSnapshot.assignmentIndex),
   );
   const [draftAssignments, setDraftAssignments] = useState(() =>
-    buildAssignmentIndex(initialSnapshot.assignments),
+    cloneAssignments(initialSnapshot.assignmentIndex),
   );
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>({
+    status: "idle",
+    message: "",
+  });
   const [statusMessage, setStatusMessage] = useState("");
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
   const [editorCell, setEditorCell] = useState<SelectedCell | null>(null);
@@ -1447,6 +1478,7 @@ export function MonthlyScheduler({
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [isMonthLoading, startMonthTransition] = useTransition();
   const [isSavingTransition, startSaveTransition] = useTransition();
+  const [, startRouteRefreshTransition] = useTransition();
   const [activeSaveCount, setActiveSaveCount] = useState(0);
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const [isSetCompletionWarningOpen, setIsSetCompletionWarningOpen] = useState(false);
@@ -1463,6 +1495,7 @@ export function MonthlyScheduler({
   const draftAssignmentsRef = useRef(draftAssignments);
   const activeSaveCountRef = useRef(0);
   const preserveLocalBaselineUntilRef = useRef(0);
+  const autosaveStatusResetTimerRef = useRef<number | null>(null);
   const scheduleTopScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleBodyScrollRef = useRef<HTMLElement | null>(null);
   const scheduleGridRef = useRef<HTMLDivElement | null>(null);
@@ -1476,15 +1509,12 @@ export function MonthlyScheduler({
     () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
     [snapshot.schedules],
   );
-  const projectedAssignmentIndex = useMemo(
-    () => buildProjectedAssignmentIndex(snapshot.projectedAssignments),
-    [snapshot.projectedAssignments],
-  );
+  const projectedAssignmentIndex = snapshot.projectedAssignmentIndex;
   const effectiveAssignments = useMemo(() => {
     const nextAssignments = { ...draftAssignments };
 
-    for (const assignment of snapshot.projectedAssignments) {
-      nextAssignments[createAssignmentKey(assignment.scheduleId, assignment.employeeId, assignment.date)] = {
+    for (const [key, assignment] of Object.entries(projectedAssignmentIndex)) {
+      nextAssignments[key] = {
         competencyId: assignment.competencyId,
         timeCodeId: assignment.timeCodeId,
         notes: assignment.notes ?? null,
@@ -1492,7 +1522,57 @@ export function MonthlyScheduler({
     }
 
     return nextAssignments;
-  }, [draftAssignments, snapshot.projectedAssignments]);
+  }, [draftAssignments, projectedAssignmentIndex]);
+  const effectiveAssignmentsByScheduleDate = useMemo(() => {
+    const index: Record<string, Array<{ employeeId: string; selection: AssignmentSelection }>> = {};
+
+    for (const [key, selection] of Object.entries(effectiveAssignments)) {
+      const parsed = parseAssignmentKey(key);
+
+      if (!parsed) {
+        continue;
+      }
+
+      const bucketKey = `${parsed.scheduleId}:${parsed.date}`;
+      index[bucketKey] ??= [];
+      index[bucketKey].push({
+        employeeId: parsed.employeeId,
+        selection,
+      });
+    }
+
+    return index;
+  }, [effectiveAssignments]);
+  const overtimeClaimsByScheduleDateCompetency = useMemo(() => {
+    const index: Record<string, OvertimeClaim[]> = {};
+
+    for (const claim of snapshot.overtimeClaims) {
+      if (!claim.scheduleId || !claim.competencyId) {
+        continue;
+      }
+
+      const bucketKey = `${claim.scheduleId}:${claim.date}:${claim.competencyId}`;
+      index[bucketKey] ??= [];
+      index[bucketKey].push(claim);
+    }
+
+    return index;
+  }, [snapshot.overtimeClaims]);
+  const overtimeClaimKeysByScheduleDateCompetency = useMemo(() => {
+    const index: Record<string, Set<string>> = {};
+
+    for (const claim of snapshot.overtimeClaims) {
+      if (!claim.scheduleId || !claim.competencyId) {
+        continue;
+      }
+
+      const bucketKey = `${claim.scheduleId}:${claim.date}:${claim.competencyId}`;
+      index[bucketKey] ??= new Set<string>();
+      index[bucketKey].add(`${claim.employeeId}:${claim.date}:${claim.competencyId}`);
+    }
+
+    return index;
+  }, [snapshot.overtimeClaims]);
   const manualEntryTimeCodes = useMemo(
     () => getManualEntryTimeCodes(snapshot.timeCodes),
     [snapshot.timeCodes],
@@ -1521,8 +1601,13 @@ export function MonthlyScheduler({
     [activeSchedule, extendedMonthDays, selectedSetAnchorDate],
   );
   const completedSetDates = useMemo(
-    () => (activeSchedule ? getCompletedSetDatesForMonth(snapshot.completedSets, activeSchedule.id, monthDays) : new Set<string>()),
-    [activeSchedule, monthDays, snapshot.completedSets],
+    () =>
+      activeSchedule
+        ? snapshot.selectedScheduleId === activeSchedule.id
+          ? new Set(snapshot.completedSetDateKeys)
+          : getCompletedSetDatesForMonth(snapshot.completedSets, activeSchedule.id, monthDays)
+        : new Set<string>(),
+    [activeSchedule, monthDays, snapshot.completedSetDateKeys, snapshot.completedSets, snapshot.selectedScheduleId],
   );
   const isSelectedSetComplete =
     activeSchedule && selectedSetDays.length > 0
@@ -1563,28 +1648,16 @@ export function MonthlyScheduler({
 
       for (const day of selectedSetDays) {
         let filledOnDate = 0;
+        const scheduleDateKey = `${activeSchedule.id}:${day.date}`;
+        const claimBucketKey = `${scheduleDateKey}:${competency.id}`;
+        const overtimeClaimKeys = overtimeClaimKeysByScheduleDateCompetency[claimBucketKey];
 
-        const overtimeClaimKeys = new Set(
-          snapshot.overtimeClaims
-            .filter(
-              (claim) =>
-                claim.scheduleId === activeSchedule.id &&
-                claim.competencyId === competency.id &&
-                claim.date === day.date,
-            )
-            .map((claim) => `${claim.employeeId}:${claim.date}:${claim.competencyId}`),
-        );
-
-        for (const [key, selection] of Object.entries(effectiveAssignments)) {
-          const parsed = parseAssignmentKey(key);
+        for (const { employeeId, selection } of effectiveAssignmentsByScheduleDate[scheduleDateKey] ?? []) {
 
           if (
-            !parsed ||
-            parsed.scheduleId !== activeSchedule.id ||
-            parsed.date !== day.date ||
             selection.competencyId !== competency.id ||
             isOvertimeManagedSelection(selection) ||
-            overtimeClaimKeys.has(`${parsed.employeeId}:${parsed.date}:${selection.competencyId}`)
+            overtimeClaimKeys?.has(`${employeeId}:${day.date}:${selection.competencyId}`)
           ) {
             continue;
           }
@@ -1593,13 +1666,10 @@ export function MonthlyScheduler({
           filledOnDate += 1;
         }
 
-        for (const claim of snapshot.overtimeClaims) {
+        for (const claim of overtimeClaimsByScheduleDateCompetency[claimBucketKey] ?? []) {
           const claimEmployee = employeeMap[claim.employeeId];
 
           if (
-            claim.scheduleId === activeSchedule.id &&
-            claim.competencyId === competency.id &&
-            claim.date === day.date &&
             claimEmployee?.scheduleId !== activeSchedule.id
           ) {
             filledCells += 1;
@@ -1628,7 +1698,15 @@ export function MonthlyScheduler({
 
       return map;
     }, {});
-  }, [activeSchedule, activeScheduleCompetencies, effectiveAssignments, employeeMap, selectedSetDays, snapshot.overtimeClaims, snapshot.timeCodes]);
+  }, [
+    activeSchedule,
+    activeScheduleCompetencies,
+    effectiveAssignmentsByScheduleDate,
+    employeeMap,
+    overtimeClaimKeysByScheduleDateCompetency,
+    overtimeClaimsByScheduleDateCompetency,
+    selectedSetDays,
+  ]);
   const unfilledSetCompetencies = useMemo<UnfilledSetCompetency[]>(
     () =>
       activeScheduleCompetencies
@@ -1809,7 +1887,6 @@ export function MonthlyScheduler({
       }),
     [baselineAssignments, draftAssignments, employeeMap, snapshot],
   );
-  const hasChanges = dirtyUpdates.length > 0;
 
   const selectedEmployee = selectedCell ? displayEmployeeMap[selectedCell.employeeId] ?? null : null;
   const editorEmployee = editorCell ? displayEmployeeMap[editorCell.employeeId] ?? null : null;
@@ -1851,6 +1928,70 @@ export function MonthlyScheduler({
     [dirtyUpdates, displayEmployeeMap, monthDays],
   );
   const hasActiveChanges = activeDirtyUpdates.length > 0;
+  const saveActiveScheduleDrafts = useCallback(
+    async ({
+      reason,
+      updates,
+      draftSnapshot,
+    }: SaveActiveScheduleDraftsOptions) => {
+      if (!canEdit) {
+        return true;
+      }
+
+      const scheduledUpdates = updates?.map((update) => ({ ...update })) ?? activeDirtyUpdates.map((update) => ({ ...update }));
+
+      if (scheduledUpdates.length === 0) {
+        showAutosaveState({ status: "idle", message: "" });
+        return true;
+      }
+
+      const scheduledDraftAssignments = draftSnapshot ? cloneAssignments(draftSnapshot) : cloneAssignments(draftAssignments);
+      const autoSaveToken = latestAutoSaveTokenRef.current + 1;
+
+      latestAutoSaveTokenRef.current = autoSaveToken;
+      showAutosaveState({
+        status: "saving",
+        message: reason === "navigation" ? "Autosaving before leaving..." : "Autosaving...",
+      });
+      setStatusMessage(
+        `Saving ${scheduledUpdates.length} change${scheduledUpdates.length === 1 ? "" : "s"}...`,
+      );
+
+      const result = await runTrackedAssignmentSave({
+        scheduleId: activeSchedule.id,
+        updates: scheduledUpdates,
+      });
+
+      if (result.ok) {
+        protectLocalBaselineFromStaleSnapshots();
+        setBaselineAssignments((current) =>
+          applySavedUpdatesToBaseline(current, scheduledDraftAssignments, scheduledUpdates),
+        );
+      }
+
+      if (latestAutoSaveTokenRef.current === autoSaveToken) {
+        setStatusMessage(result.ok ? "Changes saved automatically." : result.message);
+        showAutosaveState(
+          result.ok
+            ? { status: "saved", message: "Saved automatically." }
+            : { status: "error", message: "Autosave failed." },
+          result.ok,
+        );
+      }
+
+      return result.ok;
+    },
+    [activeDirtyUpdates, activeSchedule.id, canEdit, draftAssignments],
+  );
+  const saveBeforeWorkspaceNavigation = useCallback(async () => {
+    if (!hasActiveChanges) {
+      return true;
+    }
+
+    return saveActiveScheduleDrafts({ reason: "navigation" });
+  }, [hasActiveChanges, saveActiveScheduleDrafts]);
+
+  useWorkspaceNavigationGuard(canEdit && hasActiveChanges ? saveBeforeWorkspaceNavigation : null);
   const activeShiftOrderEmployees = useMemo<ShiftOrderEmployee[]>(() => {
     const orderedIds = scheduleEmployeeOrderBySchedule[activeSchedule.id] ?? [];
     const orderIndex = new Map(orderedIds.map((employeeId, index) => [employeeId, index]));
@@ -1897,25 +2038,6 @@ export function MonthlyScheduler({
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
 
-  function replaceScheduleUrlState(month: string, scheduleId: string) {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    params.set("month", month);
-
-    if (scheduleId) {
-      params.set("schedule", scheduleId);
-    } else {
-      params.delete("schedule");
-    }
-
-    const queryString = params.toString();
-    const nextUrl = queryString ? `/schedule?${queryString}` : "/schedule";
-    window.history.replaceState(null, "", nextUrl);
-  }
-
   useEffect(() => {
     if (!forcedScheduleId || selectedScheduleId === forcedScheduleId) {
       return;
@@ -1936,6 +2058,15 @@ export function MonthlyScheduler({
     activeSaveCountRef.current = activeSaveCount;
   }, [activeSaveCount]);
 
+  useEffect(
+    () => () => {
+      if (autosaveStatusResetTimerRef.current !== null) {
+        window.clearTimeout(autosaveStatusResetTimerRef.current);
+      }
+    },
+    [],
+  );
+
   function protectLocalBaselineFromStaleSnapshots() {
     preserveLocalBaselineUntilRef.current = Date.now() + STALE_SNAPSHOT_PROTECTION_MS;
   }
@@ -1952,8 +2083,32 @@ export function MonthlyScheduler({
     }
   }
 
+  function showAutosaveState(nextState: AutosaveState, autoHide = false) {
+    if (autosaveStatusResetTimerRef.current !== null) {
+      window.clearTimeout(autosaveStatusResetTimerRef.current);
+      autosaveStatusResetTimerRef.current = null;
+    }
+
+    setAutosaveState(nextState);
+
+    if (!autoHide) {
+      return;
+    }
+
+    autosaveStatusResetTimerRef.current = window.setTimeout(() => {
+      setAutosaveState({ status: "idle", message: "" });
+      autosaveStatusResetTimerRef.current = null;
+    }, AUTO_SAVE_SUCCESS_VISIBLE_MS);
+  }
+
+  function refreshScheduleRoute() {
+    startRouteRefreshTransition(() => {
+      router.refresh();
+    });
+  }
+
   useEffect(() => {
-    const nextAssignments = buildAssignmentIndex(initialSnapshot.assignments);
+    const nextAssignments = cloneAssignments(initialSnapshot.assignmentIndex);
     const currentBaselineAssignments = baselineAssignmentsRef.current;
     const currentDraftAssignments = draftAssignmentsRef.current;
     const unsavedDraftDelta = buildDraftDelta(currentBaselineAssignments, currentDraftAssignments);
@@ -1968,9 +2123,12 @@ export function MonthlyScheduler({
     setSelectedScheduleId((current) =>
       forcedScheduleId && initialSnapshot.schedules.some((schedule) => schedule.id === forcedScheduleId)
         ? forcedScheduleId
+        : initialSnapshot.selectedScheduleId &&
+          initialSnapshot.schedules.some((schedule) => schedule.id === initialSnapshot.selectedScheduleId)
+        ? initialSnapshot.selectedScheduleId
         : initialSnapshot.schedules.some((schedule) => schedule.id === current)
         ? current
-        : initialSnapshot.schedules[0]?.id ?? "",
+        : resolveInitialScheduleSelection(initialSnapshot, forcedScheduleId, initialSelectedScheduleId),
     );
     setBaselineAssignments(mergedBaselineAssignments);
     setDraftAssignments(() =>
@@ -1991,7 +2149,7 @@ export function MonthlyScheduler({
      * visibility/completion effects below decide whether that cell is still
      * valid in the refreshed month data.
      */
-  }, [forcedScheduleId, initialSnapshot]);
+  }, [forcedScheduleId, initialSelectedScheduleId, initialSnapshot]);
 
   useEffect(() => {
     if (!selectedCell) {
@@ -2092,38 +2250,42 @@ export function MonthlyScheduler({
 
     const scheduledUpdates = activeDirtyUpdates.map((update) => ({ ...update }));
     const scheduledDraftAssignments = cloneAssignments(draftAssignments);
-    const autoSaveToken = latestAutoSaveTokenRef.current + 1;
-
-    latestAutoSaveTokenRef.current = autoSaveToken;
+    showAutosaveState({
+      status: "pending",
+      message: "Autosave pending...",
+    });
 
     const timer = window.setTimeout(() => {
       startSaveTransition(async () => {
-        if (latestAutoSaveTokenRef.current === autoSaveToken) {
-          setStatusMessage(
-            `Saving ${scheduledUpdates.length} change${scheduledUpdates.length === 1 ? "" : "s"}...`,
-          );
-        }
-
-        const result = await runTrackedAssignmentSave({
-          scheduleId: activeSchedule.id,
+        await saveActiveScheduleDrafts({
+          reason: "auto",
           updates: scheduledUpdates,
+          draftSnapshot: scheduledDraftAssignments,
         });
-
-        if (result.ok) {
-          protectLocalBaselineFromStaleSnapshots();
-          setBaselineAssignments((current) =>
-            applySavedUpdatesToBaseline(current, scheduledDraftAssignments, scheduledUpdates),
-          );
-        }
-
-        if (latestAutoSaveTokenRef.current === autoSaveToken) {
-          setStatusMessage(result.ok ? "Changes saved automatically." : result.message);
-        }
       });
     }, AUTO_SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [activeDirtyUpdates, activeSchedule.id, canEdit, draftAssignments, editorCell, hasActiveChanges, isDraftHydrated, isSaving]);
+  }, [
+    activeDirtyUpdates,
+    canEdit,
+    draftAssignments,
+    editorCell,
+    hasActiveChanges,
+    isDraftHydrated,
+    isSaving,
+    saveActiveScheduleDrafts,
+  ]);
+
+  useEffect(() => {
+    if (autosaveState.status !== "pending") {
+      return;
+    }
+
+    if (editorCell || !hasActiveChanges) {
+      showAutosaveState({ status: "idle", message: "" });
+    }
+  }, [autosaveState.status, editorCell, hasActiveChanges]);
 
   useEffect(() => {
     function handlePointerUp() {
@@ -2298,8 +2460,14 @@ export function MonthlyScheduler({
   }
 
   function handleMonthChange(delta: number) {
-    startMonthTransition(() => {
+    startMonthTransition(async () => {
       const nextMonth = addMonths(currentMonth, delta);
+      const savedDrafts = await saveActiveScheduleDrafts({ reason: "navigation" });
+
+      if (!savedDrafts) {
+        return;
+      }
+
       persistDraftAssignmentsToStorage(baselineAssignmentsRef.current, draftAssignmentsRef.current);
       setStatusMessage("Changing month");
       router.push(`/schedule?month=${nextMonth}&schedule=${selectedScheduleId}`, { scroll: false });
@@ -2340,24 +2508,7 @@ export function MonthlyScheduler({
   }
 
   async function saveActiveDraftsBeforeLoan() {
-    if (activeDirtyUpdates.length === 0) {
-      return true;
-    }
-
-    const saveResult = await runTrackedAssignmentSave({
-      scheduleId: activeSchedule.id,
-      updates: activeDirtyUpdates,
-    });
-
-    setStatusMessage(saveResult.message);
-
-    if (!saveResult.ok) {
-      return false;
-    }
-
-    protectLocalBaselineFromStaleSnapshots();
-    setBaselineAssignments(cloneAssignments(draftAssignments));
-    return true;
+    return saveActiveScheduleDrafts({ reason: "bulk-action" });
   }
 
   function handleCreateTemporaryLoan(input: {
@@ -2388,7 +2539,7 @@ export function MonthlyScheduler({
       setIsTemporaryLoanModalOpen(false);
       setSelectedCell(null);
       setEditorCell(null);
-      router.refresh();
+      refreshScheduleRoute();
     });
   }
 
@@ -2417,7 +2568,7 @@ export function MonthlyScheduler({
       setLoanCancelTarget(null);
       setSelectedCell(null);
       setEditorCell(null);
-      router.refresh();
+      refreshScheduleRoute();
     });
   }
 
@@ -2448,7 +2599,7 @@ export function MonthlyScheduler({
         return;
       }
 
-      router.refresh();
+      refreshScheduleRoute();
     });
   }
 
@@ -2804,11 +2955,35 @@ export function MonthlyScheduler({
     }
   }
 
+  function handleRetryAutosave() {
+    startSaveTransition(async () => {
+      await saveActiveScheduleDrafts({ reason: "retry" });
+    });
+  }
+
   return (
     <section
       className="panel-frame"
       style={{ "--team-accent": getScheduleAccent(activeSchedule.id) } as CSSProperties}
     >
+      {autosaveState.status !== "idle" ? (
+        <div
+          className={`schedule-autosave-modal schedule-autosave-modal--${autosaveState.status}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div>
+            <strong>{autosaveState.message}</strong>
+            {autosaveState.status === "pending" ? <span>Saving 5 seconds after the last edit.</span> : null}
+          </div>
+          {autosaveState.status === "error" ? (
+            <button type="button" className="ghost-button" onClick={handleRetryAutosave}>
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="panel-heading panel-heading--split">
         <div className="schedule-heading-month" aria-label="Schedule month">
           <button
@@ -2876,10 +3051,22 @@ export function MonthlyScheduler({
               value={selectedScheduleId}
               onChange={(event) => {
                 const nextScheduleId = event.target.value;
-                setSelectedScheduleId(nextScheduleId);
-                replaceScheduleUrlState(currentMonth, nextScheduleId);
-                setSelectedCoverageCompetencyId(null);
-                setSelectedCompetencyFilter("all");
+                startMonthTransition(async () => {
+                  const savedDrafts = await saveActiveScheduleDrafts({ reason: "navigation" });
+
+                  if (!savedDrafts) {
+                    return;
+                  }
+
+                  persistDraftAssignmentsToStorage(
+                    baselineAssignmentsRef.current,
+                    draftAssignmentsRef.current,
+                  );
+                  setStatusMessage("Changing shift");
+                  setSelectedCoverageCompetencyId(null);
+                  setSelectedCompetencyFilter("all");
+                  router.push(`/schedule?month=${currentMonth}&schedule=${nextScheduleId}`, { scroll: false });
+                });
               }}
             >
               {snapshot.schedules.map((schedule) => (
@@ -3332,10 +3519,19 @@ function EmployeeRow({
   onCellClick: (cell: SelectedCell) => void;
   rowStyle?: CSSProperties;
 }) {
-  const setDates = new Set(selectedSetDays.map((day) => day.date));
-  const overtimeDateSet = employee.overtimeDates ? new Set(employee.overtimeDates) : null;
-  const mutualDateSet = employee.mutualDates ? new Set(employee.mutualDates) : null;
-  const loanDateSet = employee.loanDates ? new Set(employee.loanDates) : null;
+  const setDates = useMemo(() => new Set(selectedSetDays.map((day) => day.date)), [selectedSetDays]);
+  const overtimeDateSet = useMemo(
+    () => (employee.overtimeDates ? new Set(employee.overtimeDates) : null),
+    [employee.overtimeDates],
+  );
+  const mutualDateSet = useMemo(
+    () => (employee.mutualDates ? new Set(employee.mutualDates) : null),
+    [employee.mutualDates],
+  );
+  const loanDateSet = useMemo(
+    () => (employee.loanDates ? new Set(employee.loanDates) : null),
+    [employee.loanDates],
+  );
   const hasLimitedBorrowedDates = Boolean(overtimeDateSet || mutualDateSet || loanDateSet);
 
   return (

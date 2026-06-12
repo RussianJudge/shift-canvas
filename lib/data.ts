@@ -6,10 +6,16 @@ import {
   type EmployeeNameParts,
 } from "@/lib/employee-names";
 import {
+  buildAssignmentIndex,
+  getCompletedSetDatesForMonth,
   getEmployeeMap,
+  getExtendedMonthDays,
+  getMonthDays,
+  getWorkedSetDays,
   shiftMonthKey,
 } from "@/lib/scheduling";
 import {
+  buildProjectedAssignmentIndex,
   buildProjectedSubScheduleAssignments,
   filterAssignmentsShadowedBySubSchedules,
 } from "@/lib/sub-schedules";
@@ -525,6 +531,49 @@ function getExtendedMonthBounds(month: string) {
     monthStart,
     monthEnd,
     windowMonths: [previousMonth, month, nextMonth],
+  };
+}
+
+function resolvePreferredScheduleId(
+  schedules: Pick<Schedule, "id">[],
+  preferredScheduleId: string | null | undefined,
+  session?: AppSession | null,
+) {
+  const preferred = preferredScheduleId?.trim();
+
+  if (preferred && schedules.some((schedule) => schedule.id === preferred)) {
+    return preferred;
+  }
+
+  if (session?.scheduleId && schedules.some((schedule) => schedule.id === session.scheduleId)) {
+    return session.scheduleId;
+  }
+
+  return schedules[0]?.id ?? null;
+}
+
+function getSchedulePageDateBounds(month: string, schedule: Schedule | null | undefined) {
+  const visibleMonthDays = getMonthDays(month);
+  const firstVisibleDay = visibleMonthDays[0]?.date ?? `${month}-01`;
+  const lastVisibleDay = visibleMonthDays[visibleMonthDays.length - 1]?.date ?? firstVisibleDay;
+
+  if (!schedule) {
+    return {
+      monthStart: firstVisibleDay,
+      monthEnd: lastVisibleDay,
+    };
+  }
+
+  const extendedMonthDays = getExtendedMonthDays(month);
+  const boundarySetDays = [
+    ...getWorkedSetDays(schedule, extendedMonthDays, firstVisibleDay),
+    ...getWorkedSetDays(schedule, extendedMonthDays, lastVisibleDay),
+  ];
+  const boundaryDates = boundarySetDays.map((day) => day.date);
+
+  return {
+    monthStart: [firstVisibleDay, ...boundaryDates].sort()[0] ?? firstVisibleDay,
+    monthEnd: [lastVisibleDay, ...boundaryDates].sort().at(-1) ?? lastVisibleDay,
   };
 }
 
@@ -1164,8 +1213,9 @@ type ScheduleReferenceSnapshotOptions = {
   includeManualOvertimePostings?: boolean;
   includeCompletedSets?: boolean;
   includeProjectedAssignments?: boolean;
-  assignmentWindow?: "month" | "extended";
+  assignmentWindow?: "month" | "extended" | "schedule-page";
   completedSetWindow?: "month" | "extended";
+  scheduleDataScheduleId?: string | null;
 };
 
 /**
@@ -1197,6 +1247,7 @@ export async function getScheduleReferenceSnapshot(
     includeProjectedAssignments = false,
     assignmentWindow = "month",
     completedSetWindow = "month",
+    scheduleDataScheduleId,
   } = options;
 
   const scheduleReference = await getScopedSchedulesWithEmployees(session, {
@@ -1207,11 +1258,24 @@ export async function getScheduleReferenceSnapshot(
     return emptySnapshot(month);
   }
 
+  const resolvedScheduleDataScheduleId =
+    scheduleDataScheduleId === undefined
+      ? null
+      : resolvePreferredScheduleId(scheduleReference.schedules, scheduleDataScheduleId, session);
+  const scheduleForDataWindow = resolvedScheduleDataScheduleId
+    ? scheduleReference.schedules.find((schedule) => schedule.id === resolvedScheduleDataScheduleId) ?? null
+    : null;
+  const schedulePageBounds = getSchedulePageDateBounds(month, scheduleForDataWindow);
   const { monthStart, monthEnd, windowMonths } =
-    assignmentWindow === "extended" ? getExtendedMonthBounds(month) : { ...getMonthBounds(month), windowMonths: [month] };
+    assignmentWindow === "extended"
+      ? getExtendedMonthBounds(month)
+      : assignmentWindow === "schedule-page"
+        ? { ...schedulePageBounds, windowMonths: getExtendedMonthBounds(month).windowMonths }
+        : { ...getMonthBounds(month), windowMonths: [month] };
   const completedMonths =
     completedSetWindow === "extended" ? getExtendedMonthBounds(month).windowMonths : [month];
   const visibleEmployeeIds = scheduleReference.employeeRows.map((employee) => employee.id);
+  const selectedScheduleEmployeeIds = scheduleForDataWindow?.employees.map((employee) => employee.id) ?? [];
 
   const [
     competenciesResult,
@@ -1256,47 +1320,73 @@ export async function getScheduleReferenceSnapshot(
       : Promise.resolve({ data: [], error: null }),
     includeAssignments
       ? visibleEmployeeIds.length > 0
-        ? fetchAllRows<AssignmentRow>(
-            supabase
+        ? (() => {
+            let query = supabase
               .from("schedule_assignments")
               .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
               .in("employee_id", visibleEmployeeIds)
               .gte("assignment_date", monthStart)
-              .lte("assignment_date", monthEnd)
-              .order("assignment_date")
-              .order("employee_id")
-              .order("schedule_id", { nullsFirst: false }),
-          )
+              .lte("assignment_date", monthEnd);
+
+            if (resolvedScheduleDataScheduleId) {
+              query = query.eq("schedule_id", resolvedScheduleDataScheduleId);
+            }
+
+            return fetchAllRows<AssignmentRow>(
+              query
+                .order("assignment_date")
+                .order("employee_id")
+                .order("schedule_id", { nullsFirst: false }),
+            );
+          })()
         : Promise.resolve({ data: [], error: null })
       : Promise.resolve({ data: [], error: null }),
     includeSubScheduleAssignments
-      ? fetchAllRows<SubScheduleAssignmentRow>(
-          applySessionScope(
-            supabase
-              .from("sub_schedule_assignments")
-              .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, time_code_id, notes, company_id, site_id, business_area_id"),
-            session,
-          )
-            .gte("assignment_date", monthStart)
-            .lte("assignment_date", monthEnd)
-            .order("assignment_date")
-            .order("employee_id")
-            .order("sub_schedule_id"),
-        )
+      ? resolvedScheduleDataScheduleId && selectedScheduleEmployeeIds.length === 0
+        ? Promise.resolve({ data: [], error: null })
+        : (() => {
+            let query = applySessionScope(
+              supabase
+                .from("sub_schedule_assignments")
+                .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, time_code_id, notes, company_id, site_id, business_area_id"),
+              session,
+            )
+              .gte("assignment_date", monthStart)
+              .lte("assignment_date", monthEnd);
+
+            if (resolvedScheduleDataScheduleId) {
+              query = query.in("employee_id", selectedScheduleEmployeeIds);
+            }
+
+            return fetchAllRows<SubScheduleAssignmentRow>(
+              query
+                .order("assignment_date")
+                .order("employee_id")
+                .order("sub_schedule_id"),
+            );
+          })()
       : Promise.resolve({ data: [], error: null }),
     includeOvertimeClaims
-      ? fetchAllRows<OvertimeClaimRow>(
-          applySessionScope(
+      ? (() => {
+          let query = applySessionScope(
             supabase
               .from("overtime_claims")
               .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
             session,
           )
             .gte("assignment_date", monthStart)
-            .lte("assignment_date", monthEnd)
-            .order("assignment_date")
-            .order("id"),
-        )
+            .lte("assignment_date", monthEnd);
+
+          if (resolvedScheduleDataScheduleId) {
+            query = query.eq("schedule_id", resolvedScheduleDataScheduleId);
+          }
+
+          return fetchAllRows<OvertimeClaimRow>(
+            query
+              .order("assignment_date")
+              .order("id"),
+          );
+        })()
       : Promise.resolve({ data: [], error: null }),
     includeManualOvertimePostings
       ? applySessionScope(
@@ -1307,12 +1397,20 @@ export async function getScheduleReferenceSnapshot(
         ).eq("month_key", month)
       : Promise.resolve({ data: [], error: null }),
     includeCompletedSets
-      ? applySessionScope(
-          supabase
-            .from("completed_sets")
-            .select("schedule_id, month_key, start_date, end_date, company_id, site_id, business_area_id"),
-          session,
-        ).in("month_key", completedMonths)
+      ? (() => {
+          let query = applySessionScope(
+            supabase
+              .from("completed_sets")
+              .select("schedule_id, month_key, start_date, end_date, company_id, site_id, business_area_id"),
+            session,
+          ).in("month_key", completedMonths);
+
+          if (resolvedScheduleDataScheduleId) {
+            query = query.eq("schedule_id", resolvedScheduleDataScheduleId);
+          }
+
+          return query;
+        })()
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -1398,6 +1496,7 @@ export async function getMetricsSnapshot(month: string, session?: AppSession | n
 export const getSchedulePageSnapshot = cache(async function getSchedulePageSnapshot(
   month: string,
   session?: AppSession | null,
+  selectedScheduleId?: string | null,
 ): Promise<SchedulePageSnapshot> {
   const snapshot = await getScheduleReferenceSnapshot(month, session, {
     includeEmployeeCompetencies: true,
@@ -1409,19 +1508,44 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     includeProjectedAssignments: true,
     includeOvertimeClaims: true,
     includeCompletedSets: true,
-    assignmentWindow: "extended",
+    assignmentWindow: "schedule-page",
     completedSetWindow: "extended",
+    scheduleDataScheduleId: selectedScheduleId,
   });
+  const resolvedSelectedScheduleId = resolvePreferredScheduleId(
+    snapshot.schedules,
+    selectedScheduleId,
+    session,
+  );
+  const assignments = resolvedSelectedScheduleId
+    ? snapshot.assignments.filter((assignment) => assignment.scheduleId === resolvedSelectedScheduleId)
+    : snapshot.assignments;
+  const projectedAssignments = resolvedSelectedScheduleId
+    ? snapshot.projectedAssignments.filter((assignment) => assignment.scheduleId === resolvedSelectedScheduleId)
+    : snapshot.projectedAssignments;
+  const overtimeClaims = resolvedSelectedScheduleId
+    ? snapshot.overtimeClaims.filter((claim) => claim.scheduleId === resolvedSelectedScheduleId)
+    : snapshot.overtimeClaims;
+  const completedSets = resolvedSelectedScheduleId
+    ? snapshot.completedSets.filter((set) => set.scheduleId === resolvedSelectedScheduleId)
+    : snapshot.completedSets;
+  const monthDays = getMonthDays(month);
 
   return {
     month: snapshot.month,
+    selectedScheduleId: resolvedSelectedScheduleId,
     schedules: snapshot.schedules,
     competencies: snapshot.competencies,
     timeCodes: snapshot.timeCodes,
-    assignments: snapshot.assignments,
-    projectedAssignments: snapshot.projectedAssignments,
-    overtimeClaims: snapshot.overtimeClaims,
-    completedSets: snapshot.completedSets,
+    assignments,
+    projectedAssignments,
+    overtimeClaims,
+    completedSets,
+    assignmentIndex: buildAssignmentIndex(assignments),
+    projectedAssignmentIndex: buildProjectedAssignmentIndex(projectedAssignments),
+    completedSetDateKeys: resolvedSelectedScheduleId
+      ? Array.from(getCompletedSetDatesForMonth(completedSets, resolvedSelectedScheduleId, monthDays))
+      : [],
   };
 });
 

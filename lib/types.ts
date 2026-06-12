@@ -217,7 +217,12 @@ export interface SchedulePageSnapshot
     | "projectedAssignments"
     | "overtimeClaims"
     | "completedSets"
-  > {}
+  > {
+  selectedScheduleId: string | null;
+  assignmentIndex: Record<string, { competencyId: string | null; timeCodeId: string | null; notes: string | null }>;
+  projectedAssignmentIndex: Record<string, StoredAssignment>;
+  completedSetDateKeys: string[];
+}
 
 export interface MutualsSnapshot {
   month: string;

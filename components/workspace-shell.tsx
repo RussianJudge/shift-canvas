@@ -1,6 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type MouseEvent,
+} from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -25,6 +35,22 @@ const PREFETCH_ROUTE_HREFS = new Set([
   "/profile",
 ]);
 const prefetchedWorkspaceHrefs = new Set<string>();
+
+type WorkspaceNavigationGuard = (href: string) => Promise<boolean> | boolean;
+type WorkspaceNavigationGuardSetter = (guard: WorkspaceNavigationGuard | null) => void;
+const WorkspaceNavigationGuardContext = createContext<WorkspaceNavigationGuardSetter>(() => {});
+
+export function useWorkspaceNavigationGuard(guard: WorkspaceNavigationGuard | null) {
+  const setNavigationGuard = useContext(WorkspaceNavigationGuardContext);
+
+  useEffect(() => {
+    setNavigationGuard(guard);
+
+    return () => {
+      setNavigationGuard(null);
+    };
+  }, [guard, setNavigationGuard]);
+}
 
 function isNotification(value: unknown): value is AppNotification {
   return (
@@ -86,7 +112,7 @@ type NavLinkProps = {
   activeHref: string;
   label: string;
   icon: React.ReactNode;
-  onNavigate: () => void;
+  onNavigate: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
   prefetchHref?: string | null;
   onIntentPrefetch?: (href: string) => void;
 };
@@ -146,7 +172,7 @@ function NavLink({
       className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
       title={label}
       aria-current={isActive ? "page" : undefined}
-      onClick={onNavigate}
+      onClick={(event) => onNavigate(event, href)}
       onMouseEnter={scheduleIntentPrefetch}
       onMouseLeave={clearPendingPrefetch}
       onFocus={scheduleIntentPrefetch}
@@ -339,6 +365,10 @@ export function WorkspaceShell({
   const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
   const [isUpdatingScope, startScopeTransition] = useTransition();
   const notificationPopoverRef = useRef<HTMLDivElement | null>(null);
+  const navigationGuardRef = useRef<WorkspaceNavigationGuard | null>(null);
+  const setNavigationGuard = useCallback<WorkspaceNavigationGuardSetter>((guard) => {
+    navigationGuardRef.current = guard;
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -498,8 +528,21 @@ export function WorkspaceShell({
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
   const selectedMonth = searchParams.get("month");
 
-  const handleNavLinkNavigate = () => {
+  const handleNavLinkNavigate = async (event: MouseEvent<HTMLAnchorElement>, href: string) => {
     setIsMobileSidebarOpen(false);
+
+    const guard = navigationGuardRef.current;
+
+    if (!guard) {
+      return;
+    }
+
+    event.preventDefault();
+    const canNavigate = await guard(href);
+
+    if (canNavigate) {
+      router.push(href);
+    }
   };
 
   const handleNavLinkPrefetch = (href: string) => {
@@ -579,17 +622,18 @@ export function WorkspaceShell({
   );
 
   return (
-    <main className="shell">
-      <section
-        className={`workspace-frame ${isCollapsed ? "workspace-frame--collapsed" : ""} ${
-          isMobileSidebarMode ? "workspace-frame--mobile" : ""
-        }`}
-      >
-        <aside
-          className={`workspace-sidebar ${isCollapsed ? "workspace-sidebar--collapsed" : ""} ${
-            isMobileSidebarMode ? "workspace-sidebar--mobile" : ""
-          } ${isMobileSidebarOpen ? "workspace-sidebar--mobile-open" : ""}`}
+    <WorkspaceNavigationGuardContext.Provider value={setNavigationGuard}>
+      <main className="shell">
+        <section
+          className={`workspace-frame ${isCollapsed ? "workspace-frame--collapsed" : ""} ${
+            isMobileSidebarMode ? "workspace-frame--mobile" : ""
+          }`}
         >
+          <aside
+            className={`workspace-sidebar ${isCollapsed ? "workspace-sidebar--collapsed" : ""} ${
+              isMobileSidebarMode ? "workspace-sidebar--mobile" : ""
+            } ${isMobileSidebarOpen ? "workspace-sidebar--mobile-open" : ""}`}
+          >
           <div className="workspace-brand-row">
             <div className="workspace-brand">
               <BrandLockup size="compact" />
@@ -784,6 +828,7 @@ export function WorkspaceShell({
           {children}
         </div>
       </section>
-    </main>
+      </main>
+    </WorkspaceNavigationGuardContext.Provider>
   );
 }

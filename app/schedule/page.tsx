@@ -25,7 +25,7 @@ async function ScheduleBoard({
   initialSelectedScheduleId: string | null;
 }) {
   const [snapshot, initialScheduleEmployeeOrderBySchedule] = await Promise.all([
-    getSchedulePageSnapshot(month, session),
+    getSchedulePageSnapshot(month, session, initialSelectedScheduleId),
     getScheduleEmployeeOrder(session),
   ]);
 
@@ -37,7 +37,7 @@ async function ScheduleBoard({
       canManageSetBuilder={session.role !== "worker"}
       canSwitchSchedule={true}
       forcedScheduleId={null}
-      initialSelectedScheduleId={initialSelectedScheduleId}
+      initialSelectedScheduleId={snapshot.selectedScheduleId ?? initialSelectedScheduleId}
     />
   );
 }
@@ -55,7 +55,7 @@ export default async function SchedulePage({
 
   return (
     <WorkspaceShellFrame viewer={session}>
-      <Suspense key={month} fallback={<ScheduleRouteLoading month={month} />}>
+      <Suspense key={`${month}:${initialSelectedScheduleId ?? ""}`} fallback={<ScheduleRouteLoading month={month} />}>
         <ScheduleBoard
           session={session}
           month={month}
