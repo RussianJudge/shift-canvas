@@ -1446,6 +1446,9 @@ export function MonthlyScheduler({
   // `baselineAssignments` tracks the last server-confirmed state. `draftAssignments`
   // layers in local edits and set actions until auto-save confirms them or the user reverts.
   const router = useRouter();
+  const navigateToScheduleRoute = useCallback((href: string) => {
+    window.location.assign(href);
+  }, []);
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [selectedScheduleId, setSelectedScheduleId] = useState(
     resolveInitialScheduleSelection(initialSnapshot, forcedScheduleId, initialSelectedScheduleId),
@@ -2470,7 +2473,7 @@ export function MonthlyScheduler({
 
       persistDraftAssignmentsToStorage(baselineAssignmentsRef.current, draftAssignmentsRef.current);
       setStatusMessage("Changing month");
-      router.push(`/schedule?month=${nextMonth}&schedule=${selectedScheduleId}`, { scroll: false });
+      navigateToScheduleRoute(`/schedule?month=${nextMonth}&schedule=${selectedScheduleId}`);
     });
   }
 
@@ -3057,7 +3060,7 @@ export function MonthlyScheduler({
                   setStatusMessage("Changing shift");
                   setSelectedCoverageCompetencyId(null);
                   setSelectedCompetencyFilter("all");
-                  router.push(`/schedule?month=${currentMonth}&schedule=${nextScheduleId}`, { scroll: false });
+                  navigateToScheduleRoute(`/schedule?month=${currentMonth}&schedule=${nextScheduleId}`);
                 });
               }}
             >

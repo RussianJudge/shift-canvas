@@ -80,6 +80,10 @@ function getWorkspaceRoutePath(href: string) {
   return pathname ?? href;
 }
 
+function shouldUseDocumentNavigation(href: string) {
+  return getWorkspaceRoutePath(href) === "/schedule";
+}
+
 function isWorkspaceRouteActive(pathname: string, href: string) {
   return pathname === getWorkspaceRoutePath(href);
 }
@@ -465,9 +469,17 @@ export function WorkspaceShell({
   const handleNavLinkNavigate = async (event: MouseEvent<HTMLAnchorElement>, href: string) => {
     setIsMobileSidebarOpen(false);
 
+    const isPlainPrimaryClick =
+      event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+    const useDocumentNavigation = isMobileSidebarMode || isCollapsed || shouldUseDocumentNavigation(href);
     const guard = navigationGuardRef.current;
 
     if (!guard) {
+      if (useDocumentNavigation && isPlainPrimaryClick) {
+        event.preventDefault();
+        window.location.assign(href);
+      }
+
       return;
     }
 
@@ -482,6 +494,11 @@ export function WorkspaceShell({
     }
 
     if (canNavigate) {
+      if (useDocumentNavigation && isPlainPrimaryClick) {
+        window.location.assign(href);
+        return;
+      }
+
       router.push(href);
     }
   };
