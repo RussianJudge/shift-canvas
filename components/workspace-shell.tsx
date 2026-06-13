@@ -22,18 +22,7 @@ const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
 const WORKSPACE_PREFETCH_DELAY_MS = 200;
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
-const PREFETCH_ROUTE_HREFS = new Set([
-  "/schedule",
-  "/overtime",
-  "/mutuals",
-  "/sub-schedules",
-  "/personnel",
-  "/schedules",
-  "/competencies",
-  "/time-codes",
-  "/metrics",
-  "/profile",
-]);
+const PREFETCH_ROUTE_HREFS = new Set<string>();
 const prefetchedWorkspaceHrefs = new Set<string>();
 
 type WorkspaceNavigationGuard = (href: string) => Promise<boolean> | boolean;
@@ -538,7 +527,14 @@ export function WorkspaceShell({
     }
 
     event.preventDefault();
-    const canNavigate = await guard(href);
+    let canNavigate = false;
+
+    try {
+      canNavigate = await guard(href);
+    } catch (error) {
+      console.error("Workspace navigation guard failed", error);
+      canNavigate = false;
+    }
 
     if (canNavigate) {
       router.push(href);

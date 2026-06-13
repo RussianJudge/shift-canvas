@@ -1,6 +1,6 @@
 import { WorkspaceShell, type AdminScopePayload } from "@/components/workspace-shell";
 import type { AppSession } from "@/lib/types";
-import { getAdminScopeOptions, getNotificationsForViewer } from "@/lib/data";
+import { getAdminScopeOptions } from "@/lib/data";
 
 async function loadAdminScope(viewer: AppSession): Promise<AdminScopePayload | null> {
   if (viewer.role !== "admin") {
@@ -25,16 +25,13 @@ export async function WorkspaceShellFrame({
   viewer: AppSession;
   children: React.ReactNode;
 }) {
-  const [initialAdminScope, initialNotifications] = await Promise.all([
-    loadAdminScope(viewer),
-    getNotificationsForViewer(viewer, { unreadOnly: true, limit: 5 }),
-  ]);
+  const initialAdminScope = await loadAdminScope(viewer);
 
   return (
     <WorkspaceShell
       viewer={viewer}
       initialAdminScope={initialAdminScope}
-      initialNotifications={initialNotifications}
+      initialNotifications={[]}
     >
       {children}
     </WorkspaceShell>

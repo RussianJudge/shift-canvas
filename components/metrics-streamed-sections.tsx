@@ -33,6 +33,8 @@ type MetricsSettingsCompetencyOption = Pick<Competency, "id" | "code" | "label" 
 type MetricsSettingsContextValue = {
   includedTeamIds: Set<string>;
   includedCompetencyIds: Set<string>;
+  hasTeamFilter: boolean;
+  hasCompetencyFilter: boolean;
   registerSettingsOptions: (input: {
     schedules: MetricsSettingsTeamOption[];
     competencies: MetricsSettingsCompetencyOption[];
@@ -42,6 +44,8 @@ type MetricsSettingsContextValue = {
 const EMPTY_METRICS_SETTINGS: MetricsSettingsContextValue = {
   includedTeamIds: new Set<string>(),
   includedCompetencyIds: new Set<string>(),
+  hasTeamFilter: false,
+  hasCompetencyFilter: false,
   registerSettingsOptions: () => {},
 };
 const MetricsSettingsContext = createContext<MetricsSettingsContextValue>(EMPTY_METRICS_SETTINGS);
@@ -89,9 +93,11 @@ function filterTeamMetricsBySettings<T extends { scheduleId: string }>(
   teamMetrics: T[],
   includedTeamIds: Set<string>,
   includedCompetencyIds: Set<string>,
+  hasTeamFilter: boolean,
+  hasCompetencyFilter: boolean,
 ): T[] {
   return teamMetrics
-    .filter((team) => includedTeamIds.has(team.scheduleId))
+    .filter((team) => !hasTeamFilter || includedTeamIds.has(team.scheduleId))
     .map((team) => {
       const nextTeam = { ...team } as T & {
         competencyMetrics?: Array<{ competencyId: string }>;
@@ -100,21 +106,21 @@ function filterTeamMetricsBySettings<T extends { scheduleId: string }>(
       };
 
       if (Array.isArray(nextTeam.competencyMetrics)) {
-        nextTeam.competencyMetrics = nextTeam.competencyMetrics.filter((metric) =>
-          includedCompetencyIds.has(metric.competencyId),
-        );
+        nextTeam.competencyMetrics = hasCompetencyFilter
+          ? nextTeam.competencyMetrics.filter((metric) => includedCompetencyIds.has(metric.competencyId))
+          : nextTeam.competencyMetrics;
       }
 
       if (Array.isArray(nextTeam.shiftFragilityMetrics)) {
-        nextTeam.shiftFragilityMetrics = nextTeam.shiftFragilityMetrics.filter((metric) =>
-          includedCompetencyIds.has(metric.competencyId),
-        );
+        nextTeam.shiftFragilityMetrics = hasCompetencyFilter
+          ? nextTeam.shiftFragilityMetrics.filter((metric) => includedCompetencyIds.has(metric.competencyId))
+          : nextTeam.shiftFragilityMetrics;
       }
 
       if (Array.isArray(nextTeam.topOvertimeCompetencies)) {
-        nextTeam.topOvertimeCompetencies = nextTeam.topOvertimeCompetencies.filter((metric) =>
-          includedCompetencyIds.has(metric.competencyId),
-        );
+        nextTeam.topOvertimeCompetencies = hasCompetencyFilter
+          ? nextTeam.topOvertimeCompetencies.filter((metric) => includedCompetencyIds.has(metric.competencyId))
+          : nextTeam.topOvertimeCompetencies;
       }
 
       return nextTeam;
@@ -171,9 +177,17 @@ export function MetricsPageFrame({
     () => ({
       includedTeamIds: effectiveIncludedTeamIds,
       includedCompetencyIds: effectiveIncludedCompetencyIds,
+      hasTeamFilter: includedTeamIds !== null,
+      hasCompetencyFilter: includedCompetencyIds !== null,
       registerSettingsOptions,
     }),
-    [effectiveIncludedCompetencyIds, effectiveIncludedTeamIds, registerSettingsOptions],
+    [
+      effectiveIncludedCompetencyIds,
+      effectiveIncludedTeamIds,
+      includedCompetencyIds,
+      includedTeamIds,
+      registerSettingsOptions,
+    ],
   );
 
   function navigateMonth(delta: number) {
@@ -342,15 +356,22 @@ export function MetricsPageFrame({
 }
 
 export function MetricsCompetenciesSection({ snapshot }: { snapshot: SchedulerSnapshot }) {
-  const { includedTeamIds, includedCompetencyIds } = useMetricsSettings(snapshot);
+  const { includedTeamIds, includedCompetencyIds, hasTeamFilter, hasCompetencyFilter } = useMetricsSettings(snapshot);
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
   const allTeamMetrics = useMemo(
     () => getTeamMetrics(snapshot, [], [], metricsAnchorDate),
     [metricsAnchorDate, snapshot],
   );
   const teamMetrics = useMemo(
-    () => filterTeamMetricsBySettings(allTeamMetrics, includedTeamIds, includedCompetencyIds),
-    [allTeamMetrics, includedCompetencyIds, includedTeamIds],
+    () =>
+      filterTeamMetricsBySettings(
+        allTeamMetrics,
+        includedTeamIds,
+        includedCompetencyIds,
+        hasTeamFilter,
+        hasCompetencyFilter,
+      ),
+    [allTeamMetrics, hasCompetencyFilter, hasTeamFilter, includedCompetencyIds, includedTeamIds],
   );
   const maxQualifiedPeople = Math.max(
     1,
@@ -773,7 +794,7 @@ export function MetricsOvertimeSection({
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
 }) {
-  const { includedTeamIds, includedCompetencyIds } = useMetricsSettings(snapshot);
+  const { includedTeamIds, includedCompetencyIds, hasTeamFilter, hasCompetencyFilter } = useMetricsSettings(snapshot);
   const [overtimeWindow, setOvertimeWindow] = useState<OvertimeWindow>("30d");
   const [selectedOvertimeTeamId, setSelectedOvertimeTeamId] = useState<string | null>(null);
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
@@ -793,18 +814,25 @@ export function MetricsOvertimeSection({
     () =>
       filteredEntries.filter(
         (entry) =>
-          includedTeamIds.has(entry.scheduleId) &&
-          (!entry.competencyId || includedCompetencyIds.has(entry.competencyId)),
+          (!hasTeamFilter || includedTeamIds.has(entry.scheduleId)) &&
+          (!hasCompetencyFilter || !entry.competencyId || includedCompetencyIds.has(entry.competencyId)),
       ),
-    [filteredEntries, includedCompetencyIds, includedTeamIds],
+    [filteredEntries, hasCompetencyFilter, hasTeamFilter, includedCompetencyIds, includedTeamIds],
   );
   const allTeamMetrics = useMemo(
     () => getTeamMetrics(snapshot, settingsFilteredEntries, [], metricsAnchorDate),
     [metricsAnchorDate, settingsFilteredEntries, snapshot],
   );
   const teamMetrics = useMemo(
-    () => filterTeamMetricsBySettings(allTeamMetrics, includedTeamIds, includedCompetencyIds),
-    [allTeamMetrics, includedCompetencyIds, includedTeamIds],
+    () =>
+      filterTeamMetricsBySettings(
+        allTeamMetrics,
+        includedTeamIds,
+        includedCompetencyIds,
+        hasTeamFilter,
+        hasCompetencyFilter,
+      ),
+    [allTeamMetrics, hasCompetencyFilter, hasTeamFilter, includedCompetencyIds, includedTeamIds],
   );
   const maxOvertimeShifts = Math.max(1, ...teamMetrics.map((team) => team.overtimeShifts));
   const selectedOvertimeTeam = useMemo(
@@ -977,7 +1005,7 @@ export function MetricsFatigueSection({
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
 }) {
-  const { includedTeamIds } = useMetricsSettings(snapshot);
+  const { includedTeamIds, hasTeamFilter } = useMetricsSettings(snapshot);
   const allTeamFatigueMetrics = useMemo(
     () =>
       getTeamFatigueMetrics({
@@ -989,8 +1017,11 @@ export function MetricsFatigueSection({
     [assignmentHistory, overtimeHistory, snapshot],
   );
   const teamFatigueMetrics = useMemo(
-    () => allTeamFatigueMetrics.filter((team) => includedTeamIds.has(team.scheduleId)),
-    [allTeamFatigueMetrics, includedTeamIds],
+    () =>
+      hasTeamFilter
+        ? allTeamFatigueMetrics.filter((team) => includedTeamIds.has(team.scheduleId))
+        : allTeamFatigueMetrics,
+    [allTeamFatigueMetrics, hasTeamFilter, includedTeamIds],
   );
 
   return (
@@ -1081,7 +1112,7 @@ export function MetricsFragilitySection({
   overtimeHistory: OvertimeClaim[];
   assignmentHistory: StoredAssignment[];
 }) {
-  const { includedTeamIds, includedCompetencyIds } = useMetricsSettings(snapshot);
+  const { includedTeamIds, includedCompetencyIds, hasTeamFilter, hasCompetencyFilter } = useMetricsSettings(snapshot);
   const [fragilityWindow, setFragilityWindow] = useState<FragilityWindow>("1y");
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
   const filteredOvertimeHistory = useMemo(() => {
@@ -1100,18 +1131,25 @@ export function MetricsFragilitySection({
     () =>
       filteredEntries.filter(
         (entry) =>
-          includedTeamIds.has(entry.scheduleId) &&
-          (!entry.competencyId || includedCompetencyIds.has(entry.competencyId)),
+          (!hasTeamFilter || includedTeamIds.has(entry.scheduleId)) &&
+          (!hasCompetencyFilter || !entry.competencyId || includedCompetencyIds.has(entry.competencyId)),
       ),
-    [filteredEntries, includedCompetencyIds, includedTeamIds],
+    [filteredEntries, hasCompetencyFilter, hasTeamFilter, includedCompetencyIds, includedTeamIds],
   );
   const allTeamMetrics = useMemo(
     () => getTeamMetrics(snapshot, [], settingsFilteredEntries, metricsAnchorDate),
     [metricsAnchorDate, settingsFilteredEntries, snapshot],
   );
   const teamMetrics = useMemo(
-    () => filterTeamMetricsBySettings(allTeamMetrics, includedTeamIds, includedCompetencyIds),
-    [allTeamMetrics, includedCompetencyIds, includedTeamIds],
+    () =>
+      filterTeamMetricsBySettings(
+        allTeamMetrics,
+        includedTeamIds,
+        includedCompetencyIds,
+        hasTeamFilter,
+        hasCompetencyFilter,
+      ),
+    [allTeamMetrics, hasCompetencyFilter, hasTeamFilter, includedCompetencyIds, includedTeamIds],
   );
   const maxFragilityScore = Math.max(
     1,
@@ -1213,7 +1251,7 @@ export function MetricsTimeCodeSection({
   snapshot: SchedulerSnapshot;
   assignmentHistory: StoredAssignment[];
 }) {
-  const { includedTeamIds } = useMetricsSettings(snapshot);
+  const { includedTeamIds, hasTeamFilter } = useMetricsSettings(snapshot);
   const [timeCodeWindow, setTimeCodeWindow] = useState<TimeCodeWindow>("30d");
   const [selectedTimeCodeId, setSelectedTimeCodeId] = useState(snapshot.timeCodes[0]?.id ?? "");
   const metricsAnchorDate = useMemo(() => getMetricsAnchorDate(snapshot.month), [snapshot.month]);
@@ -1233,8 +1271,11 @@ export function MetricsTimeCodeSection({
     [filteredAssignmentHistory, selectedTimeCodeId, snapshot],
   );
   const teamTimeCodeMetrics = useMemo(
-    () => allTeamTimeCodeMetrics.filter((team) => includedTeamIds.has(team.scheduleId)),
-    [allTeamTimeCodeMetrics, includedTeamIds],
+    () =>
+      hasTeamFilter
+        ? allTeamTimeCodeMetrics.filter((team) => includedTeamIds.has(team.scheduleId))
+        : allTeamTimeCodeMetrics,
+    [allTeamTimeCodeMetrics, hasTeamFilter, includedTeamIds],
   );
   const maxTimeCodeShifts = Math.max(1, ...teamTimeCodeMetrics.map((team) => team.entryCount));
 
