@@ -41,20 +41,24 @@ select {
 }
 
 .shell {
-  padding: 2rem;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 .workspace-frame {
   max-width: 100%;
-  min-height: calc(100vh - 4rem);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 2rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 249, 240, 0.88)),
-    var(--surface);
-  box-shadow: var(--shadow);
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   overflow: hidden;
-  backdrop-filter: blur(18px);
+  backdrop-filter: none;
   display: grid;
   grid-template-columns: 16rem minmax(0, 1fr);
 }
@@ -67,11 +71,15 @@ select {
   display: flex;
   flex-direction: column;
   gap: 2rem;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1.4rem 1rem;
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(255, 252, 248, 0.95), rgba(245, 236, 223, 0.85));
-  min-height: 100%;
 }
 
 .workspace-sidebar--collapsed {
@@ -511,8 +519,13 @@ button.workspace-nav-link {
 }
 
 .workspace-content {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   padding: 1.25rem;
   min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .workspace-mobile-toolbar,
@@ -4095,12 +4108,14 @@ button.workspace-nav-link {
   }
 
   .shell {
-    padding: 1rem;
+    padding: 0;
   }
 
   .workspace-frame {
-    min-height: calc(100vh - 2rem);
-    border-radius: 1.5rem;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    border-radius: 0;
     grid-template-columns: 13rem minmax(0, 1fr);
   }
 
@@ -4116,7 +4131,9 @@ button.workspace-nav-link {
     border-right: 1px solid var(--line);
     border-bottom: 0;
     gap: 1.1rem;
-    min-height: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
   }
 
   .workspace-admin-scope__fields {
@@ -4698,12 +4715,16 @@ button.workspace-nav-link {
 @media (max-width: 600px) {
   .workspace-frame,
   .workspace-frame--collapsed {
-    min-height: calc(100vh - 1.3rem);
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     grid-template-columns: minmax(0, 1fr);
     position: relative;
   }
 
   .workspace-content {
+    height: 100vh;
+    height: 100dvh;
     padding: 0.65rem;
   }
 
@@ -4725,7 +4746,10 @@ button.workspace-nav-link {
     inset: 0 auto 0 0;
     z-index: 30;
     width: min(18rem, calc(100vw - 1.5rem));
-    min-height: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow-y: auto;
     border-right: 1px solid var(--line);
     border-bottom: 0;
     gap: 1.15rem;
