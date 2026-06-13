@@ -270,19 +270,7 @@ function isNonWorkingTimeCode(timeCode: TimeCode | undefined) {
     return false;
   }
 
-  const code = timeCode.code.trim().toUpperCase();
-  const label = timeCode.label.trim().toUpperCase();
-
-  return (
-    code === "OFF" ||
-    code === "V" ||
-    code === "VAC" ||
-    code === "VACATION" ||
-    code === "BOT" ||
-    label.includes("BOOKED OFF") ||
-    label.includes("VACATION") ||
-    label.includes("LEAVE")
-  );
+  return timeCode.workStatus === "off";
 }
 
 function isWorkingAssignment(assignment: StoredAssignment, timeCodeMap: Record<string, TimeCode>) {
@@ -494,6 +482,13 @@ export function getTeamFatigueMetrics({
 
       for (const date of scanDates) {
         const assignmentEntries = assignmentsByEmployeeDate.get(`${employee.id}:${date}`) ?? [];
+        const hasNonWorkingAssignment = assignmentEntries.some((assignment) => {
+          if (!assignment.timeCodeId || assignment.competencyId) {
+            return false;
+          }
+
+          return isNonWorkingTimeCode(timeCodeMap[assignment.timeCodeId]);
+        });
         const hasWorkedAssignment = assignmentEntries.some((assignment) => {
           if (assignment.competencyId) {
             return true;
@@ -511,10 +506,10 @@ export function getTeamFatigueMetrics({
         /**
          * Fatigue is intentionally based on worked-day exposure only. The base
          * rotation counts as work, overtime/mutual/saved work entries add work
-         * exposure, and obvious leave/off time codes break the streak.
+         * exposure, and off time codes break the base rostered-work streak.
          */
         const workedDate =
-          defaultWorkedShift || hasOvertimeClaim || hasWorkedAssignment;
+          hasWorkedAssignment || hasOvertimeClaim || (!hasNonWorkingAssignment && defaultWorkedShift);
 
         currentStreak = workedDate ? currentStreak + 1 : 0;
 

@@ -52,13 +52,13 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
     { id: "comp-pack-9", code: "Pack 9", label: "Final QA hold", colorToken: "rose", requiredStaff: 1 },
   ],
   timeCodes: [
-    { id: "time-ill", code: "ILL", label: "Illness", colorToken: "rose", usageMode: "manual" },
-    { id: "time-absa", code: "ABSA", label: "Absent", colorToken: "orange", usageMode: "manual" },
-    { id: "time-bot", code: "BOT", label: "Booked off", colorToken: "amber", usageMode: "manual" },
-    { id: "time-days", code: "DAY", label: "Day shift", colorToken: "blue", usageMode: "manual" },
-    { id: "time-nights", code: "NIGHT", label: "Night shift", colorToken: "violet", usageMode: "manual" },
-    { id: "time-sim", code: "SIM", label: "Simulation", colorToken: "teal", usageMode: "manual" },
-    { id: "time-v", code: "V", label: "Vacation", colorToken: "lime", usageMode: "manual" },
+    { id: "time-ill", code: "ILL", label: "Illness", colorToken: "rose", usageMode: "manual", workStatus: "off" },
+    { id: "time-absa", code: "ABSA", label: "Absent", colorToken: "orange", usageMode: "manual", workStatus: "working" },
+    { id: "time-bot", code: "BOT", label: "Booked off", colorToken: "amber", usageMode: "manual", workStatus: "working" },
+    { id: "time-days", code: "DAY", label: "Day shift", colorToken: "blue", usageMode: "manual", workStatus: "working" },
+    { id: "time-nights", code: "NIGHT", label: "Night shift", colorToken: "violet", usageMode: "manual", workStatus: "working" },
+    { id: "time-sim", code: "SIM", label: "Simulation", colorToken: "teal", usageMode: "manual", workStatus: "working" },
+    { id: "time-v", code: "V", label: "Vacation", colorToken: "lime", usageMode: "manual", workStatus: "off" },
   ],
   schedules: [
     {

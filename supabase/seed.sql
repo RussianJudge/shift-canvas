@@ -73,20 +73,22 @@ set
   site_id = excluded.site_id,
   business_area_id = excluded.business_area_id;
 
-insert into time_codes (id, code, label, color_token, company_id, site_id, business_area_id)
+insert into time_codes (id, code, label, color_token, usage_mode, work_status, company_id, site_id, business_area_id)
 values
-  ('time-ill', 'ILL', 'Illness', 'rose', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('time-absa', 'ABSA', 'Absent', 'orange', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('time-bot', 'BOT', 'Booked off', 'amber', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('time-days', 'DAY', 'Day shift', 'blue', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('time-nights', 'NIGHT', 'Night shift', 'violet', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('time-sim', 'SIM', 'Simulation', 'teal', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
-  ('time-v', 'V', 'Vacation', 'lime', 'company-suncor', 'site-mildred-lake', 'business-area-sgd')
+  ('time-ill', 'ILL', 'Illness', 'rose', 'manual', 'off', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('time-absa', 'ABSA', 'Absent', 'orange', 'manual', 'working', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('time-bot', 'BOT', 'Booked off', 'amber', 'manual', 'working', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('time-days', 'DAY', 'Day shift', 'blue', 'manual', 'working', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('time-nights', 'NIGHT', 'Night shift', 'violet', 'manual', 'working', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('time-sim', 'SIM', 'Simulation', 'teal', 'manual', 'working', 'company-suncor', 'site-mildred-lake', 'business-area-sgd'),
+  ('time-v', 'V', 'Vacation', 'lime', 'manual', 'off', 'company-suncor', 'site-mildred-lake', 'business-area-sgd')
 on conflict (id) do update
 set
   code = excluded.code,
   label = excluded.label,
   color_token = excluded.color_token,
+  usage_mode = excluded.usage_mode,
+  work_status = excluded.work_status,
   company_id = excluded.company_id,
   site_id = excluded.site_id,
   business_area_id = excluded.business_area_id;

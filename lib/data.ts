@@ -115,6 +115,7 @@ type TimeCodeRow = {
   label: string;
   color_token: string | null;
   usage_mode: TimeCode["usageMode"] | null;
+  work_status: TimeCode["workStatus"] | null;
   company_id: string;
   site_id: string;
   business_area_id: string;
@@ -609,6 +610,7 @@ function mapTimeCodes(rows: TimeCodeRow[]) {
     label: row.label,
     colorToken: row.color_token ?? "slate",
     usageMode: row.usage_mode ?? "manual",
+    workStatus: row.work_status ?? "working",
     companyId: row.company_id,
     siteId: row.site_id,
     businessAreaId: row.business_area_id,
@@ -941,7 +943,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       session,
     ).order("code"),
     applySessionScope(
-      supabase.from("time_codes").select("id, code, label, color_token, usage_mode, company_id, site_id, business_area_id"),
+      supabase.from("time_codes").select("id, code, label, color_token, usage_mode, work_status, company_id, site_id, business_area_id"),
       session,
     ).order("code"),
     applySessionScope(
@@ -1123,7 +1125,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     missingReferencedTimeCodeIds.length > 0
       ? await supabase
           .from("time_codes")
-          .select("id, code, label, color_token, usage_mode, company_id, site_id, business_area_id")
+          .select("id, code, label, color_token, usage_mode, work_status, company_id, site_id, business_area_id")
           .in("id", missingReferencedTimeCodeIds)
           .eq("company_id", session?.companyId ?? "")
       : { data: [], error: null };
@@ -1296,7 +1298,7 @@ export async function getScheduleReferenceSnapshot(
       : Promise.resolve({ data: [], error: null }),
     includeTimeCodes
       ? applySessionScope(
-          supabase.from("time_codes").select("id, code, label, color_token, usage_mode, company_id, site_id, business_area_id"),
+          supabase.from("time_codes").select("id, code, label, color_token, usage_mode, work_status, company_id, site_id, business_area_id"),
           session,
         ).order("code")
       : Promise.resolve({ data: [], error: null }),
@@ -1775,7 +1777,7 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
         session,
       ).order("code"),
       applySessionScope(
-        supabase.from("time_codes").select("id, code, label, color_token, usage_mode, company_id, site_id, business_area_id"),
+        supabase.from("time_codes").select("id, code, label, color_token, usage_mode, work_status, company_id, site_id, business_area_id"),
         session,
       ).order("code"),
       applySessionScope(
@@ -2172,7 +2174,7 @@ export async function getTimeCodesSnapshot(month: string, session?: AppSession |
   const timeCodesResult = await applySessionScope(
     supabase
     .from("time_codes")
-    .select("id, code, label, color_token, usage_mode, company_id, site_id, business_area_id"),
+    .select("id, code, label, color_token, usage_mode, work_status, company_id, site_id, business_area_id"),
     session,
   )
     .order("code");

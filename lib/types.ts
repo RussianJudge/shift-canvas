@@ -8,6 +8,7 @@ export type MutualStatus =
   | "cancelled"
   | "rejected";
 export type TimeCodeUsageMode = "manual" | "projected_only" | "both";
+export type TimeCodeWorkStatus = "working" | "off";
 
 export type ScheduleCode = "601" | "602" | "603" | "604";
 
@@ -50,6 +51,7 @@ export interface TimeCode extends OrganizationScope {
   label: string;
   colorToken: string;
   usageMode: TimeCodeUsageMode;
+  workStatus: TimeCodeWorkStatus;
 }
 
 export interface Employee extends OrganizationScope {
@@ -388,6 +390,7 @@ export interface TimeCodeUpdate {
   label: string;
   colorToken: string;
   usageMode: TimeCodeUsageMode;
+  workStatus: TimeCodeWorkStatus;
 }
 
 export interface SaveTimeCodesInput {

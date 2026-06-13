@@ -4,10 +4,15 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 
 import { saveTimeCodes } from "@/app/actions";
-import type { SaveTimeCodesInput, SchedulerSnapshot, TimeCodeUpdate, TimeCodeUsageMode } from "@/lib/types";
+import type {
+  SaveTimeCodesInput,
+  SchedulerSnapshot,
+  TimeCodeUpdate,
+  TimeCodeUsageMode,
+  TimeCodeWorkStatus,
+} from "@/lib/types";
 
 const COLOR_TOKENS = ["amber", "teal", "violet", "rose", "blue", "lime", "orange", "slate"];
-const OFF_TIME_CODE_CODES = new Set(["V", "TR", "SB", "OFF", "ILL"]);
 
 type EditableTimeCode = {
   id: string;
@@ -15,6 +20,7 @@ type EditableTimeCode = {
   label: string;
   colorToken: string;
   usageMode: TimeCodeUsageMode;
+  workStatus: TimeCodeWorkStatus;
 };
 
 function RemoveTimeCodeModal({
@@ -77,6 +83,7 @@ function normalizeTimeCode(timeCode: EditableTimeCode): TimeCodeUpdate {
     label: timeCode.label.trim(),
     colorToken: timeCode.colorToken,
     usageMode: timeCode.usageMode,
+    workStatus: timeCode.workStatus,
   };
 }
 
@@ -99,10 +106,6 @@ function getTimeCodeIssues(timeCode: EditableTimeCode) {
   return issues;
 }
 
-function isOffTimeCode(timeCode: EditableTimeCode) {
-  return OFF_TIME_CODE_CODES.has(timeCode.code.trim().toUpperCase());
-}
-
 /** CRUD editor for the time codes that can be assigned on the scheduler. */
 export function TimeCodesPanel({
   snapshot,
@@ -117,6 +120,7 @@ export function TimeCodesPanel({
         label: timeCode.label,
         colorToken: timeCode.colorToken,
         usageMode: timeCode.usageMode,
+        workStatus: timeCode.workStatus,
       })),
     [snapshot.timeCodes],
   );
@@ -168,8 +172,8 @@ export function TimeCodesPanel({
   const pendingRemoveTimeCode = pendingRemoveTimeCodeId
     ? timeCodes.find((timeCode) => timeCode.id === pendingRemoveTimeCodeId) ?? null
     : null;
-  const workingTimeCodes = timeCodes.filter((timeCode) => !isOffTimeCode(timeCode));
-  const offTimeCodes = timeCodes.filter(isOffTimeCode);
+  const workingTimeCodes = timeCodes.filter((timeCode) => timeCode.workStatus === "working");
+  const offTimeCodes = timeCodes.filter((timeCode) => timeCode.workStatus === "off");
 
   function updateTimeCode(
     timeCodeId: string,
@@ -187,6 +191,7 @@ export function TimeCodesPanel({
       label: "New time code",
       colorToken: "slate",
       usageMode: "manual",
+      workStatus: "working",
     };
 
     setTimeCodes((current) => [nextTimeCode, ...current]);
@@ -245,7 +250,7 @@ export function TimeCodesPanel({
     if (groupedTimeCodes.length === 0) {
       return (
         <tr>
-          <td colSpan={6}>
+          <td colSpan={7}>
             <div className="empty-state">
               <strong>{emptyMessage}</strong>
               <span>Add or rename a code to place it in this group.</span>
@@ -322,6 +327,21 @@ export function TimeCodesPanel({
           </select>
         </td>
         <td>
+          <select
+            className="table-select"
+            value={timeCode.workStatus}
+            onChange={(event) =>
+              updateTimeCode(timeCode.id, (current) => ({
+                ...current,
+                workStatus: event.target.value as TimeCodeWorkStatus,
+              }))
+            }
+          >
+            <option value="working">Working</option>
+            <option value="off">Off</option>
+          </select>
+        </td>
+        <td>
           <span className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()}`}>
             {timeCode.code}
           </span>
@@ -350,7 +370,7 @@ export function TimeCodesPanel({
         <div className="metrics-section__header">
           <div className="metrics-section__title-group">
             <h2 className="metrics-section__title">{title}</h2>
-            <p>{description}</p>
+            {description ? <p>{description}</p> : null}
           </div>
         </div>
 
@@ -362,6 +382,7 @@ export function TimeCodesPanel({
                 <th>Label</th>
                 <th>Color</th>
                 <th>Usage</th>
+                <th>Counts as</th>
                 <th>Preview</th>
                 <th />
               </tr>
@@ -408,13 +429,13 @@ export function TimeCodesPanel({
       <div className="time-code-sections">
         {renderTimeCodeTable(
           "Working Time Codes",
-          "Codes used for worked time, coverage, and active shift tracking.",
+          "",
           workingTimeCodes,
           "No working time codes yet.",
         )}
         {renderTimeCodeTable(
           "Off Time Codes",
-          "V, TR, SB, OFF, and ILL are grouped here as non-working time.",
+          "",
           offTimeCodes,
           "No off time codes yet.",
         )}

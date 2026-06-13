@@ -5970,6 +5970,7 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
     label: update.label.trim(),
     color_token: update.colorToken,
     usage_mode: update.usageMode,
+    work_status: update.workStatus,
     ...toDatabaseScope(sessionScope),
   }));
 
