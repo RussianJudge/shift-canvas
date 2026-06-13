@@ -956,6 +956,50 @@ export async function requestPasswordReset(formData: FormData) {
   redirect("/sign-in?mode=reset&notice=reset-sent");
 }
 
+export type ProfilePasswordResetState = {
+  status: "idle" | "success" | "error";
+  message: string;
+};
+
+export async function requestProfilePasswordReset(
+  _previousState: ProfilePasswordResetState,
+): Promise<ProfilePasswordResetState> {
+  const session = await getAppSession();
+
+  if (!session) {
+    return {
+      status: "error",
+      message: "Sign in again before requesting a password change.",
+    };
+  }
+
+  const authClient = getSupabaseServerClient();
+
+  if (!authClient) {
+    return {
+      status: "error",
+      message: "Supabase authentication is unavailable right now. Try again in a moment.",
+    };
+  }
+
+  const origin = await getAuthRedirectOrigin();
+  const { error } = await authClient.auth.resetPasswordForEmail(session.email, {
+    redirectTo: `${origin}/reset-password`,
+  });
+
+  if (error) {
+    return {
+      status: "error",
+      message: "Could not send the password change email. Try again in a moment.",
+    };
+  }
+
+  return {
+    status: "success",
+    message: `Password change email sent to ${session.email}.`,
+  };
+}
+
 /** Ends the current app session and sends the browser back to sign-in. */
 export async function signOut() {
   await clearAppSession();

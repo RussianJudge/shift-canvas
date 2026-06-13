@@ -362,15 +362,6 @@ button.workspace-nav-link {
   border-top: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
 }
 
-.workspace-notifications {
-  position: relative;
-  margin-top: 0;
-}
-
-.workspace-notifications__button {
-  position: relative;
-}
-
 .workspace-notifications__badge {
   display: inline-flex;
   align-items: center;
@@ -386,72 +377,7 @@ button.workspace-nav-link {
   margin-left: auto;
 }
 
-.workspace-notifications-popover {
-  position: absolute;
-  left: calc(100% + 0.9rem);
-  bottom: 0;
-  z-index: 35;
-  width: min(22rem, calc(100vw - 2rem));
-  display: grid;
-  gap: 0.85rem;
-  padding: 0.9rem;
-  border: 1px solid rgba(23, 20, 17, 0.1);
-  border-radius: 1.15rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 248, 238, 0.96)),
-    var(--surface);
-  box-shadow: 0 24px 60px rgba(23, 20, 17, 0.18);
-}
-
-.workspace-notifications-popover__header,
-.workspace-notifications-popover__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.workspace-notifications-popover__header div {
-  display: grid;
-  gap: 0.15rem;
-}
-
-.workspace-notifications-popover__header strong {
-  font-family: var(--font-display), sans-serif;
-  font-size: 1rem;
-}
-
-.workspace-notifications-popover__header span {
-  color: var(--muted);
-  font-size: 0.74rem;
-}
-
-.workspace-notifications-popover__header a,
-.workspace-notifications-popover__footer a {
-  color: var(--ink);
-  font-size: 0.82rem;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.workspace-notifications-popover__footer {
-  justify-content: flex-end;
-}
-
-.workspace-notifications-popover__settings {
-  width: 2.35rem;
-  height: 2.35rem;
-}
-
-.workspace-notifications-popover__list {
-  display: grid;
-  gap: 0.55rem;
-  max-height: min(20rem, 54vh);
-  overflow-y: auto;
-}
-
-.workspace-notification-item,
-.workspace-notifications-empty {
+.workspace-notification-item {
   display: grid;
   gap: 0.25rem;
   padding: 0.8rem;
@@ -461,8 +387,7 @@ button.workspace-nav-link {
 }
 
 .workspace-notification-item span,
-.workspace-notification-item small,
-.workspace-notifications-empty span {
+.workspace-notification-item small {
   color: var(--muted);
   font-size: 0.78rem;
 }
@@ -1008,6 +933,23 @@ button.workspace-nav-link {
   display: grid;
   gap: 0.8rem;
   padding: 0 1.5rem 1.5rem;
+}
+
+.profile-section--password {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.profile-section--password div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.profile-section--password p {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .panel-heading {
@@ -4848,16 +4790,6 @@ button.workspace-nav-link {
     gap: 0.5rem;
     padding: 0.75rem 0.1rem 0;
     border-top: 1px solid var(--line);
-  }
-
-  .workspace-notifications-popover {
-    position: fixed;
-    left: 1rem;
-    right: 1rem;
-    bottom: 1rem;
-    width: auto;
-    max-height: calc(100vh - 2rem);
-    overflow: auto;
   }
 
   .workspace-session__meta {

@@ -38,17 +38,6 @@ export function useWorkspaceNavigationGuard(guard: WorkspaceNavigationGuard | nu
   }, [guard, setNavigationGuard]);
 }
 
-function isNotification(value: unknown): value is AppNotification {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    "title" in value &&
-    "body" in value &&
-    "createdAt" in value
-  );
-}
-
 function getCurrentMonthKey(now = new Date()) {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   return `${now.getFullYear()}-${month}`;
@@ -265,16 +254,6 @@ function NotificationsIcon() {
   );
 }
 
-/** Gear icon used for notification settings. */
-function NotificationSettingsIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 8.25a3.75 3.75 0 1 1 0 7.5a3.75 3.75 0 0 1 0-7.5Z" />
-      <path d="M19.5 12a7.46 7.46 0 0 0-.15-1.5l2.1-1.62l-2-3.46l-2.48 1a7.6 7.6 0 0 0-2.6-1.5L14 2.25h-4l-.38 2.67a7.6 7.6 0 0 0-2.6 1.5l-2.48-1l-2 3.46l2.1 1.62a7.4 7.4 0 0 0 0 3l-2.1 1.62l2 3.46l2.48-1a7.6 7.6 0 0 0 2.6 1.5l.38 2.67h4l.38-2.67a7.6 7.6 0 0 0 2.6-1.5l2.48 1l2-3.46l-2.1-1.62c.1-.49.15-.99.15-1.5Z" />
-    </svg>
-  );
-}
-
 /** Responsive shell with a collapsible toolbar and role-scoped nav. */
 export function WorkspaceShell({
   children,
@@ -299,10 +278,8 @@ export function WorkspaceShell({
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(initialAdminScope);
   const [isAdminScopeCollapsed, setIsAdminScopeCollapsed] = useState(true);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
   const [isUpdatingScope, startScopeTransition] = useTransition();
-  const notificationPopoverRef = useRef<HTMLDivElement | null>(null);
   const navigationGuardRef = useRef<WorkspaceNavigationGuard | null>(null);
   const setNavigationGuard = useCallback<WorkspaceNavigationGuardSetter>((guard) => {
     navigationGuardRef.current = guard;
@@ -358,64 +335,6 @@ export function WorkspaceShell({
     setNotifications(initialNotifications);
   }, [initialNotifications]);
 
-  useEffect(() => {
-    if (!isNotificationsOpen) {
-      return;
-    }
-
-    const controller = new AbortController();
-
-    fetch("/api/notifications?unread=1&limit=5", {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((payload: { notifications?: unknown[] } | null) => {
-        if (!payload?.notifications) {
-          return;
-        }
-
-        setNotifications(payload.notifications.filter(isNotification));
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-
-        console.error("Could not refresh notifications", error);
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, [isNotificationsOpen]);
-
-  useEffect(() => {
-    if (!isNotificationsOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (notificationPopoverRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      setIsNotificationsOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsNotificationsOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isNotificationsOpen]);
   /**
    * Navigation is derived directly from the resolved app role so page
    * visibility stays centralized here instead of being scattered through the UI.
@@ -432,6 +351,7 @@ export function WorkspaceShell({
           { href: "/competencies", label: "Competencies", icon: <CompetenciesIcon /> },
           { href: "/time-codes", label: "Time Codes", icon: <TimeCodesIcon /> },
           { href: "/metrics", label: "Metrics", icon: <MetricsIcon /> },
+          { href: "/profile", label: "My Profile", icon: <ProfileIcon /> },
         ]
       : viewer.role === "leader"
       ? [
@@ -441,6 +361,7 @@ export function WorkspaceShell({
           { href: "/sub-schedules", label: "Sub-Schedules", icon: <SubSchedulesIcon /> },
           { href: "/personnel", label: "Personnel", icon: <PersonnelIcon /> },
           { href: "/metrics", label: "Metrics", icon: <MetricsIcon /> },
+          { href: "/profile", label: "My Profile", icon: <ProfileIcon /> },
         ]
       : [
           { href: "/schedule", label: "Schedule", icon: <ScheduleIcon /> },
@@ -505,68 +426,20 @@ export function WorkspaceShell({
 
   const notificationsNavItem = (
     <div className="workspace-nav-notifications">
-      <div className="workspace-notifications" ref={notificationPopoverRef}>
-        <button
-          type="button"
-          className={`workspace-nav-link workspace-notifications__button ${
-            isNotificationsOpen ? "workspace-nav-link--active" : ""
-          }`}
-          onClick={() => setIsNotificationsOpen((current) => !current)}
-          aria-expanded={isNotificationsOpen}
-          aria-haspopup="dialog"
-        >
-          <span className="workspace-nav-icon">
-            <NotificationsIcon />
-          </span>
-          <strong>Notifications</strong>
-          {notifications.length > 0 ? (
-            <span className="workspace-notifications__badge">{notifications.length}</span>
-          ) : null}
-        </button>
-
-        {isNotificationsOpen ? (
-          <section className="workspace-notifications-popover" role="dialog" aria-label="Notifications">
-            <div className="workspace-notifications-popover__header">
-              <div>
-                <strong>Notifications</strong>
-                <span>{notifications.length} unread</span>
-              </div>
-              <Link href="/notifications" onClick={() => setIsNotificationsOpen(false)}>
-                View all
-              </Link>
-            </div>
-
-            <div className="workspace-notifications-popover__list">
-              {notifications.length > 0 ? (
-                notifications.map((notification) => (
-                  <article key={notification.id} className="workspace-notification-item">
-                    <strong>{notification.title}</strong>
-                    <span>{notification.body}</span>
-                    <small>{notification.createdAt.slice(0, 10)}</small>
-                  </article>
-                ))
-              ) : (
-                <div className="workspace-notifications-empty">
-                  <strong>No notifications yet</strong>
-                  <span>Schedule alerts, overtime updates, and mutual approvals will appear here.</span>
-                </div>
-              )}
-            </div>
-
-            <div className="workspace-notifications-popover__footer">
-              <Link
-                href="/notifications/settings"
-                className="icon-button workspace-notifications-popover__settings"
-                aria-label="Notification settings"
-                title="Notification settings"
-                onClick={() => setIsNotificationsOpen(false)}
-              >
-                <NotificationSettingsIcon />
-              </Link>
-            </div>
-          </section>
-        ) : null}
-      </div>
+      <Link
+        href="/notifications"
+        prefetch={false}
+        className={`workspace-nav-link ${pathname === "/notifications" ? "workspace-nav-link--active" : ""}`}
+        title="Notifications"
+        aria-current={pathname === "/notifications" ? "page" : undefined}
+        onClick={(event) => handleNavLinkNavigate(event, "/notifications")}
+      >
+        <span className="workspace-nav-icon">
+          <NotificationsIcon />
+        </span>
+        <strong>Notifications</strong>
+        {notifications.length > 0 ? <span className="workspace-notifications__badge">{notifications.length}</span> : null}
+      </Link>
     </div>
   );
 

@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 async function ProfileBoard({ session }: { session: Awaited<ReturnType<typeof requireAppSession>> }) {
   const snapshot = await getProfileSnapshot(session);
-  return <ProfilePanel snapshot={snapshot} />;
+  return <ProfilePanel snapshot={snapshot} viewer={session} />;
 }
 
 function ProfileBoardFallback() {
@@ -22,7 +22,7 @@ function ProfileBoardFallback() {
 }
 
 export default async function ProfilePage() {
-  const session = await requireAppSession(["worker"]);
+  const session = await requireAppSession(["admin", "leader", "worker"]);
 
   return (
     <WorkspaceShellFrame viewer={session}>
