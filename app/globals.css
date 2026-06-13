@@ -309,7 +309,7 @@ select {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.9rem 1rem;
+  padding: 0;
   border-radius: 1rem;
   color: inherit;
   text-decoration: none;
@@ -347,7 +347,7 @@ button.workspace-nav-link {
 }
 
 .workspace-nav-link strong {
-  font-size: 0.98rem;
+  font-size: 0.95rem;
 }
 
 .workspace-nav-link--active {
