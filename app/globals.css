@@ -5825,3 +5825,177 @@ button.workspace-nav-link {
   background: var(--state-warn-soft);
   border-color: color-mix(in srgb, var(--state-warn) 45%, transparent);
 }
+
+/* ============================================================
+   VISUAL REFRESH 2026 — pill treatment B + tonal hue ramps
+   Flat tint + hairline border + same-hue dark text.
+   One token trio per hue, auto-flipping for dark mode.
+   ============================================================ */
+:root {
+  --hue-amber-fill: #faeeda;  --hue-amber-border: rgba(186, 117, 23, 0.34);  --hue-amber-text: #854f0b;
+  --hue-teal-fill: #e1f5ee;   --hue-teal-border: rgba(15, 110, 86, 0.32);    --hue-teal-text: #0f6e56;
+  --hue-violet-fill: #eeedfe; --hue-violet-border: rgba(83, 74, 183, 0.30);  --hue-violet-text: #3c3489;
+  --hue-rose-fill: #fbeaf0;   --hue-rose-border: rgba(153, 53, 86, 0.30);    --hue-rose-text: #993556;
+  --hue-blue-fill: #e6f1fb;   --hue-blue-border: rgba(24, 95, 165, 0.30);    --hue-blue-text: #185fa5;
+  --hue-lime-fill: #eaf3de;   --hue-lime-border: rgba(59, 109, 17, 0.32);    --hue-lime-text: #3b6d11;
+  --hue-orange-fill: #faece7; --hue-orange-border: rgba(153, 60, 29, 0.30);  --hue-orange-text: #993c1d;
+  --hue-slate-fill: #edf0f4;  --hue-slate-border: rgba(71, 85, 105, 0.28);   --hue-slate-text: #334155;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hue-amber-fill: rgba(239, 159, 39, 0.18);  --hue-amber-border: rgba(239, 159, 39, 0.40);  --hue-amber-text: #fac775;
+    --hue-teal-fill: rgba(29, 158, 117, 0.18);   --hue-teal-border: rgba(29, 158, 117, 0.40);   --hue-teal-text: #9fe1cb;
+    --hue-violet-fill: rgba(127, 119, 221, 0.20);--hue-violet-border: rgba(127, 119, 221, 0.42);--hue-violet-text: #cecbf6;
+    --hue-rose-fill: rgba(212, 83, 126, 0.18);   --hue-rose-border: rgba(212, 83, 126, 0.40);   --hue-rose-text: #f4c0d1;
+    --hue-blue-fill: rgba(55, 138, 221, 0.18);   --hue-blue-border: rgba(55, 138, 221, 0.42);   --hue-blue-text: #b5d4f4;
+    --hue-lime-fill: rgba(99, 153, 34, 0.20);    --hue-lime-border: rgba(99, 153, 34, 0.42);    --hue-lime-text: #c0dd97;
+    --hue-orange-fill: rgba(216, 90, 48, 0.20);  --hue-orange-border: rgba(216, 90, 48, 0.42);  --hue-orange-text: #f5c4b3;
+    --hue-slate-fill: rgba(148, 163, 184, 0.16); --hue-slate-border: rgba(148, 163, 184, 0.34); --hue-slate-text: #cbd5e1;
+  }
+}
+
+/* Legend / competency chips ------------------------------------- */
+.legend-pill {
+  border: 0.5px solid transparent;
+  font-weight: 500;
+}
+.legend-pill--amber  { background: var(--hue-amber-fill);  border-color: var(--hue-amber-border);  color: var(--hue-amber-text); }
+.legend-pill--teal   { background: var(--hue-teal-fill);   border-color: var(--hue-teal-border);   color: var(--hue-teal-text); }
+.legend-pill--violet { background: var(--hue-violet-fill); border-color: var(--hue-violet-border); color: var(--hue-violet-text); }
+.legend-pill--rose   { background: var(--hue-rose-fill);   border-color: var(--hue-rose-border);   color: var(--hue-rose-text); }
+.legend-pill--blue   { background: var(--hue-blue-fill);   border-color: var(--hue-blue-border);   color: var(--hue-blue-text); }
+.legend-pill--lime   { background: var(--hue-lime-fill);   border-color: var(--hue-lime-border);   color: var(--hue-lime-text); }
+.legend-pill--orange { background: var(--hue-orange-fill); border-color: var(--hue-orange-border); color: var(--hue-orange-text); }
+.legend-pill--slate  { background: var(--hue-slate-fill);  border-color: var(--hue-slate-border);  color: var(--hue-slate-text); }
+
+/* Shift-cell competency fills: flat tint (no gradient) ---------- */
+.shift-cell.legend-pill--amber  { background: var(--hue-amber-fill); }
+.shift-cell.legend-pill--teal   { background: var(--hue-teal-fill); }
+.shift-cell.legend-pill--violet { background: var(--hue-violet-fill); }
+.shift-cell.legend-pill--rose   { background: var(--hue-rose-fill); }
+.shift-cell.legend-pill--blue   { background: var(--hue-blue-fill); }
+.shift-cell.legend-pill--lime   { background: var(--hue-lime-fill); }
+.shift-cell.legend-pill--orange { background: var(--hue-orange-fill); }
+.shift-cell.legend-pill--slate  { background: var(--hue-slate-fill); }
+
+/* Cell label text takes the hue's dark shade -------------------- */
+.shift-cell-button.legend-pill--amber  { color: var(--hue-amber-text); }
+.shift-cell-button.legend-pill--teal   { color: var(--hue-teal-text); }
+.shift-cell-button.legend-pill--violet { color: var(--hue-violet-text); }
+.shift-cell-button.legend-pill--rose   { color: var(--hue-rose-text); }
+.shift-cell-button.legend-pill--blue   { color: var(--hue-blue-text); }
+.shift-cell-button.legend-pill--lime   { color: var(--hue-lime-text); }
+.shift-cell-button.legend-pill--orange { color: var(--hue-orange-text); }
+.shift-cell-button.legend-pill--slate  { color: var(--hue-slate-text); }
+
+/* ============================================================
+   VISUAL REFRESH 2026 — unified date selector (month / year)
+   Labeled-pill trigger + clean card popover + accent-soft
+   selected state. One look across every page, both modes.
+   ============================================================ */
+
+/* Trigger: reads like the toolbar field pills ------------------- */
+.app-date-selector__trigger {
+  min-width: auto;
+  gap: 0.02rem 0.6rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  transition: background-color 140ms ease, border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+.app-date-selector__trigger:hover {
+  background: var(--bg-tint);
+  border-color: var(--line-strong);
+}
+.app-date-selector__trigger:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.app-date-selector__trigger strong,
+.workspace-toolbar .app-date-selector__trigger strong {
+  font-family: var(--font-body), sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.app-date-selector__eyebrow {
+  color: var(--faint);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.app-date-selector__trigger svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted);
+  stroke-width: 2;
+}
+
+/* Popover: clean elevated card ---------------------------------- */
+.app-date-selector__popover,
+.panel-heading--split .app-date-selector__popover {
+  width: min(17rem, calc(100vw - 2rem));
+  gap: 0.7rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Year stepper header ------------------------------------------- */
+.app-date-selector__header {
+  grid-template-columns: 2rem minmax(0, 1fr) 2rem;
+  gap: 0.4rem;
+}
+.app-date-selector__header strong {
+  font-family: var(--font-body), sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.app-date-selector__header button {
+  min-height: 1.9rem;
+  font: 500 1.15rem/1 var(--font-body), sans-serif;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+/* Month / year options ------------------------------------------ */
+.app-date-selector__grid {
+  gap: 0.4rem;
+}
+.app-date-selector__option {
+  min-height: 2.3rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+.app-date-selector__header button:hover,
+.app-date-selector__option:hover {
+  background: var(--bg-tint);
+  border-color: var(--line-strong);
+}
+.app-date-selector__option--selected {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-strong);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.app-date-selector__option:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
