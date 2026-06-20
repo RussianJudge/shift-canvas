@@ -6128,3 +6128,38 @@ button.workspace-nav-link {
   flex-direction: column;
   overflow: hidden;
 }
+
+/* ============================================================
+   Scheduler — single combined toolbar (date + filters + actions)
+   Replaces the stacked panel-heading + filter bar to reclaim
+   vertical space for the grid.
+   ============================================================ */
+.scheduler-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.85rem;
+  padding: 0.6rem clamp(0.75rem, 2vw, 1.25rem);
+  border-bottom: 1px solid var(--line);
+}
+.scheduler-toolbar .app-date-selector {
+  flex: 0 0 auto;
+}
+.scheduler-toolbar .field {
+  flex: 0 1 13rem;
+  min-width: 9rem;
+}
+.scheduler-toolbar .field--static {
+  flex: 0 0 auto;
+}
+.scheduler-toolbar .toolbar-status-wrap {
+  flex: 1 1 5rem;
+  min-width: 0;
+}
+.scheduler-toolbar__actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.panel-frame:has(.schedule-scroll-shell) > .scheduler-toolbar {
+  flex: 0 0 auto;
+}

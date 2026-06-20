@@ -3056,7 +3056,7 @@ export function MonthlyScheduler({
         </div>
       ) : null}
 
-      <div className="panel-heading panel-heading--split">
+      <div className="scheduler-toolbar">
         <AppDateSelector
           mode="month"
           value={currentMonth}
@@ -3064,47 +3064,6 @@ export function MonthlyScheduler({
           triggerLabel={formatMonthDateRange(monthDays)}
           onChange={navigateToScheduleMonth}
         />
-        <div className="planner-actions planner-actions--schedule">
-          <div className="planner-actions__row planner-actions__row--save">
-            {canEdit && canManageSetBuilder ? (
-              <button
-                type="button"
-                className="ghost-button icon-button schedule-temporary-loan-button"
-                onClick={() => setIsTemporaryLoanModalOpen(true)}
-                disabled={isScheduleLocked}
-                aria-label="Temporary loan"
-                title="Temporary loan"
-              >
-                <TemporaryLoanIcon />
-              </button>
-            ) : null}
-            {canManageSetBuilder ? (
-              <button
-                type="button"
-                className="ghost-button icon-button schedule-order-button"
-                onClick={() => setIsShiftOrderModalOpen(true)}
-                disabled={isScheduleLocked}
-                aria-label="Shift order"
-                title="Shift order"
-              >
-                <ShiftOrderIcon />
-              </button>
-            ) : null}
-            <a
-              href={`/schedule/print?month=${currentMonth}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ghost-button icon-button schedule-print-button"
-              aria-label="Print schedules"
-              title="Print schedules"
-            >
-              <PrinterIcon />
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <div className="workspace-toolbar workspace-toolbar--scheduler">
         {canSwitchSchedule ? (
           <label className="field">
             <span>Shift</span>
@@ -3171,6 +3130,44 @@ export function MonthlyScheduler({
         <div className="toolbar-status-wrap">
           {isMonthLoading ? <p className="toolbar-status">Loading month...</p> : null}
           {!isMonthLoading && statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+        </div>
+        <div className="planner-actions planner-actions--schedule scheduler-toolbar__actions">
+          <div className="planner-actions__row planner-actions__row--save">
+            {canEdit && canManageSetBuilder ? (
+              <button
+                type="button"
+                className="ghost-button icon-button schedule-temporary-loan-button"
+                onClick={() => setIsTemporaryLoanModalOpen(true)}
+                disabled={isScheduleLocked}
+                aria-label="Temporary loan"
+                title="Temporary loan"
+              >
+                <TemporaryLoanIcon />
+              </button>
+            ) : null}
+            {canManageSetBuilder ? (
+              <button
+                type="button"
+                className="ghost-button icon-button schedule-order-button"
+                onClick={() => setIsShiftOrderModalOpen(true)}
+                disabled={isScheduleLocked}
+                aria-label="Shift order"
+                title="Shift order"
+              >
+                <ShiftOrderIcon />
+              </button>
+            ) : null}
+            <a
+              href={`/schedule/print?month=${currentMonth}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ghost-button icon-button schedule-print-button"
+              aria-label="Print schedules"
+              title="Print schedules"
+            >
+              <PrinterIcon />
+            </a>
+          </div>
         </div>
       </div>
 
