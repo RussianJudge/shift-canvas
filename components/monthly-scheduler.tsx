@@ -72,6 +72,7 @@ const AUTO_SAVE_DEBOUNCE_MS = 5000;
 const AUTO_SAVE_SUCCESS_VISIBLE_MS = 2200;
 const STALE_SNAPSHOT_PROTECTION_MS = 12000;
 const SCHEDULE_ROW_HEIGHT_PX = 51;
+const OVERTIME_DIRECT_CLEAR_ERROR_PREFIX = "Overtime-filled cells cannot be cleared from the schedule directly.";
 type AssignmentSelection = { competencyId: string | null; timeCodeId: string | null; notes: string | null };
 type PersistedDraftAssignments = Record<string, AssignmentSelection | null>;
 type SelectedCell = { employeeId: string; date: string };
@@ -1146,6 +1147,10 @@ function isOvertimeManagedSelection(selection: AssignmentSelection) {
   return Boolean(selection.notes?.startsWith("OT|"));
 }
 
+function isEmptyAssignmentSelection(selection: AssignmentSelection) {
+  return !selection.competencyId && !selection.timeCodeId && !(selection.notes?.trim().length ?? 0);
+}
+
 function isTemporaryLoanManagedSelection(selection: AssignmentSelection) {
   return Boolean(parseTemporaryLoanAssignmentNote(selection.notes).loanId);
 }
@@ -1950,6 +1955,51 @@ export function MonthlyScheduler({
 
       const scheduledDraftAssignments = draftSnapshot ? cloneAssignments(draftSnapshot) : cloneAssignments(draftAssignments);
       const autoSaveToken = latestAutoSaveTokenRef.current + 1;
+      const discardedProtectedClearKeys = new Set<string>();
+      const discardOvertimeManagedClearDrafts = () => {
+        const protectedClearKeys = scheduledUpdates.flatMap((update) => {
+          const key = createAssignmentKey(update.scheduleId, update.employeeId, update.date);
+          const baselineSelection = baselineAssignmentsRef.current[key];
+          const draftSelection: AssignmentSelection = {
+            competencyId: update.competencyId,
+            timeCodeId: update.timeCodeId,
+            notes: update.notes ?? null,
+          };
+
+          return baselineSelection &&
+            isOvertimeManagedSelection(baselineSelection) &&
+            isEmptyAssignmentSelection(draftSelection)
+            ? [key]
+            : [];
+        });
+
+        if (protectedClearKeys.length === 0) {
+          return 0;
+        }
+
+        protectedClearKeys.forEach((key) => discardedProtectedClearKeys.add(key));
+
+        setDraftAssignments((current) => {
+          const nextAssignments = { ...current };
+
+          for (const key of protectedClearKeys) {
+            const baselineSelection = baselineAssignmentsRef.current[key];
+
+            if (baselineSelection) {
+              nextAssignments[key] = { ...baselineSelection };
+              continue;
+            }
+
+            delete nextAssignments[key];
+          }
+
+          draftAssignmentsRef.current = nextAssignments;
+          persistDraftAssignmentsToStorage(baselineAssignmentsRef.current, nextAssignments);
+          return nextAssignments;
+        });
+
+        return protectedClearKeys.length;
+      };
 
       latestAutoSaveTokenRef.current = autoSaveToken;
       showAutosaveState({
@@ -1972,17 +2022,43 @@ export function MonthlyScheduler({
         );
       }
 
+      const discardedProtectedDrafts =
+        !result.ok && result.message.startsWith(OVERTIME_DIRECT_CLEAR_ERROR_PREFIX)
+          ? discardOvertimeManagedClearDrafts()
+          : 0;
+      const didRecoverProtectedDrafts = discardedProtectedDrafts > 0;
+      const hasRemainingChangesAfterRecovery =
+        didRecoverProtectedDrafts &&
+        scheduledUpdates.some(
+          (update) => !discardedProtectedClearKeys.has(createAssignmentKey(update.scheduleId, update.employeeId, update.date)),
+        );
+
       if (latestAutoSaveTokenRef.current === autoSaveToken) {
-        setStatusMessage(result.ok ? "Changes saved automatically." : result.message);
+        setStatusMessage(
+          result.ok
+            ? "Changes saved automatically."
+            : didRecoverProtectedDrafts
+            ? `Discarded ${discardedProtectedDrafts} stale overtime draft ${
+                discardedProtectedDrafts === 1 ? "cell" : "cells"
+              }. Release overtime from the Overtime page before clearing those cells.`
+            : result.message,
+        );
         showAutosaveState(
           result.ok
             ? { status: "saved", message: "Saved automatically." }
+            : didRecoverProtectedDrafts
+            ? {
+                status: hasRemainingChangesAfterRecovery ? "pending" : "saved",
+                message: hasRemainingChangesAfterRecovery
+                  ? "Autosave draft cleaned up. Saving remaining changes..."
+                  : "Autosave draft cleaned up.",
+              }
             : { status: "error", message: "Autosave failed." },
-          result.ok,
+          result.ok || (didRecoverProtectedDrafts && !hasRemainingChangesAfterRecovery),
         );
       }
 
-      return result.ok;
+      return result.ok || (didRecoverProtectedDrafts && !hasRemainingChangesAfterRecovery);
     },
     [activeDirtyUpdates, activeSchedule.id, canEdit, draftAssignments],
   );
