@@ -2255,7 +2255,11 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
         ...(((manualPostingsResult.data as Array<{ month_key: string }> | null) ?? []).map((row) => row.month_key)),
       ].filter(Boolean),
     ),
-  ).sort();
+  )
+    // Only surface the current month and future months in the picker —
+    // past overtime history should not be selectable.
+    .filter((month) => month >= currentMonth)
+    .sort();
 
   return candidateMonths.length > 0 ? candidateMonths : postingMonths.length > 0 ? postingMonths : [currentMonth];
 }
