@@ -62,7 +62,7 @@
   --state-warn-soft: rgba(234, 88, 12, 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   :root {
     --bg: #161618;
     --bg-tint: #1c1c1f;
@@ -5285,7 +5285,7 @@ button.workspace-nav-link {
   background: var(--surface);
   border-right: 1px solid var(--line);
 }
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   .workspace-sidebar {
     background: var(--surface-2);
   }
@@ -5841,7 +5841,7 @@ button.workspace-nav-link {
   --hue-orange-fill: #faece7; --hue-orange-border: rgba(153, 60, 29, 0.30);  --hue-orange-text: #993c1d;
   --hue-slate-fill: #edf0f4;  --hue-slate-border: rgba(71, 85, 105, 0.28);   --hue-slate-text: #334155;
 }
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   :root {
     --hue-amber-fill: rgba(239, 159, 39, 0.18);  --hue-amber-border: rgba(239, 159, 39, 0.40);  --hue-amber-text: #fac775;
     --hue-teal-fill: rgba(29, 158, 117, 0.18);   --hue-teal-border: rgba(29, 158, 117, 0.40);   --hue-teal-text: #9fe1cb;
@@ -6065,7 +6065,7 @@ button.workspace-nav-link {
 }
 
 /* Fatigue bands legible in dark mode ---------------------------- */
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   .metrics-fatigue-band--green    { color: #4ade80; }
   .metrics-fatigue-band--amber    { color: #fbbf24; }
   .metrics-fatigue-band--red      { color: #f87171; }
@@ -6266,7 +6266,7 @@ button.workspace-nav-link {
   --danger-soft: rgba(185, 28, 28, 0.10);
   --danger-border: rgba(185, 28, 28, 0.26);
 }
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   :root {
     --danger: #f87171;
     --danger-soft: rgba(248, 113, 113, 0.14);
@@ -6330,6 +6330,55 @@ textarea::placeholder {
   display: none;
 }
 .scheduler-toolbar .app-date-selector__trigger strong {
+  font-size: 1.6rem;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+/* ============================================================
+   Remove the on-click selection outlines on the cell, the
+   worker-name cell, and the date header. Keep a keyboard-only
+   focus ring on cells for accessibility.
+   ============================================================ */
+.shift-cell--selected {
+  outline: none;
+}
+.employee-cell--selected {
+  outline: none;
+}
+.day-header--set-anchor {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.day-header--completed.day-header--set-anchor {
+  box-shadow: inset 0 -2px 0 var(--state-good);
+}
+.shift-cell-button:focus {
+  box-shadow: none;
+}
+.shift-cell-button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-ring);
+}
+
+/* ============================================================
+   Print — default to Legal, landscape; never carry dark mode.
+   (Dark tokens are scoped to `screen`, so print uses the light
+   palette automatically.)
+   ============================================================ */
+@page {
+  size: legal landscape;
+  margin: 0.4in;
+}
+
+/* ============================================================
+   Date selector — apply the scheduler update everywhere:
+   no eyebrow label, larger date value (metrics, overtime,
+   mutuals, sub-schedules, scheduler).
+   ============================================================ */
+.app-date-selector__eyebrow {
+  display: none;
+}
+.app-date-selector__trigger strong,
+.workspace-toolbar .app-date-selector__trigger strong {
   font-size: 1.6rem;
   line-height: 1.05;
   letter-spacing: -0.02em;
