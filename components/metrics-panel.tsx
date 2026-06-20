@@ -4,12 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
+import { AppDateSelector } from "@/components/app-date-selector";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
   formatMonthLabel,
   getEmployeeMap,
   getMonthDays,
-  shiftMonthKey,
   shiftForDate,
 } from "@/lib/scheduling";
 import type { Competency, OvertimeClaim, SchedulerSnapshot, StoredAssignment, TimeCode } from "@/lib/types";
@@ -953,8 +953,7 @@ export function MetricsPanel({
   const [selectedTransferSuggestionIndex, setSelectedTransferSuggestionIndex] = useState(0);
   const [transferMessage, setTransferMessage] = useState("");
 
-  function navigateMonth(delta: number) {
-    const nextMonth = shiftMonthKey(snapshot.month, delta);
+  function navigateMonth(nextMonth: string) {
     router.push(`/metrics?month=${nextMonth}`, { scroll: false });
   }
 
@@ -1031,25 +1030,13 @@ export function MetricsPanel({
     <section className="panel-frame">
       <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Metrics</h1>
-        <div className="schedule-heading-month metrics-month-pager" aria-label="Metrics month">
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--previous"
-            onClick={() => navigateMonth(-1)}
-            aria-label="Previous month"
-          >
-            ‹
-          </button>
-          <strong className="panel-title schedule-heading-month__label">{formatMonthLabel(snapshot.month)}</strong>
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--next"
-            onClick={() => navigateMonth(1)}
-            aria-label="Next month"
-          >
-            ›
-          </button>
-        </div>
+        <AppDateSelector
+          mode="month"
+          value={snapshot.month}
+          label="Metrics month"
+          className="metrics-month-pager"
+          onChange={navigateMonth}
+        />
       </div>
 
       <div className="metrics-grid">

@@ -14,6 +14,7 @@ import {
   saveScheduleEmployeeOrder,
   setScheduleSetCompletion,
 } from "@/app/actions";
+import { AppDateSelector } from "@/components/app-date-selector";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import { parseTemporaryLoanAssignmentNote } from "@/lib/temporary-loans";
@@ -34,7 +35,6 @@ import {
   getWorkedSetDays,
   isCompletedSetRange,
   parseAssignmentKey,
-  shiftMonthKey,
   shiftForDate,
   toggleCompletedSetEntries,
 } from "@/lib/scheduling";
@@ -886,10 +886,6 @@ function buildDisplayEmployeesForSchedule({
       return left.index - right.index;
     })
     .map((entry) => entry.employee);
-}
-
-function addMonths(monthKey: string, delta: number) {
-  return shiftMonthKey(monthKey, delta);
 }
 
 function getShiftTone(shift: ShiftKind) {
@@ -2538,9 +2534,8 @@ export function MonthlyScheduler({
     });
   }
 
-  function handleMonthChange(delta: number) {
+  function navigateToScheduleMonth(nextMonth: string) {
     startMonthTransition(async () => {
-      const nextMonth = addMonths(currentMonth, delta);
       const savedDrafts = await saveActiveScheduleDrafts({ reason: "navigation" });
 
       if (!savedDrafts) {
@@ -3055,25 +3050,13 @@ export function MonthlyScheduler({
       ) : null}
 
       <div className="panel-heading panel-heading--split">
-        <div className="schedule-heading-month" aria-label="Schedule month">
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--previous"
-            onClick={() => handleMonthChange(-1)}
-            aria-label="Previous month"
-          >
-            ‹
-          </button>
-          <h1 className="panel-title schedule-heading-month__label">{formatMonthDateRange(monthDays)}</h1>
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--next"
-            onClick={() => handleMonthChange(1)}
-            aria-label="Next month"
-          >
-            ›
-          </button>
-        </div>
+        <AppDateSelector
+          mode="month"
+          value={currentMonth}
+          label="Schedule month"
+          triggerLabel={formatMonthDateRange(monthDays)}
+          onChange={navigateToScheduleMonth}
+        />
         <div className="planner-actions planner-actions--schedule">
           <div className="planner-actions__row planner-actions__row--save">
             {canEdit && canManageSetBuilder ? (

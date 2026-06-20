@@ -12,11 +12,11 @@ import {
   withdrawMutualApplication,
   withdrawMutualPosting,
 } from "@/app/actions";
+import { AppDateSelector } from "@/components/app-date-selector";
 import {
   formatMonthLabel,
   getEmployeeMap,
   getMonthDays,
-  shiftMonthKey,
   shiftForDate,
 } from "@/lib/scheduling";
 import type { AppSession, MutualShiftPosting, MutualsSnapshot, ShiftKind } from "@/lib/types";
@@ -645,31 +645,23 @@ export function MutualsPanel({
     runAction(action);
   }
 
+  function handleYearChange(nextMonth: string) {
+    loadMutualsMonth(nextMonth);
+  }
+
   return (
     <section className="panel-frame mutuals-page">
       <div className="panel-heading panel-heading--simple mutuals-topbar">
         <h1 className="panel-title">Mutuals</h1>
-        <div className="schedule-heading-month mutuals-year-pager" aria-label="Mutuals year">
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--previous"
-            onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, -12))}
-            disabled={isMonthLoading}
-            aria-label="Previous year"
-          >
-            ‹
-          </button>
-          <strong className="panel-title schedule-heading-month__label">{formatYearLabel(viewMonth)}</strong>
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--next"
-            onClick={() => loadMutualsMonth(shiftMonthKey(viewMonth, 12))}
-            disabled={isMonthLoading}
-            aria-label="Next year"
-          >
-            ›
-          </button>
-        </div>
+        <AppDateSelector
+          mode="year"
+          value={viewMonth}
+          label="Mutuals year"
+          triggerLabel={formatYearLabel(viewMonth)}
+          disabled={isMonthLoading}
+          className="mutuals-year-pager"
+          onChange={handleYearChange}
+        />
       </div>
 
       {statusMessage ? (

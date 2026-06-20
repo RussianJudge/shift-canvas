@@ -10,6 +10,7 @@ import {
   deleteManualOvertimePosting,
   releaseOvertimePosting,
 } from "@/app/actions";
+import { AppDateSelector } from "@/components/app-date-selector";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
@@ -2175,23 +2176,13 @@ export function OvertimePanel({
 
       <div className="workspace-toolbar workspace-toolbar--overtime">
         {availableMonths.length > 0 ? (
-          <label className="field">
-            <span>Month</span>
-            <select
-              value={snapshot.month}
-              onChange={(event) => router.push(`/overtime?month=${event.target.value}`)}
-            >
-              {availableMonths.map((month) => (
-                <option key={month} value={month}>
-                  {new Intl.DateTimeFormat("en-US", {
-                    month: "long",
-                    year: "numeric",
-                    timeZone: "UTC",
-                  }).format(new Date(`${month}-01T00:00:00Z`))}
-                </option>
-              ))}
-            </select>
-          </label>
+          <AppDateSelector
+            mode="month"
+            value={snapshot.month}
+            label="Overtime month"
+            availableMonths={availableMonths}
+            onChange={(nextMonth) => router.push(`/overtime?month=${nextMonth}`)}
+          />
         ) : (
           <div className="field field--static">
             <span>Month</span>

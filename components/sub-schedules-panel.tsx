@@ -9,6 +9,7 @@ import {
   saveSubScheduleAssignments,
   saveSubSchedules,
 } from "@/app/actions";
+import { AppDateSelector } from "@/components/app-date-selector";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
   formatMonthLabel,
@@ -17,7 +18,6 @@ import {
   getMonthDays,
   getScheduleById,
   getTimeCodeMap,
-  shiftMonthKey,
 } from "@/lib/scheduling";
 import { getManualEntryTimeCodes } from "@/lib/sub-schedules";
 import type {
@@ -896,8 +896,7 @@ export function SubSchedulesPanel({
     });
   }
 
-  function handleMonthChange(delta: number) {
-    const nextMonth = shiftMonthKey(snapshot.month, delta);
+  function handleMonthChange(nextMonth: string) {
     const params = new URLSearchParams({ month: nextMonth });
 
     if (selectedSubScheduleId) {
@@ -1025,25 +1024,13 @@ export function SubSchedulesPanel({
     <section className="panel-frame">
       <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Sub-Schedules</h1>
-        <div className="schedule-heading-month sub-schedules-month-pager" aria-label="Sub-schedules month">
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--previous"
-            onClick={() => handleMonthChange(-1)}
-            aria-label="Previous month"
-          >
-            ‹
-          </button>
-          <strong className="panel-title schedule-heading-month__label">{formatMonthLabel(snapshot.month)}</strong>
-          <button
-            type="button"
-            className="schedule-heading-month__button schedule-heading-month__button--next"
-            onClick={() => handleMonthChange(1)}
-            aria-label="Next month"
-          >
-            ›
-          </button>
-        </div>
+        <AppDateSelector
+          mode="month"
+          value={snapshot.month}
+          label="Sub-schedules month"
+          className="sub-schedules-month-pager"
+          onChange={handleMonthChange}
+        />
       </div>
 
       <section className="metrics-section subschedule-builder-section">
