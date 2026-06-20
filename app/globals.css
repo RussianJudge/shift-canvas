@@ -5919,10 +5919,10 @@ button.workspace-nav-link {
 .app-date-selector__trigger strong,
 .workspace-toolbar .app-date-selector__trigger strong {
   font-family: var(--font-body), sans-serif;
-  font-size: 0.95rem;
+  font-size: 1.25rem;
   font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 .app-date-selector__eyebrow {
   color: var(--faint);
@@ -6104,4 +6104,27 @@ button.workspace-nav-link {
 .metrics-month-nav__current strong {
   background: var(--surface-2);
   border-color: var(--line);
+}
+
+/* ============================================================
+   FIX — schedule fills remaining height as a flex column so the
+   mobile "Open Menu" toolbar keeps its space and the grid stays
+   reachable (replaces the fixed height:100% that ignored siblings).
+   ============================================================ */
+.workspace-content:has(.schedule-scroll-shell) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.workspace-content:has(.schedule-scroll-shell) .workspace-mobile-toolbar {
+  flex: 0 0 auto;
+}
+.panel-frame:has(.schedule-scroll-shell) {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
