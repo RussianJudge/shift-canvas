@@ -6163,3 +6163,174 @@ button.workspace-nav-link {
 .panel-frame:has(.schedule-scroll-shell) > .scheduler-toolbar {
   flex: 0 0 auto;
 }
+
+/* ============================================================
+   Mobile menu toggle — compact + subtle so it doesn't block
+   the top of the screen. Icon-only; label kept for a11y.
+   ============================================================ */
+@media (max-width: 600px) {
+  .workspace-mobile-toolbar {
+    padding: 0.2rem 0 0;
+  }
+  .workspace-mobile-toggle.ghost-button {
+    min-height: 0;
+    padding: 0.2rem;
+    gap: 0;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+  .workspace-mobile-toggle:hover.ghost-button {
+    background: transparent;
+  }
+  .workspace-mobile-toggle__icon {
+    width: 2rem;
+    height: 2rem;
+  }
+  /* Keep the "Open/Close Menu" text for screen readers, hide it visually */
+  .workspace-mobile-toggle strong {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* ============================================================
+   Set builder — collapsible
+   ============================================================ */
+.set-builder__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0 0.1rem 0.55rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-body), sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.set-builder__toggle:hover {
+  color: var(--ink);
+}
+.set-builder__chevron {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 160ms ease;
+}
+.set-builder--collapsed .set-builder__chevron {
+  transform: rotate(-90deg);
+}
+.set-builder--collapsed .set-builder__toggle {
+  padding-bottom: 0;
+}
+.set-builder--collapsed .set-builder-heading,
+.set-builder--collapsed .set-builder-pills {
+  display: none;
+}
+
+/* ============================================================
+   Schedule crosshair — hovering a cell tints the matching
+   date header + worker-name cell with the same accent tone.
+   (background-image layer keeps each element's own background.)
+   ============================================================ */
+.day-header--xhover,
+.employee-cell--xhover {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--accent) 8%, transparent),
+    color-mix(in srgb, var(--accent) 8%, transparent)
+  );
+}
+
+/* ============================================================
+   DARK MODE batch — form fields + danger/add controls
+   ============================================================ */
+:root {
+  --danger: #b91c1c;
+  --danger-soft: rgba(185, 28, 28, 0.10);
+  --danger-border: rgba(185, 28, 28, 0.26);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --danger: #f87171;
+    --danger-soft: rgba(248, 113, 113, 0.14);
+    --danger-border: rgba(248, 113, 113, 0.32);
+  }
+}
+
+/* Bare inputs across Personnel, Shifts, Competencies, Time codes,
+   Sub-schedules now follow the token palette instead of browser white. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select,
+textarea {
+  background-color: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--faint);
+  opacity: 1;
+}
+
+/* Classed fields that were hardcoded white */
+.assignment-field select {
+  background: var(--surface);
+}
+.assignment-field select:focus,
+.table-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.assignment-modal__note-input:focus {
+  outline: 2px solid var(--accent-ring);
+}
+.table-row--selected td {
+  background: var(--accent-soft);
+}
+
+/* Sub-schedules — "add worker" button */
+.subschedule-add-row__button {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+}
+
+/* Delete sub-schedule danger section + danger actions */
+.assignment-modal__danger-zone {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+.assignment-modal__danger-zone strong {
+  color: var(--danger);
+}
+.table-action--danger {
+  color: var(--danger);
+}
+
+/* ============================================================
+   Scheduler month selector — drop the eyebrow label, larger date
+   ============================================================ */
+.scheduler-toolbar .app-date-selector__eyebrow {
+  display: none;
+}
+.scheduler-toolbar .app-date-selector__trigger strong {
+  font-size: 1.6rem;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}

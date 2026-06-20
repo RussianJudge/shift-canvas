@@ -1487,6 +1487,7 @@ export function MonthlyScheduler({
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const [isSetCompletionWarningOpen, setIsSetCompletionWarningOpen] = useState(false);
   const [isTemporaryLoanModalOpen, setIsTemporaryLoanModalOpen] = useState(false);
+  const [isSetBuilderCollapsed, setIsSetBuilderCollapsed] = useState(false);
   const [loanCancelTarget, setLoanCancelTarget] = useState<LoanCancelTarget | null>(null);
   const [isLoanTransition, startLoanTransition] = useTransition();
   const [isShiftOrderModalOpen, setIsShiftOrderModalOpen] = useState(false);
@@ -2425,6 +2426,50 @@ export function MonthlyScheduler({
     return () => window.removeEventListener("pointerup", handlePointerUp);
   }, [completedSetDates, dragRange, employeeMap, monthDays, snapshot, snapshot.timeCodes]);
 
+  // Crosshair: tint the hovered cell's column header (date) and row header
+  // (worker name) with the same tone as the hovered cell. Done imperatively so
+  // hovering never triggers a re-render of the (large) grid.
+  useEffect(() => {
+    const grid = scheduleGridRef.current;
+    if (!grid) {
+      return;
+    }
+
+    const COL_CLASS = "day-header--xhover";
+    const ROW_CLASS = "employee-cell--xhover";
+
+    const clearHover = () => {
+      grid.querySelectorAll(`.${COL_CLASS}, .${ROW_CLASS}`).forEach((element) => {
+        element.classList.remove(COL_CLASS, ROW_CLASS);
+      });
+    };
+
+    const handleOver = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      const cell = target?.closest<HTMLElement>(".shift-cell");
+      clearHover();
+
+      if (!cell) {
+        return;
+      }
+
+      const date = cell.dataset.date;
+      if (date) {
+        grid.querySelector(`.day-header[data-date="${date}"]`)?.classList.add(COL_CLASS);
+      }
+
+      cell.closest(".schedule-grid-row")?.querySelector(".employee-cell")?.classList.add(ROW_CLASS);
+    };
+
+    grid.addEventListener("mouseover", handleOver);
+    grid.addEventListener("mouseleave", clearHover);
+
+    return () => {
+      grid.removeEventListener("mouseover", handleOver);
+      grid.removeEventListener("mouseleave", clearHover);
+    };
+  }, []);
+
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -3172,8 +3217,22 @@ export function MonthlyScheduler({
       </div>
 
       {canManageSetBuilder && hasSelectedBuilderTarget ? (
-        <section className="set-builder" aria-label="Set builder">
+        <section
+          className={`set-builder ${isSetBuilderCollapsed ? "set-builder--collapsed" : ""}`}
+          aria-label="Set builder"
+        >
           <div className="set-builder__surface">
+            <button
+              type="button"
+              className="set-builder__toggle"
+              onClick={() => setIsSetBuilderCollapsed((current) => !current)}
+              aria-expanded={!isSetBuilderCollapsed}
+            >
+              <span>Set builder</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="set-builder__chevron">
+                <path d="M6 9l6 6l6-6" />
+              </svg>
+            </button>
             <div className="set-builder-heading">
               <div className="set-builder-actions">
                 <button
@@ -3314,6 +3373,7 @@ export function MonthlyScheduler({
                 return (
                   <div
                     key={day.date}
+                    data-date={day.date}
                     className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
                       isCompletedDay ? "day-header--completed" : ""
                     } ${
@@ -3671,6 +3731,7 @@ function EmployeeRow({
         return (
           <div
             key={`${employee.rowId}-${day.date}`}
+            data-date={day.date}
             className={`shift-cell shift-cell--${getShiftTone(shiftKind)} ${
               day.isWeekend ? "shift-cell--weekend" : ""
             } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${

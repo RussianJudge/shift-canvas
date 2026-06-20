@@ -905,6 +905,15 @@ function OvertimeCalendarModal({
   );
 }
 
+function getTodayDateKey() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Edmonton",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 /** Modal used by leaders/admins to author a manual overtime posting. */
 function ManualOvertimePostingModal({
   snapshot,
@@ -991,6 +1000,7 @@ function ManualOvertimePostingModal({
               label: timeCode.label,
             })),
         ];
+  const todayKey = useMemo(() => getTodayDateKey(), []);
   const availableDates = selectedSchedule
     ? getMonthDays(selectedMonth)
         .map((day) => ({
@@ -1000,6 +1010,7 @@ function ManualOvertimePostingModal({
         .filter(
           (entry): entry is { date: string; shiftKind: Exclude<ShiftKind, "OFF"> } => entry.shiftKind !== "OFF",
         )
+        .filter((entry) => entry.date >= todayKey)
     : [];
 
   return createPortal(
@@ -1106,7 +1117,9 @@ function ManualOvertimePostingModal({
             </div>
           ) : (
             <div className="mutual-picker__grid">
-              {getMonthDays(selectedMonth).map((entry) => {
+              {getMonthDays(selectedMonth)
+                .filter((entry) => entry.date >= todayKey)
+                .map((entry) => {
                 const isSelected = selectedDates.includes(entry.date);
 
                 return (
