@@ -2372,7 +2372,10 @@ export function MonthlyScheduler({
       const endIndex = Math.max(dragRange.startIndex, dragRange.currentIndex);
 
       if (endIndex > startIndex) {
-        const rangeDates = monthDays.slice(startIndex, endIndex + 1).map((day) => day.date);
+        const rangeDates = monthDays
+          .slice(startIndex, endIndex + 1)
+          .map((day) => day.date)
+          .filter((date) => !completedSetDates.has(date));
 
         startTransition(() => {
           setDraftAssignments((current) => {
@@ -2406,7 +2409,11 @@ export function MonthlyScheduler({
 
             return nextAssignments;
           });
-          setStatusMessage(`Copied assignment across ${rangeDates.length} days`);
+          setStatusMessage(
+            rangeDates.length > 0
+              ? `Copied assignment across ${rangeDates.length} days`
+              : "Completed set columns are locked. Reopen the set to edit.",
+          );
         });
       }
 
@@ -2416,7 +2423,7 @@ export function MonthlyScheduler({
     window.addEventListener("pointerup", handlePointerUp);
 
     return () => window.removeEventListener("pointerup", handlePointerUp);
-  }, [dragRange, employeeMap, monthDays, snapshot, snapshot.timeCodes]);
+  }, [completedSetDates, dragRange, employeeMap, monthDays, snapshot, snapshot.timeCodes]);
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -3644,6 +3651,7 @@ function EmployeeRow({
         const isSelected =
           selectedCell?.employeeId === employee.sourceEmployeeId && selectedCell.date === day.date;
         const isInDragRange =
+          !isLockedCell &&
           dragRange?.employeeId === employee.sourceEmployeeId &&
           dayIndex >= Math.min(dragRange.startIndex, dragRange.currentIndex) &&
           dayIndex <= Math.max(dragRange.startIndex, dragRange.currentIndex);

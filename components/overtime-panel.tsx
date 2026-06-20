@@ -2170,11 +2170,8 @@ export function OvertimePanel({
 
   return (
     <section className="panel-frame">
-      <div className="panel-heading panel-heading--simple">
+      <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Overtime</h1>
-      </div>
-
-      <div className="workspace-toolbar workspace-toolbar--overtime">
         {availableMonths.length > 0 ? (
           <AppDateSelector
             mode="month"
@@ -2189,7 +2186,9 @@ export function OvertimePanel({
             <strong>No overtime months</strong>
           </div>
         )}
+      </div>
 
+      <div className="workspace-toolbar workspace-toolbar--overtime">
         {viewer.role === "worker" ? (
           <div className="field field--static">
             <span>Claim As</span>
