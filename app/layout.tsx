@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import "./globals.css";
 
@@ -10,8 +10,20 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "Schwifty",
-    statusBarStyle: "default",
+    // Transparent status bar so the app draws under the camera/notch.
+    statusBarStyle: "black-translucent",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Let the app extend into the safe area (flow up under the notch).
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f7" },
+    { media: "(prefers-color-scheme: dark)", color: "#161618" },
+  ],
 };
 
 export default function RootLayout({
