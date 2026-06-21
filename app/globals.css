@@ -6610,3 +6610,23 @@ textarea::placeholder {
 .subschedule-empty {
   padding: 1rem clamp(0.75rem, 2vw, 1.25rem);
 }
+
+/* Sub-schedules — clean controls toolbar (no metrics-section band) */
+.subschedule-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+}
+.subschedule-toolbar .field {
+  flex: 0 1 16rem;
+  min-width: 11rem;
+}
+.subschedule-toolbar .toolbar-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+.subschedule-toolbar .toolbar-status-wrap {
+  flex: 1 1 6rem;
+  min-width: 0;
+}
