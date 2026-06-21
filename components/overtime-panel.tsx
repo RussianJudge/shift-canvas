@@ -1794,6 +1794,7 @@ export function OvertimePanel({
       ),
     [optimisticClaimOverrides, postings],
   );
+  const todayKey = useMemo(() => getTodayDateKey(), []);
   const filteredPostings = useMemo(
     () =>
       displayPostings.filter((posting) => {
@@ -1813,13 +1814,28 @@ export function OvertimePanel({
           return false;
         }
 
-        if (availabilityFilter === "available" && posting.openShifts === 0) {
-          return false;
+        if (availabilityFilter === "available") {
+          if (posting.openShifts === 0) {
+            return false;
+          }
+
+          // Hide postings whose shifts are entirely in the past.
+          const latestDate = posting.dates.reduce((max, date) => (date > max ? date : max), "");
+          if (latestDate && latestDate < todayKey) {
+            return false;
+          }
         }
 
         return true;
       }),
-    [availabilityFilter, displayPostings, selectedAssignmentFilter, selectedSubScheduleFilter, selectedTargetMode],
+    [
+      availabilityFilter,
+      displayPostings,
+      selectedAssignmentFilter,
+      selectedSubScheduleFilter,
+      selectedTargetMode,
+      todayKey,
+    ],
   );
   const calendarPostings = useMemo<OvertimeCalendarPosting[]>(
     () =>

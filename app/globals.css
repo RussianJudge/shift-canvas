@@ -6532,3 +6532,14 @@ textarea::placeholder {
 .metrics-bar-fill--fragility {
   background: #dc2626;
 }
+
+/* ============================================================
+   Mobile — clear the floating Menu button so it doesn't cover
+   the date selector / page header.
+   ============================================================ */
+@media (max-width: 600px) {
+  .scheduler-toolbar,
+  .panel-heading {
+    padding-top: 3.1rem;
+  }
+}

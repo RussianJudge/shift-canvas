@@ -640,7 +640,7 @@ export function WorkspaceShell({
                 <span className="workspace-nav-icon workspace-mobile-toggle__icon">
                   <MobileMenuIcon />
                 </span>
-                <strong>{isMobileSidebarOpen ? "Close Menu" : "Open Menu"}</strong>
+                <strong>Menu</strong>
               </button>
             </div>
           ) : null}
