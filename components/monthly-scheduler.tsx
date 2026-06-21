@@ -1488,6 +1488,7 @@ export function MonthlyScheduler({
   const [isSetCompletionWarningOpen, setIsSetCompletionWarningOpen] = useState(false);
   const [isTemporaryLoanModalOpen, setIsTemporaryLoanModalOpen] = useState(false);
   const [isSetBuilderCollapsed, setIsSetBuilderCollapsed] = useState(false);
+  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [loanCancelTarget, setLoanCancelTarget] = useState<LoanCancelTarget | null>(null);
   const [isLoanTransition, startLoanTransition] = useTransition();
   const [isShiftOrderModalOpen, setIsShiftOrderModalOpen] = useState(false);
@@ -3101,7 +3102,7 @@ export function MonthlyScheduler({
         </div>
       ) : null}
 
-      <div className="scheduler-toolbar">
+      <div className={`scheduler-toolbar ${isToolbarCollapsed ? "scheduler-toolbar--collapsed" : ""}`}>
         <AppDateSelector
           mode="month"
           value={currentMonth}
@@ -3109,6 +3110,17 @@ export function MonthlyScheduler({
           triggerLabel={formatMonthDateRange(monthDays)}
           onChange={navigateToScheduleMonth}
         />
+        <button
+          type="button"
+          className="scheduler-toolbar__toggle"
+          onClick={() => setIsToolbarCollapsed((current) => !current)}
+          aria-expanded={!isToolbarCollapsed}
+        >
+          <span>{isToolbarCollapsed ? "Show filters" : "Hide filters"}</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 9l6 6l6-6" />
+          </svg>
+        </button>
         {canSwitchSchedule ? (
           <label className="field">
             <span>Shift</span>

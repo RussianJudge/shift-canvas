@@ -6383,3 +6383,48 @@ textarea::placeholder {
   line-height: 1.05;
   letter-spacing: -0.02em;
 }
+
+/* ============================================================
+   Scheduler toolbar — fold filters/actions away on mobile
+   (toggle hidden on desktop; toolbar always full there).
+   ============================================================ */
+.scheduler-toolbar__toggle {
+  display: none;
+}
+.scheduler-toolbar__toggle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 160ms ease;
+}
+@media (max-width: 600px) {
+  .scheduler-toolbar__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    font-family: var(--font-body), sans-serif;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .scheduler-toolbar--collapsed .scheduler-toolbar__toggle svg {
+    transform: rotate(-90deg);
+  }
+  .scheduler-toolbar--collapsed .field,
+  .scheduler-toolbar--collapsed .toolbar-status-wrap,
+  .scheduler-toolbar--collapsed .scheduler-toolbar__actions {
+    display: none;
+  }
+}
