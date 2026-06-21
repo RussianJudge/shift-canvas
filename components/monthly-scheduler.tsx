@@ -3116,7 +3116,7 @@ export function MonthlyScheduler({
           onClick={() => setIsToolbarCollapsed((current) => !current)}
           aria-expanded={!isToolbarCollapsed}
         >
-          <span>{isToolbarCollapsed ? "Show filters" : "Hide filters"}</span>
+          <span>Filters</span>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 9l6 6l6-6" />
           </svg>

@@ -6385,11 +6385,37 @@ textarea::placeholder {
 }
 
 /* ============================================================
-   Scheduler toolbar — fold filters/actions away on mobile
-   (toggle hidden on desktop; toolbar always full there).
+   Scheduler toolbar — "Filters" collapses like the set builder.
+   The toggle is a full-width header row; the date selector and
+   action icons stay on the top line, the filter fields fold below.
    ============================================================ */
+.scheduler-toolbar .app-date-selector {
+  order: 0;
+}
+.scheduler-toolbar__actions {
+  order: 1;
+}
 .scheduler-toolbar__toggle {
-  display: none;
+  order: 2;
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-body), sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.scheduler-toolbar__toggle:hover {
+  color: var(--ink);
 }
 .scheduler-toolbar__toggle svg {
   width: 1.05rem;
@@ -6401,32 +6427,16 @@ textarea::placeholder {
   stroke-linejoin: round;
   transition: transform 160ms ease;
 }
-@media (max-width: 600px) {
-  .scheduler-toolbar__toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin-left: auto;
-    padding: 0.35rem 0.65rem;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    background: var(--surface);
-    color: var(--muted);
-    cursor: pointer;
-    font-family: var(--font-body), sans-serif;
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  .scheduler-toolbar--collapsed .scheduler-toolbar__toggle svg {
-    transform: rotate(-90deg);
-  }
-  .scheduler-toolbar--collapsed .field,
-  .scheduler-toolbar--collapsed .toolbar-status-wrap,
-  .scheduler-toolbar--collapsed .scheduler-toolbar__actions {
-    display: none;
-  }
+.scheduler-toolbar .field,
+.scheduler-toolbar .toolbar-status-wrap {
+  order: 3;
+}
+.scheduler-toolbar--collapsed .scheduler-toolbar__toggle svg {
+  transform: rotate(-90deg);
+}
+.scheduler-toolbar--collapsed .field,
+.scheduler-toolbar--collapsed .toolbar-status-wrap {
+  display: none;
 }
 
 /* ============================================================
@@ -6479,4 +6489,46 @@ textarea::placeholder {
     border: 0;
     color: var(--ink);
   }
+}
+
+/* ============================================================
+   FIX — temporary loan selected date highlight
+   The rollout's .temporary-loan-date background was sourced after
+   the --selected rule and masked it. Re-assert the selected state.
+   ============================================================ */
+.temporary-loan-date--selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.temporary-loan-date--selected strong,
+.temporary-loan-date--selected span {
+  color: var(--accent-strong);
+}
+
+/* ============================================================
+   Sweep — re-assert state backgrounds the rollout base classes
+   masked (legend understaffed, empty calendar day, dragging row).
+   ============================================================ */
+.set-builder-legend__item--under {
+  background: var(--hue-slate-fill);
+}
+.overtime-calendar-day--empty {
+  background: var(--bg-tint);
+}
+.shift-order-row--dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ============================================================
+   Metrics — overtime + fragility bars aligned to app semantics
+   (overtime = warm amber/load, fragility = red/risk).
+   ============================================================ */
+.metrics-bar-fill--overtime {
+  background: #d97706;
+}
+.metrics-bar-fill--fragility {
+  background: #dc2626;
 }
