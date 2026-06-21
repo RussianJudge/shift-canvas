@@ -1440,6 +1440,7 @@ button.workspace-nav-link {
   gap: 0.9rem;
   align-items: end;
   padding: 0 1.5rem 1rem;
+  margin-bottom: 1rem;
 }
 
 .field {
@@ -1971,7 +1972,7 @@ button.workspace-nav-link {
 }
 
 .metrics-card__title {
-  margin: 0;
+  margin-top: 0.5rem;
   font-family: var(--font-display), sans-serif;
   font-size: 1.15rem;
   line-height: 1.05;
@@ -3601,7 +3602,7 @@ button.workspace-nav-link {
 
 .schedule-grid {
   --schedule-name-column-width: 7.75rem;
-  --schedule-day-column-width: clamp(1.72rem, calc((100vw - 18rem) / 31), 2.35rem);
+  --schedule-day-column-width: clamp(2.2rem, calc((100vw - 18rem) / 31), 2.35rem);
   display: grid;
   align-items: stretch;
   width: max-content;
@@ -5375,6 +5376,7 @@ button.workspace-nav-link {
   background: var(--surface);
   border: 1px solid var(--line);
   color: var(--ink);
+  margin-top: 0.2rem;
 }
 .ghost-button:hover {
   background: var(--bg-tint);
@@ -6542,4 +6544,69 @@ textarea::placeholder {
   .panel-heading {
     padding-top: 3.1rem;
   }
+}
+
+/* ============================================================
+   Shifts page — icon action buttons (add / revert / save),
+   kept inline on every size including mobile.
+   ============================================================ */
+.planner-actions--icons {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+}
+.schedules-save-button.icon-button {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+}
+.schedules-save-button.icon-button:hover {
+  background: var(--accent-strong);
+}
+@media (max-width: 600px) {
+  .workspace-toolbar--actions .planner-actions--icons {
+    flex-direction: row;
+    flex-wrap: nowrap;
+  }
+}
+
+/* Mutuals — worker search bar */
+.mutuals-search-bar {
+  padding-top: 0;
+}
+.mutuals-search-bar .field {
+  max-width: 24rem;
+}
+@media (max-width: 600px) {
+  .mutuals-search-bar .field {
+    max-width: 100%;
+  }
+}
+
+/* Sub-schedules — status line (toolbar shell removed) */
+.subschedule-builder-status {
+  padding: 0 clamp(0.75rem, 2vw, 1.25rem);
+}
+.subschedule-builder-status:empty {
+  display: none;
+}
+
+/* Sub-schedules — controls folded into the header (toolbar removed) */
+.subschedule-topbar__controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.8rem;
+  justify-self: end;
+}
+.subschedule-topbar__controls .field {
+  flex: 0 1 14rem;
+  min-width: 10rem;
+}
+.subschedule-topbar__controls .toolbar-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+.subschedule-empty {
+  padding: 1rem clamp(0.75rem, 2vw, 1.25rem);
 }

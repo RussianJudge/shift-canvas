@@ -1022,38 +1022,10 @@ export function SubSchedulesPanel({
 
   return (
     <section className="panel-frame">
-      <div className="panel-heading panel-heading--split">
+      <div className="panel-heading panel-heading--split subschedule-topbar">
         <h1 className="panel-title">Sub-Schedules</h1>
-        <AppDateSelector
-          mode="month"
-          value={snapshot.month}
-          label="Sub-schedules month"
-          className="sub-schedules-month-pager"
-          onChange={handleMonthChange}
-        />
-      </div>
-
-      <section className="metrics-section subschedule-builder-section">
-        {subSchedules.length === 0 ? (
-          <div className="workspace-toolbar workspace-toolbar--scheduler">
-            <div className="empty-state">
-              <strong>No sub-schedules yet.</strong>
-              <span>Add one to start planning outage or event staffing.</span>
-            </div>
-            <div className="toolbar-actions">
-              <button
-                type="button"
-                className="icon-button"
-                onClick={handleAddSubSchedule}
-                aria-label="Add sub-schedule"
-                title="Add sub-schedule"
-              >
-                <PlusIcon />
-              </button>
-            </div>
-          </div>
-        ) : activeSubSchedule ? (
-          <div className="workspace-toolbar workspace-toolbar--scheduler">
+        <div className="subschedule-topbar__controls">
+          {activeSubSchedule ? (
             <label className="field">
               <span>Sub-schedule</span>
               <select
@@ -1069,17 +1041,25 @@ export function SubSchedulesPanel({
                 ))}
               </select>
             </label>
-
-            <div className="toolbar-actions">
-              <button
-                type="button"
-                className="icon-button"
-                onClick={handleAddSubSchedule}
-                aria-label="Add sub-schedule"
-                title="Add sub-schedule"
-              >
-                <PlusIcon />
-              </button>
+          ) : null}
+          <AppDateSelector
+            mode="month"
+            value={snapshot.month}
+            label="Sub-schedules month"
+            className="sub-schedules-month-pager"
+            onChange={handleMonthChange}
+          />
+          <div className="toolbar-actions">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={handleAddSubSchedule}
+              aria-label="Add sub-schedule"
+              title="Add sub-schedule"
+            >
+              <PlusIcon />
+            </button>
+            {activeSubSchedule ? (
               <button
                 type="button"
                 className="icon-button"
@@ -1089,38 +1069,43 @@ export function SubSchedulesPanel({
               >
                 <SettingsIcon />
               </button>
-            </div>
-
-            <div className="toolbar-status-wrap">
-              {activeSubScheduleIssues.length > 0 ? (
-                <p className="toolbar-status">{activeSubScheduleIssues[0]}</p>
-              ) : dirtySubScheduleIds.has(activeSubSchedule.id) ? (
-                <p className="toolbar-status">This sub-schedule has unsaved changes.</p>
-              ) : statusMessage ? (
-                <p className="toolbar-status">{statusMessage}</p>
-              ) : null}
-            </div>
+            ) : null}
           </div>
-        ) : null}
-      </section>
+        </div>
+      </div>
+
+      {subSchedules.length === 0 ? (
+        <div className="empty-state subschedule-empty">
+          <strong>No sub-schedules yet.</strong>
+          <span>Add one to start planning outage or event staffing.</span>
+        </div>
+      ) : activeSubSchedule ? (
+        <div className="toolbar-status-wrap subschedule-builder-status">
+          {activeSubScheduleIssues.length > 0 ? (
+            <p className="toolbar-status">{activeSubScheduleIssues[0]}</p>
+          ) : dirtySubScheduleIds.has(activeSubSchedule.id) ? (
+            <p className="toolbar-status">This sub-schedule has unsaved changes.</p>
+          ) : statusMessage ? (
+            <p className="toolbar-status">{statusMessage}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <section className="metrics-section">
         {activeSubSchedule ? (
           <>
-            <div className="workspace-toolbar workspace-toolbar--scheduler subschedule-builder-toolbar">
-              <div className="toolbar-status-wrap">
-                {!isPersistedActiveSubSchedule ? (
-                  <p className="toolbar-status">Save this new sub-schedule definition before staffing it.</p>
-                ) : activeSubSchedule.isArchived ? (
-                  <p className="toolbar-status">Archived sub-schedules stay visible for history but cannot be edited.</p>
-                ) : isSavingAssignments ? (
-                  <p className="toolbar-status">Saving changes automatically...</p>
-                ) : assignmentMessage ? (
-                  <p className="toolbar-status">{assignmentMessage}</p>
-                ) : activeSubSchedule.competencyIds.length === 0 ? (
-                  <p className="toolbar-status">No posts are assigned to this sub-schedule yet, but time codes and notes can still be saved.</p>
-                ) : null}
-              </div>
+            <div className="toolbar-status-wrap subschedule-builder-status">
+              {!isPersistedActiveSubSchedule ? (
+                <p className="toolbar-status">Save this new sub-schedule definition before staffing it.</p>
+              ) : activeSubSchedule.isArchived ? (
+                <p className="toolbar-status">Archived sub-schedules stay visible for history but cannot be edited.</p>
+              ) : isSavingAssignments ? (
+                <p className="toolbar-status">Saving changes automatically...</p>
+              ) : assignmentMessage ? (
+                <p className="toolbar-status">{assignmentMessage}</p>
+              ) : activeSubSchedule.competencyIds.length === 0 ? (
+                <p className="toolbar-status">No posts are assigned to this sub-schedule yet, but time codes and notes can still be saved.</p>
+              ) : null}
             </div>
 
             <div className="subschedule-grid-wrap">
