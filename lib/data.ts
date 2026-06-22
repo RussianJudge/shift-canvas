@@ -1252,44 +1252,23 @@ export async function getScheduleReferenceSnapshot(
     scheduleDataScheduleId,
   } = options;
 
-  const scheduleReference = await getScopedSchedulesWithEmployees(session, {
-    includeEmployeeCompetencies,
-  });
-
-  if (!scheduleReference) {
-    return emptySnapshot(month);
-  }
-
-  const resolvedScheduleDataScheduleId =
-    scheduleDataScheduleId === undefined
-      ? null
-      : resolvePreferredScheduleId(scheduleReference.schedules, scheduleDataScheduleId, session);
-  const scheduleForDataWindow = resolvedScheduleDataScheduleId
-    ? scheduleReference.schedules.find((schedule) => schedule.id === resolvedScheduleDataScheduleId) ?? null
-    : null;
-  const schedulePageBounds = getSchedulePageDateBounds(month, scheduleForDataWindow);
-  const { monthStart, monthEnd, windowMonths } =
-    assignmentWindow === "extended"
-      ? getExtendedMonthBounds(month)
-      : assignmentWindow === "schedule-page"
-        ? { ...schedulePageBounds, windowMonths: getExtendedMonthBounds(month).windowMonths }
-        : { ...getMonthBounds(month), windowMonths: [month] };
   const completedMonths =
     completedSetWindow === "extended" ? getExtendedMonthBounds(month).windowMonths : [month];
-  const visibleEmployeeIds = scheduleReference.employeeRows.map((employee) => employee.id);
-  const selectedScheduleEmployeeIds = scheduleForDataWindow?.employees.map((employee) => employee.id) ?? [];
 
+  // Batch 1 — the scoped schedule/employee reference plus every reference query
+  // that does not depend on the resolved employee list or data window. Running
+  // them together means these reads no longer wait on the reference round-trip.
   const [
+    scheduleReference,
     competenciesResult,
     timeCodesResult,
     subSchedulesResult,
     subScheduleCompetenciesResult,
-    assignmentsResult,
-    subScheduleAssignmentsResult,
-    overtimeClaimsResult,
     manualOvertimePostingsResult,
-    completedSetsResult,
   ] = await Promise.all([
+    getScopedSchedulesWithEmployees(session, {
+      includeEmployeeCompetencies,
+    }),
     includeCompetencies
       ? applySessionScope(
           supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
@@ -1320,6 +1299,44 @@ export async function getScheduleReferenceSnapshot(
           session,
         )
       : Promise.resolve({ data: [], error: null }),
+    includeManualOvertimePostings
+      ? applySessionScope(
+          supabase
+            .from("manual_overtime_postings")
+            .select("id, schedule_id, sub_schedule_id, competency_id, time_code_id, slot_count, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
+          session,
+        ).eq("month_key", month)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (!scheduleReference) {
+    return emptySnapshot(month);
+  }
+
+  const resolvedScheduleDataScheduleId =
+    scheduleDataScheduleId === undefined
+      ? null
+      : resolvePreferredScheduleId(scheduleReference.schedules, scheduleDataScheduleId, session);
+  const scheduleForDataWindow = resolvedScheduleDataScheduleId
+    ? scheduleReference.schedules.find((schedule) => schedule.id === resolvedScheduleDataScheduleId) ?? null
+    : null;
+  const schedulePageBounds = getSchedulePageDateBounds(month, scheduleForDataWindow);
+  const { monthStart, monthEnd, windowMonths } =
+    assignmentWindow === "extended"
+      ? getExtendedMonthBounds(month)
+      : assignmentWindow === "schedule-page"
+        ? { ...schedulePageBounds, windowMonths: getExtendedMonthBounds(month).windowMonths }
+        : { ...getMonthBounds(month), windowMonths: [month] };
+  const visibleEmployeeIds = scheduleReference.employeeRows.map((employee) => employee.id);
+  const selectedScheduleEmployeeIds = scheduleForDataWindow?.employees.map((employee) => employee.id) ?? [];
+
+  // Batch 2 — reads that depend on the resolved employee list / data window.
+  const [
+    assignmentsResult,
+    subScheduleAssignmentsResult,
+    overtimeClaimsResult,
+    completedSetsResult,
+  ] = await Promise.all([
     includeAssignments
       ? visibleEmployeeIds.length > 0
         ? (() => {
@@ -1389,14 +1406,6 @@ export async function getScheduleReferenceSnapshot(
               .order("id"),
           );
         })()
-      : Promise.resolve({ data: [], error: null }),
-    includeManualOvertimePostings
-      ? applySessionScope(
-          supabase
-            .from("manual_overtime_postings")
-            .select("id, schedule_id, sub_schedule_id, competency_id, time_code_id, slot_count, month_key, shift_kind, posting_dates, created_at, company_id, site_id, business_area_id"),
-          session,
-        ).eq("month_key", month)
       : Promise.resolve({ data: [], error: null }),
     includeCompletedSets
       ? (() => {
@@ -1551,7 +1560,10 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
   };
 });
 
-export async function getOvertimeBoardSnapshot(month: string, session?: AppSession | null) {
+export const getOvertimeBoardSnapshot = cache(async function getOvertimeBoardSnapshot(
+  month: string,
+  session?: AppSession | null,
+) {
   return getScheduleReferenceSnapshot(month, session, {
     includeEmployeeCompetencies: true,
     includeCompetencies: true,
@@ -1565,7 +1577,7 @@ export async function getOvertimeBoardSnapshot(month: string, session?: AppSessi
     assignmentWindow: "extended",
     completedSetWindow: "extended",
   });
-}
+});
 
 export async function getFutureOvertimeClaimsForEmployee(
   employeeId: string | null | undefined,
