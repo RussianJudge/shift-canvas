@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 
 import {
   formatEmployeeDisplayName,
@@ -168,9 +169,9 @@ type AssignmentRow = {
   time_code_id: string | null;
   notes: string | null;
   shift_kind: StoredAssignment["shiftKind"];
-  company_id: string;
-  site_id: string;
-  business_area_id: string;
+  company_id?: string;
+  site_id?: string;
+  business_area_id?: string;
 };
 
 type ProductionUnitRow = {
@@ -191,9 +192,9 @@ type OvertimeClaimRow = {
   time_code_id: string | null;
   assignment_date: string;
   manual_posting_id: string | null;
-  company_id: string;
-  site_id: string;
-  business_area_id: string;
+  company_id?: string;
+  site_id?: string;
+  business_area_id?: string;
 };
 
 type NotificationRow = {
@@ -385,6 +386,43 @@ function applySessionScope(query: any, session?: AppSession | null) {
   return companyScoped
     .eq("site_id", session.siteId)
     .eq("business_area_id", session.businessAreaId);
+}
+
+/**
+ * The exact set of fields `applySessionScope` reads. Used as a cache key so
+ * cached reference data is partitioned strictly by organization scope and can
+ * never leak across companies/sites/business areas.
+ */
+type ScopeCacheKey = {
+  companyId: string | null;
+  role: string | null;
+  activeSiteId: string | null;
+  activeBusinessAreaId: string | null;
+  siteId: string | null;
+  businessAreaId: string | null;
+};
+
+function toScopeCacheKey(session?: AppSession | null): ScopeCacheKey {
+  return {
+    companyId: session?.companyId ?? null,
+    role: session?.role ?? null,
+    activeSiteId: session?.activeSiteId ?? null,
+    activeBusinessAreaId: session?.activeBusinessAreaId ?? null,
+    siteId: session?.siteId ?? null,
+    businessAreaId: session?.businessAreaId ?? null,
+  };
+}
+
+/** Minimal session containing only the fields `applySessionScope` consumes. */
+function sessionFromScopeCacheKey(scope: ScopeCacheKey): AppSession {
+  return {
+    companyId: scope.companyId ?? undefined,
+    role: scope.role ?? "worker",
+    activeSiteId: scope.activeSiteId ?? undefined,
+    activeBusinessAreaId: scope.activeBusinessAreaId ?? undefined,
+    siteId: scope.siteId ?? undefined,
+    businessAreaId: scope.businessAreaId ?? undefined,
+  } as AppSession;
 }
 
 export async function getAdminScopeOptions(session: AppSession) {
@@ -836,11 +874,9 @@ function mapCompletedSets(rows: CompletedSetRow[]) {
  * or completed-set state. Centralizing this narrower loader avoids making those
  * pages pay the full scheduler snapshot cost.
  */
-async function getScopedSchedulesWithEmployees(
-  session?: AppSession | null,
-  options: {
-    includeEmployeeCompetencies?: boolean;
-  } = {},
+async function runScopedSchedulesWithEmployees(
+  scope: ScopeCacheKey,
+  includeEmployeeCompetencies: boolean,
 ) {
   const supabase = getDataClient();
 
@@ -848,7 +884,7 @@ async function getScopedSchedulesWithEmployees(
     return null;
   }
 
-  const { includeEmployeeCompetencies = false } = options;
+  const session = sessionFromScopeCacheKey(scope);
   const [schedulesResult, employeesResult, employeeCompetenciesResult, scheduleCompetenciesResult] = await Promise.all([
     applySessionScope(
       supabase.from("schedules").select("id, name, start_date, day_shift_days, night_shift_days, off_days, is_active, company_id, site_id, business_area_id"),
@@ -892,6 +928,27 @@ async function getScopedSchedulesWithEmployees(
       ["schedule_competencies", scheduleCompetenciesResult.error],
     ] as Array<[string, { message?: string } | null | undefined]>,
   };
+}
+
+/**
+ * Reference schedules + employees are session-scoped but change rarely, so they
+ * are cached for a short TTL keyed strictly by organization scope. revalidatePath
+ * does not clear unstable_cache, so edits surface within the TTL window below.
+ */
+const getScopedSchedulesWithEmployeesCached = unstable_cache(
+  runScopedSchedulesWithEmployees,
+  ["scoped-schedules-with-employees-v1"],
+  { revalidate: 15 },
+);
+
+async function getScopedSchedulesWithEmployees(
+  session?: AppSession | null,
+  options: {
+    includeEmployeeCompetencies?: boolean;
+  } = {},
+) {
+  const { includeEmployeeCompetencies = false } = options;
+  return getScopedSchedulesWithEmployeesCached(toScopeCacheKey(session), includeEmployeeCompetencies);
 }
 
 /** Normalizes a full date into the `YYYY-MM` month key used in routing. */
@@ -985,7 +1042,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       applySessionScope(
         supabase
         .from("overtime_claims")
-        .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+        .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id"),
         session,
       )
         .gte("assignment_date", monthStart)
@@ -1033,7 +1090,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
       ? await fetchAllRows<AssignmentRow>(
           supabase
             .from("schedule_assignments")
-            .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
+            .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
             .in("employee_id", visibleEmployeeIds)
             .gte("assignment_date", monthStart)
             .lte("assignment_date", monthEnd)
@@ -1342,7 +1399,7 @@ export async function getScheduleReferenceSnapshot(
         ? (() => {
             let query = supabase
               .from("schedule_assignments")
-              .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id")
+              .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
               .in("employee_id", visibleEmployeeIds)
               .gte("assignment_date", monthStart)
               .lte("assignment_date", monthEnd);
@@ -1390,7 +1447,7 @@ export async function getScheduleReferenceSnapshot(
           let query = applySessionScope(
             supabase
               .from("overtime_claims")
-              .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+              .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id"),
             session,
           )
             .gte("assignment_date", monthStart)
@@ -1598,7 +1655,7 @@ export async function getFutureOvertimeClaimsForEmployee(
   let query = applySessionScope(
     supabase
       .from("overtime_claims")
-      .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+      .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id"),
     session,
   )
       .gt("assignment_date", today)
@@ -1685,7 +1742,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
           applySessionScope(
             supabase
               .from("schedule_assignments")
-              .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
+              .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind"),
             session,
           ).in("employee_id", employeeIds),
         )
@@ -1713,7 +1770,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
           applySessionScope(
             supabase
               .from("overtime_claims")
-              .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+              .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id"),
             session,
           ).in("employee_id", employeeIds),
         )
@@ -1856,7 +1913,7 @@ export async function getMetricsOvertimeHistory(today: string, session?: AppSess
     applySessionScope(
       supabase
       .from("overtime_claims")
-      .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id, company_id, site_id, business_area_id"),
+      .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id"),
       session,
     )
       .gte("assignment_date", getYearStart(today))
@@ -1887,7 +1944,7 @@ export async function getMetricsAssignmentHistory(today: string, session?: AppSe
         applySessionScope(
           supabase
             .from("schedule_assignments")
-            .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind, company_id, site_id, business_area_id"),
+            .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind"),
           session,
         )
           .gte("assignment_date", yearStart)
