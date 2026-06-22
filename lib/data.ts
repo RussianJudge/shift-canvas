@@ -1,6 +1,5 @@
 import "server-only";
 import { cache } from "react";
-import { unstable_cache } from "next/cache";
 
 import {
   formatEmployeeDisplayName,
@@ -930,17 +929,6 @@ async function runScopedSchedulesWithEmployees(
   };
 }
 
-/**
- * Reference schedules + employees are session-scoped but change rarely, so they
- * are cached for a short TTL keyed strictly by organization scope. revalidatePath
- * does not clear unstable_cache, so edits surface within the TTL window below.
- */
-const getScopedSchedulesWithEmployeesCached = unstable_cache(
-  runScopedSchedulesWithEmployees,
-  ["scoped-schedules-with-employees-v1"],
-  { revalidate: 15 },
-);
-
 async function getScopedSchedulesWithEmployees(
   session?: AppSession | null,
   options: {
@@ -948,7 +936,7 @@ async function getScopedSchedulesWithEmployees(
   } = {},
 ) {
   const { includeEmployeeCompetencies = false } = options;
-  return getScopedSchedulesWithEmployeesCached(toScopeCacheKey(session), includeEmployeeCompetencies);
+  return runScopedSchedulesWithEmployees(toScopeCacheKey(session), includeEmployeeCompetencies);
 }
 
 /** Normalizes a full date into the `YYYY-MM` month key used in routing. */
