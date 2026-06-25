@@ -6630,3 +6630,26 @@ textarea::placeholder {
   flex: 1 1 6rem;
   min-width: 0;
 }
+
+/* ============================================================
+   FIX — manual overtime / mutual date pills, dark-mode safe
+   (were hardcoded white bg + warm border + color-mix-white selected)
+   ============================================================ */
+.mutual-date-pill {
+  background: var(--surface);
+  border-color: var(--line);
+}
+.mutual-date-pill:hover {
+  background: var(--bg-tint);
+  border-color: var(--line-strong);
+}
+.mutual-date-pill--selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.mutual-date-pill--selected strong,
+.mutual-date-pill--selected span {
+  color: var(--accent-strong);
+}

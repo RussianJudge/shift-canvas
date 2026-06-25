@@ -457,6 +457,7 @@ export function MutualsPanel({
     [snapshot.schedules],
   );
   const [statusMessage, setStatusMessage] = useState("");
+  const [search, setSearch] = useState("");
   const [selectedPostingEmployeeId, setSelectedPostingEmployeeId] = useState(
     canPostForOthers ? allEmployees[0]?.id ?? "" : viewer.employeeId ?? "",
   );
@@ -491,10 +492,21 @@ export function MutualsPanel({
     ? viewSnapshot.postings.find((posting) => posting.id === cancelAcceptedPostingId) ?? null
     : null;
 
-  const openPostings = viewSnapshot.postings.filter((posting) => posting.status === "open");
-  const pendingApprovalPostings = viewSnapshot.postings.filter((posting) => posting.status === "pending_leader_approval");
-  const acceptedPostings = viewSnapshot.postings.filter((posting) => posting.status === "accepted");
-  const closedPostings = viewSnapshot.postings.filter(
+  const normalizedSearch = search.trim().toLowerCase();
+  const searchedPostings = normalizedSearch
+    ? viewSnapshot.postings.filter((posting) => {
+        const involvedNames = [
+          posting.ownerEmployeeName,
+          ...posting.applications.map((application) => application.applicantEmployeeName),
+        ];
+        return involvedNames.some((name) => name?.toLowerCase().includes(normalizedSearch));
+      })
+    : viewSnapshot.postings;
+
+  const openPostings = searchedPostings.filter((posting) => posting.status === "open");
+  const pendingApprovalPostings = searchedPostings.filter((posting) => posting.status === "pending_leader_approval");
+  const acceptedPostings = searchedPostings.filter((posting) => posting.status === "accepted");
+  const closedPostings = searchedPostings.filter(
     (posting) => !["open", "pending_leader_approval", "accepted"].includes(posting.status),
   );
 
@@ -662,6 +674,18 @@ export function MutualsPanel({
           className="mutuals-year-pager"
           onChange={handleYearChange}
         />
+      </div>
+
+      <div className="workspace-toolbar workspace-toolbar--personnel-page mutuals-search-bar">
+        <label className="field">
+          <span>Search</span>
+          <input
+            type="search"
+            placeholder="Search by worker name"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
       </div>
 
       {statusMessage ? (

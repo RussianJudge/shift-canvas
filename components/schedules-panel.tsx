@@ -261,20 +261,45 @@ export function SchedulesPanel({
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--actions">
-        <div className="planner-actions">
-          <button type="button" className="ghost-button" onClick={handleAddSchedule}>
-            Add shift
-          </button>
-          <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
-            Revert
+        <div className="planner-actions planner-actions--icons">
+          <button
+            type="button"
+            className="ghost-button icon-button"
+            onClick={handleAddSchedule}
+            aria-label="Add shift"
+            title="Add shift"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
           </button>
           <button
             type="button"
-            className="primary-button"
+            className="ghost-button icon-button"
+            onClick={handleRevert}
+            disabled={isSaving || !hasChanges}
+            aria-label="Revert changes"
+            title="Revert changes"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 14L4 9l5-5" />
+              <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="primary-button icon-button schedules-save-button"
             onClick={handleSave}
             disabled={isSaving || !hasChanges || hasValidationErrors}
+            aria-label={isSaving ? "Saving" : "Save"}
+            title="Save"
           >
-            {isSaving ? "Saving..." : "Save"}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <path d="M17 21v-8H7v8" />
+              <path d="M7 3v5h8" />
+            </svg>
           </button>
         </div>
         <div className="toolbar-status-wrap">

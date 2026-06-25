@@ -1489,6 +1489,13 @@ export function MonthlyScheduler({
   const [isTemporaryLoanModalOpen, setIsTemporaryLoanModalOpen] = useState(false);
   const [isSetBuilderCollapsed, setIsSetBuilderCollapsed] = useState(false);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
+
+  // On mobile the set builder starts visible but collapsed (no auto-open).
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth <= 600) {
+      setIsSetBuilderCollapsed(true);
+    }
+  }, []);
   const [loanCancelTarget, setLoanCancelTarget] = useState<LoanCancelTarget | null>(null);
   const [isLoanTransition, startLoanTransition] = useTransition();
   const [isShiftOrderModalOpen, setIsShiftOrderModalOpen] = useState(false);
