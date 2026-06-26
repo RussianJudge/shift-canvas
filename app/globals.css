@@ -6636,11 +6636,11 @@ textarea::placeholder {
    (were hardcoded white bg + warm border + color-mix-white selected)
    ============================================================ */
 .mutual-date-pill {
-  background: var(--surface);
+  background: var(--surface-2);
   border-color: var(--line);
 }
 .mutual-date-pill:hover {
-  background: var(--bg-tint);
+  background: var(--surface);
   border-color: var(--line-strong);
 }
 .mutual-date-pill--selected {
@@ -6652,4 +6652,34 @@ textarea::placeholder {
 .mutual-date-pill--selected strong,
 .mutual-date-pill--selected span {
   color: var(--accent-strong);
+}
+
+/* Remove set builder padding */
+.set-builder,
+.set-builder__surface {
+  padding: 0;
+}
+
+
+/* Set builder pills margin */
+.set-builder-pills {
+  margin-bottom: 10px;
+}
+
+/* Set builder padding to match the toolbar above */
+.set-builder__surface {
+  padding: 12px;
+}
+
+/* Increase top toolbar clearance under the floating menu (mobile) */
+@media (max-width: 600px) {
+  .scheduler-toolbar,
+  .panel-heading {
+    padding-top: 3.5rem;
+  }
+}
+
+/* Panel heading margin */
+.panel-heading {
+  margin-bottom: 0.5rem;
 }

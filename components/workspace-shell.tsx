@@ -332,7 +332,15 @@ export function WorkspaceShell({
   }, [initialAdminScope]);
 
   useEffect(() => {
-    setNotifications(initialNotifications);
+    setNotifications((previous) => {
+      const unchanged =
+        previous.length === initialNotifications.length &&
+        previous.every((entry, index) => entry.id === initialNotifications[index]?.id);
+
+      // Returning the existing reference makes React skip the update, so an
+      // unstable (new-each-render) prop can't drive an infinite render loop.
+      return unchanged ? previous : initialNotifications;
+    });
   }, [initialNotifications]);
 
   /**
