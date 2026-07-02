@@ -6683,3 +6683,13 @@ textarea::placeholder {
 .panel-heading {
   margin-bottom: 0.5rem;
 }
+
+/* Mutual reject (cancel workflow) button */
+.mutual-reject-button {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+.mutual-reject-button:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}

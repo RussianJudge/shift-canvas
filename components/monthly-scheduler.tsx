@@ -1487,15 +1487,9 @@ export function MonthlyScheduler({
   const [isUpdatingSetCompletion, startSetCompletionTransition] = useTransition();
   const [isSetCompletionWarningOpen, setIsSetCompletionWarningOpen] = useState(false);
   const [isTemporaryLoanModalOpen, setIsTemporaryLoanModalOpen] = useState(false);
-  const [isSetBuilderCollapsed, setIsSetBuilderCollapsed] = useState(false);
+  // The set builder is always mounted (so it never "pops" in) and starts collapsed.
+  const [isSetBuilderCollapsed, setIsSetBuilderCollapsed] = useState(true);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
-
-  // On mobile the set builder starts visible but collapsed (no auto-open).
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth <= 600) {
-      setIsSetBuilderCollapsed(true);
-    }
-  }, []);
   const [loanCancelTarget, setLoanCancelTarget] = useState<LoanCancelTarget | null>(null);
   const [isLoanTransition, startLoanTransition] = useTransition();
   const [isShiftOrderModalOpen, setIsShiftOrderModalOpen] = useState(false);
@@ -1648,7 +1642,6 @@ export function MonthlyScheduler({
     selectedColumnDate !== null &&
     copiedColumnTemplate.sourceDate !== selectedColumnDate &&
     !completedSetDates.has(selectedColumnDate);
-  const hasSelectedBuilderTarget = selectedSetDays.length > 0 || selectedColumnDate !== null;
   const competencyCoverage = useMemo(() => {
     if (!activeSchedule) {
       return {};
@@ -3235,7 +3228,7 @@ export function MonthlyScheduler({
         </div>
       </div>
 
-      {canManageSetBuilder && hasSelectedBuilderTarget ? (
+      {canManageSetBuilder ? (
         <section
           className={`set-builder ${isSetBuilderCollapsed ? "set-builder--collapsed" : ""}`}
           aria-label="Set builder"

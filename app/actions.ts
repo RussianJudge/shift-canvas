@@ -6,6 +6,7 @@ import type {
   AppRole,
   ApplyToMutualPostingInput,
   ApproveMutualPostingInput,
+  RejectMutualPostingInput,
   CancelAcceptedMutualInput,
   CancelTemporaryLoanInput,
   ClaimOvertimePostingInput,
@@ -4281,6 +4282,112 @@ export async function approveMutualPosting(input: ApproveMutualPostingInput) {
   return {
     ok: true,
     message: "Leader approval recorded. Waiting on the other shift leader.",
+  };
+}
+
+/**
+ * Lets a leader (of either shift) or an admin reject a mutual that is waiting
+ * for leader approval, cancelling the workflow. The posting and its accepted
+ * application both move to `rejected`.
+ */
+export async function rejectMutualPosting(input: RejectMutualPostingInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can reject mutuals.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual approvals are unavailable.",
+    };
+  }
+
+  const postingResult = await supabase
+    .from("mutual_shift_postings")
+    .select("id, owner_employee_id, owner_schedule_id, status, accepted_application_id, company_id, site_id, business_area_id")
+    .eq("id", input.postingId)
+    .maybeSingle();
+
+  const posting = postingResult.data as MutualPostingRecord | null;
+
+  if (postingResult.error || !posting) {
+    return {
+      ok: false,
+      message: "Could not find that mutual posting.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(posting))) {
+    return {
+      ok: false,
+      message: "You do not have permission to access that mutual.",
+    };
+  }
+
+  if (posting.status !== "pending_leader_approval" || !posting.accepted_application_id) {
+    return {
+      ok: false,
+      message: "That mutual is not waiting for leader approval.",
+    };
+  }
+
+  const applicationResult = await supabase
+    .from("mutual_shift_applications")
+    .select("id, status, applicant_employee_id, applicant_schedule_id, company_id, site_id, business_area_id")
+    .eq("id", posting.accepted_application_id)
+    .eq("posting_id", input.postingId)
+    .maybeSingle();
+
+  const application = applicationResult.data as MutualApplicationRecord | null;
+
+  if (applicationResult.error || !application) {
+    return {
+      ok: false,
+      message: "Could not find the accepted mutual offer waiting for approval.",
+    };
+  }
+
+  const canReject =
+    (await canApproveMutualForSchedule(session, posting.owner_schedule_id)) ||
+    (await canApproveMutualForSchedule(session, application.applicant_schedule_id));
+
+  if (!canReject) {
+    return {
+      ok: false,
+      message: "You are not a leader for either shift in this mutual.",
+    };
+  }
+
+  const { error: rejectError } = await supabase
+    .from("mutual_shift_postings")
+    .update({ status: "rejected" })
+    .eq("id", input.postingId);
+
+  if (rejectError) {
+    return {
+      ok: false,
+      message: `Could not reject mutual: ${rejectError.message}`,
+    };
+  }
+
+  await supabase
+    .from("mutual_shift_applications")
+    .update({ status: "rejected" })
+    .eq("id", application.id);
+
+  revalidatePath("/mutuals");
+  revalidatePath("/mutals");
+
+  return {
+    ok: true,
+    message: "Mutual rejected. The swap workflow has been cancelled.",
   };
 }
 

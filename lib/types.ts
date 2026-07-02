@@ -319,6 +319,10 @@ export interface WithdrawMutualPostingInput {
   postingId: string;
 }
 
+export interface RejectMutualPostingInput {
+  postingId: string;
+}
+
 export interface WithdrawMutualApplicationInput {
   postingId: string;
   applicationId: string;

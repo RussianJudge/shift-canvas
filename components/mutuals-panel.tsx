@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import {
   acceptMutualApplication,
   approveMutualPosting,
+  rejectMutualPosting,
   applyToMutualPosting,
   cancelAcceptedMutual,
   createMutualPosting,
@@ -955,6 +956,19 @@ export function MutualsPanel({
                           Approve {acceptedApplication.applicantScheduleName}
                         </button>
                       ) : null}
+                      <button
+                        type="button"
+                        className="ghost-button mutual-reject-button"
+                        onClick={() =>
+                          confirmAction(
+                            "Reject this mutual and cancel the swap? This cannot be undone.",
+                            () => rejectMutualPosting({ postingId: posting.id }),
+                          )
+                        }
+                        disabled={isSubmitting}
+                      >
+                        Reject
+                      </button>
                     </div>
                   ) : null}
                 </article>
