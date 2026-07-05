@@ -126,7 +126,7 @@ function getScheduleCellComment({
 
   if (parsedMutual.partnerEmployeeId) {
     const partnerName = employeeMap[parsedMutual.partnerEmployeeId]?.name ?? "their mutual partner";
-    return `${employeeName} working for ${partnerName}`;
+    return `${employeeName} covering ${partnerName} via mutual`;
   }
 
   const parsedOvertime = parseOvertimeAssignmentNote(notes);

@@ -1440,7 +1440,6 @@ button.workspace-nav-link {
   gap: 0.9rem;
   align-items: end;
   padding: 0 1.5rem 1rem;
-  margin-bottom: 1rem;
 }
 
 .field {
@@ -1972,7 +1971,7 @@ button.workspace-nav-link {
 }
 
 .metrics-card__title {
-  margin-top: 0.5rem;
+  margin: 0;
   font-family: var(--font-display), sans-serif;
   font-size: 1.15rem;
   line-height: 1.05;
@@ -3602,7 +3601,7 @@ button.workspace-nav-link {
 
 .schedule-grid {
   --schedule-name-column-width: 7.75rem;
-  --schedule-day-column-width: clamp(2.2rem, calc((100vw - 18rem) / 31), 2.35rem);
+  --schedule-day-column-width: clamp(1.72rem, calc((100vw - 18rem) / 31), 2.35rem);
   display: grid;
   align-items: stretch;
   width: max-content;
@@ -5376,7 +5375,6 @@ button.workspace-nav-link {
   background: var(--surface);
   border: 1px solid var(--line);
   color: var(--ink);
-  margin-top: 0.2rem;
 }
 .ghost-button:hover {
   background: var(--bg-tint);
@@ -6544,191 +6542,4 @@ textarea::placeholder {
   .panel-heading {
     padding-top: 3.1rem;
   }
-}
-
-/* ============================================================
-   Shifts page — icon action buttons (add / revert / save),
-   kept inline on every size including mobile.
-   ============================================================ */
-.planner-actions--icons {
-  flex-direction: row;
-  flex-wrap: nowrap;
-  gap: 0.5rem;
-}
-.schedules-save-button.icon-button {
-  background: var(--accent);
-  border-color: transparent;
-  color: var(--accent-ink);
-}
-.schedules-save-button.icon-button:hover {
-  background: var(--accent-strong);
-}
-@media (max-width: 600px) {
-  .workspace-toolbar--actions .planner-actions--icons {
-    flex-direction: row;
-    flex-wrap: nowrap;
-  }
-}
-
-/* Mutuals — worker search bar */
-.mutuals-search-bar {
-  padding-top: 0;
-}
-.mutuals-search-bar .field {
-  max-width: 24rem;
-}
-@media (max-width: 600px) {
-  .mutuals-search-bar .field {
-    max-width: 100%;
-  }
-}
-
-/* Sub-schedules — status line (toolbar shell removed) */
-.subschedule-builder-status {
-  padding: 0 clamp(0.75rem, 2vw, 1.25rem);
-}
-.subschedule-builder-status:empty {
-  display: none;
-}
-
-/* Sub-schedules — controls folded into the header (toolbar removed) */
-.subschedule-topbar__controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.55rem 0.8rem;
-  justify-self: end;
-}
-.subschedule-topbar__controls .field {
-  flex: 0 1 14rem;
-  min-width: 10rem;
-}
-.subschedule-topbar__controls .toolbar-actions {
-  display: flex;
-  gap: 0.45rem;
-}
-.subschedule-empty {
-  padding: 1rem clamp(0.75rem, 2vw, 1.25rem);
-}
-
-/* Sub-schedules — clean controls toolbar (no metrics-section band) */
-.subschedule-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.55rem 0.85rem;
-}
-.subschedule-toolbar .field {
-  flex: 0 1 16rem;
-  min-width: 11rem;
-}
-.subschedule-toolbar .toolbar-actions {
-  display: flex;
-  gap: 0.45rem;
-}
-.subschedule-toolbar .toolbar-status-wrap {
-  flex: 1 1 6rem;
-  min-width: 0;
-}
-
-/* ============================================================
-   FIX — manual overtime / mutual date pills, dark-mode safe
-   (were hardcoded white bg + warm border + color-mix-white selected)
-   ============================================================ */
-.mutual-date-pill {
-  background: var(--surface-2);
-  border-color: var(--line);
-}
-.mutual-date-pill:hover {
-  background: var(--surface);
-  border-color: var(--line-strong);
-}
-.mutual-date-pill--selected {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent-strong);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-.mutual-date-pill--selected strong,
-.mutual-date-pill--selected span {
-  color: var(--accent-strong);
-}
-
-/* Remove set builder padding */
-.set-builder,
-.set-builder__surface {
-  padding: 0;
-}
-
-
-/* Set builder pills margin */
-.set-builder-pills {
-  margin-bottom: 10px;
-}
-
-/* Set builder padding to match the toolbar above */
-.set-builder__surface {
-  padding: 12px;
-}
-
-/* Increase top toolbar clearance under the floating menu (mobile) */
-@media (max-width: 600px) {
-  .scheduler-toolbar,
-  .panel-heading {
-    padding-top: 3.5rem;
-  }
-}
-
-/* Panel heading margin */
-.panel-heading {
-  margin-bottom: 0.5rem;
-}
-
-/* Mutual reject (cancel workflow) button */
-.mutual-reject-button {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
-}
-.mutual-reject-button:hover {
-  background: var(--danger-soft);
-  border-color: var(--danger);
-}
-
-/* Lock the date header row at the top while scrolling the grid vertically */
-.schedule-grid__header {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-}
-
-/* Assignment modal — shift options greyed/disabled when the set is locked */
-.assignment-modal__options button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  filter: grayscale(0.5);
-}
-.assignment-modal__locked-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-/* Locked cells render normally on the grid — locking shows only in the modal */
-.shift-cell--locked,
-.shift-cell--locked-coded {
-  box-shadow: none;
-}
-
-/* Keep the sticky date header row opaque (even over completed/locked columns) */
-.schedule-grid__header {
-  background: var(--grid-header);
-}
-
-/* Assignment modal — read-only generated comment (mutual / loan / overtime) */
-.assignment-modal__note-readonly {
-  min-height: 0;
-  margin: 0;
-  color: var(--muted);
-  white-space: normal;
-  cursor: default;
 }

@@ -45,6 +45,8 @@ export function ScheduleAssignmentModal({
   onClear,
   onClose,
   clearDisabledReason,
+  locked = false,
+  readOnlyComment = null,
 }: {
   selectedEmployeeName: string | null;
   selectedDate: string | null;
@@ -56,6 +58,8 @@ export function ScheduleAssignmentModal({
   onClear: () => void;
   onClose: () => void;
   clearDisabledReason?: string | null;
+  locked?: boolean;
+  readOnlyComment?: string | null;
 }) {
   if (!selectedEmployeeName || !selectedDate || typeof document === "undefined") {
     return null;
@@ -80,13 +84,20 @@ export function ScheduleAssignmentModal({
           </button>
         </div>
 
+        {locked ? (
+          <p className="assignment-modal__locked-note">
+            This set is locked. Reopen the set to change the shift — only the note can be edited.
+          </p>
+        ) : null}
+
         <div className="assignment-modal__group">
           <span className="assignment-modal__label">Time Codes</span>
-          <div className="assignment-modal__options">
+          <div className={`assignment-modal__options ${locked ? "assignment-modal__options--locked" : ""}`}>
             {timeCodes.map((timeCode) => (
               <button
                 key={timeCode.id}
                 type="button"
+                disabled={locked}
                 className={`legend-pill legend-pill--${timeCode.colorToken.toLowerCase()} ${
                   selection.timeCodeId === timeCode.id ? "legend-pill--selected" : ""
                 }`}
@@ -107,11 +118,12 @@ export function ScheduleAssignmentModal({
 
         <div className="assignment-modal__group">
           <span className="assignment-modal__label">Competencies</span>
-          <div className="assignment-modal__options">
+          <div className={`assignment-modal__options ${locked ? "assignment-modal__options--locked" : ""}`}>
             {competencies.map((competency) => (
               <button
                 key={competency.id}
                 type="button"
+                disabled={locked}
                 className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
                   selection.competencyId === competency.id ? "legend-pill--selected" : ""
                 }`}
@@ -134,19 +146,25 @@ export function ScheduleAssignmentModal({
           <label className="assignment-modal__label" htmlFor="assignment-note">
             Note
           </label>
-          <textarea
-            id="assignment-note"
-            className="assignment-modal__note-input"
-            rows={3}
-            value={selection.notes ?? ""}
-            placeholder="Add a note for this cell"
-            onChange={(event) =>
-              onApply({
-                ...selection,
-                notes: event.target.value || null,
-              })
-            }
-          />
+          {readOnlyComment ? (
+            <p className="assignment-modal__note-input assignment-modal__note-readonly">
+              {readOnlyComment}
+            </p>
+          ) : (
+            <textarea
+              id="assignment-note"
+              className="assignment-modal__note-input"
+              rows={3}
+              value={selection.notes ?? ""}
+              placeholder="Add a note for this cell"
+              onChange={(event) =>
+                onApply({
+                  ...selection,
+                  notes: event.target.value || null,
+                })
+              }
+            />
+          )}
         </div>
 
         <div className="assignment-modal__footer">
@@ -155,7 +173,7 @@ export function ScheduleAssignmentModal({
             type="button"
             className="ghost-button"
             onClick={onClear}
-            disabled={Boolean(clearDisabledReason)}
+            disabled={Boolean(clearDisabledReason) || locked}
           >
             Clear assignment
           </button>

@@ -1188,8 +1188,8 @@ function getScheduleCellComment({
     const isBorrowedMutualCell = employeeMap[employeeId]?.scheduleId !== scheduleId;
 
     return isBorrowedMutualCell
-      ? `${employeeName} is covering ${partnerName} via mutual.`
-      : `${partnerName} is covering ${employeeName} via mutual.`;
+      ? `${employeeName} covering ${partnerName} via mutual`
+      : `${partnerName} covering ${employeeName} via mutual`;
   }
 
   const parsedOvertime = parseOvertimeAssignmentNote(notes);
@@ -1489,7 +1489,8 @@ export function MonthlyScheduler({
   const [isTemporaryLoanModalOpen, setIsTemporaryLoanModalOpen] = useState(false);
   // The set builder is always mounted (so it never "pops" in) and starts collapsed.
   const [isSetBuilderCollapsed, setIsSetBuilderCollapsed] = useState(true);
-  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
+  // Filters start collapsed too.
+  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(true);
   const [loanCancelTarget, setLoanCancelTarget] = useState<LoanCancelTarget | null>(null);
   const [isLoanTransition, startLoanTransition] = useTransition();
   const [isShiftOrderModalOpen, setIsShiftOrderModalOpen] = useState(false);
@@ -1896,6 +1897,7 @@ export function MonthlyScheduler({
 
   const selectedEmployee = selectedCell ? displayEmployeeMap[selectedCell.employeeId] ?? null : null;
   const editorEmployee = editorCell ? displayEmployeeMap[editorCell.employeeId] ?? null : null;
+  const editorCellLocked = editorCell ? completedSetDates.has(editorCell.date) : false;
   const editorShiftKind =
     editorCell && activeSchedule ? shiftForDate(activeSchedule, editorCell.date) : "OFF";
   const editorSelection =
@@ -1909,6 +1911,23 @@ export function MonthlyScheduler({
           snapshot.timeCodes,
         )
       : { competencyId: null, timeCodeId: null, notes: null };
+  // For generated cells (mutual / loan / overtime) show the friendly comment in
+  // the modal instead of the raw metadata note, read-only.
+  const editorIsGeneratedNote =
+    Boolean(parseMutualAssignmentNote(editorSelection.notes).partnerEmployeeId) ||
+    Boolean(parseTemporaryLoanAssignmentNote(editorSelection.notes).loanId) ||
+    Boolean(parseOvertimeAssignmentNote(editorSelection.notes).claimantEmployeeId);
+  const editorReadOnlyComment =
+    editorCell && editorEmployee && editorIsGeneratedNote
+      ? getScheduleCellComment({
+          notes: editorSelection.notes,
+          employeeName: editorEmployee.name,
+          employeeId: editorCell.employeeId,
+          scheduleId: activeSchedule.id,
+          employeeMap,
+          scheduleNameMap,
+        }) ?? null
+      : null;
   const editorClearDisabledReason = isOvertimeManagedSelection(editorSelection)
     ? "This cell came from an overtime posting. Release it from the Overtime page instead of clearing it here."
     : isTemporaryLoanManagedSelection(editorSelection)
@@ -2258,13 +2277,6 @@ export function MonthlyScheduler({
     }
   }, [displayEmployees, editorCell, monthDays]);
 
-  useEffect(() => {
-    if (!editorCell || !completedSetDates.has(editorCell.date)) {
-      return;
-    }
-
-    setEditorCell(null);
-  }, [completedSetDates, editorCell]);
 
   useEffect(() => {
     if (!selectedSetAnchorDate || monthDays.some((day) => day.date === selectedSetAnchorDate)) {
@@ -3397,6 +3409,8 @@ export function MonthlyScheduler({
                         ? () => {
                             setSelectedSetAnchorDate(day.date);
                             setSelectedCoverageCompetencyId(null);
+                            // Opening the set builder for the clicked week.
+                            setIsSetBuilderCollapsed(false);
                           }
                         : undefined
                     }
@@ -3572,6 +3586,8 @@ export function MonthlyScheduler({
           selection={editorSelection}
           competencies={editorEmployeeCompetencies}
           timeCodes={manualEntryTimeCodes}
+          locked={editorCellLocked}
+          readOnlyComment={editorReadOnlyComment}
           clearDisabledReason={editorClearDisabledReason}
           onApply={(selection) => {
             if (!editorCell) {
@@ -3788,13 +3804,15 @@ function EmployeeRow({
                 activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""
               }`}
               onClick={() => {
-                if (!canEdit || !isBorrowedCellVisible || isLockedCell) {
+                // Locked (completed-set) cells still open the editor so a note
+                // can be added; the editor greys out everything but the note.
+                if (!canEdit || !isBorrowedCellVisible) {
                   return;
                 }
 
                 onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date });
               }}
-              disabled={!canEdit || !isBorrowedCellVisible || isLockedCell}
+              disabled={!canEdit || !isBorrowedCellVisible}
               aria-label={`${employee.name} ${day.date} assignment`}
               title={cellTitle}
             >
