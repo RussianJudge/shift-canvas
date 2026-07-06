@@ -1554,6 +1554,9 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
   session?: AppSession | null,
   selectedScheduleId?: string | null,
 ): Promise<SchedulePageSnapshot> {
+  // "all" renders every schedule stacked read-only, so nothing is scoped to a
+  // single schedule and all assignments are returned unfiltered.
+  const isAllShifts = selectedScheduleId === "all";
   const snapshot = await getScheduleReferenceSnapshot(month, session, {
     includeEmployeeCompetencies: true,
     includeCompetencies: true,
@@ -1566,24 +1569,23 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     includeCompletedSets: true,
     assignmentWindow: "schedule-page",
     completedSetWindow: "extended",
-    scheduleDataScheduleId: selectedScheduleId,
+    scheduleDataScheduleId: isAllShifts ? undefined : selectedScheduleId,
   });
-  const resolvedSelectedScheduleId = resolvePreferredScheduleId(
-    snapshot.schedules,
-    selectedScheduleId,
-    session,
-  );
-  const assignments = resolvedSelectedScheduleId
-    ? snapshot.assignments.filter((assignment) => assignment.scheduleId === resolvedSelectedScheduleId)
+  const resolvedSelectedScheduleId = isAllShifts
+    ? "all"
+    : resolvePreferredScheduleId(snapshot.schedules, selectedScheduleId, session);
+  const filterScheduleId = isAllShifts ? null : resolvedSelectedScheduleId;
+  const assignments = filterScheduleId
+    ? snapshot.assignments.filter((assignment) => assignment.scheduleId === filterScheduleId)
     : snapshot.assignments;
-  const projectedAssignments = resolvedSelectedScheduleId
-    ? snapshot.projectedAssignments.filter((assignment) => assignment.scheduleId === resolvedSelectedScheduleId)
+  const projectedAssignments = filterScheduleId
+    ? snapshot.projectedAssignments.filter((assignment) => assignment.scheduleId === filterScheduleId)
     : snapshot.projectedAssignments;
-  const overtimeClaims = resolvedSelectedScheduleId
-    ? snapshot.overtimeClaims.filter((claim) => claim.scheduleId === resolvedSelectedScheduleId)
+  const overtimeClaims = filterScheduleId
+    ? snapshot.overtimeClaims.filter((claim) => claim.scheduleId === filterScheduleId)
     : snapshot.overtimeClaims;
-  const completedSets = resolvedSelectedScheduleId
-    ? snapshot.completedSets.filter((set) => set.scheduleId === resolvedSelectedScheduleId)
+  const completedSets = filterScheduleId
+    ? snapshot.completedSets.filter((set) => set.scheduleId === filterScheduleId)
     : snapshot.completedSets;
   const monthDays = getMonthDays(month);
 
@@ -1599,8 +1601,8 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     completedSets,
     assignmentIndex: buildAssignmentIndex(assignments),
     projectedAssignmentIndex: buildProjectedAssignmentIndex(projectedAssignments),
-    completedSetDateKeys: resolvedSelectedScheduleId
-      ? Array.from(getCompletedSetDatesForMonth(completedSets, resolvedSelectedScheduleId, monthDays))
+    completedSetDateKeys: filterScheduleId
+      ? Array.from(getCompletedSetDatesForMonth(completedSets, filterScheduleId, monthDays))
       : [],
   };
 });

@@ -6732,3 +6732,32 @@ textarea::placeholder {
   white-space: normal;
   cursor: default;
 }
+
+/* ============================================================
+   All shifts overview — schedules stacked with divider rows
+   ============================================================ */
+.all-shifts-divider {
+  display: flex;
+  align-items: center;
+  min-height: 2.15rem;
+  background: var(--surface-2);
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
+}
+.all-shifts-group:first-child .all-shifts-divider {
+  border-top: 0;
+}
+.all-shifts-divider__label {
+  position: sticky;
+  left: 0;
+  padding: 0.4rem 0.9rem;
+  font-family: var(--font-display), sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.all-shifts-cell {
+  pointer-events: none;
+  cursor: default;
+}

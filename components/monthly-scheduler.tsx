@@ -1661,9 +1661,12 @@ export function MonthlyScheduler({
 
         for (const { employeeId, selection } of effectiveAssignmentsByScheduleDate[scheduleDateKey] ?? []) {
 
+          // Count any assignment on this competency — including a same-shift
+          // overtime competency swap (an OT| cell sitting on the worker's own
+          // row). Cells that already have a matching overtime-claim row are
+          // skipped here and counted in the claim loop below, so no double count.
           if (
             selection.competencyId !== competency.id ||
-            isOvertimeManagedSelection(selection) ||
             overtimeClaimKeys?.has(`${employeeId}:${day.date}:${selection.competencyId}`)
           ) {
             continue;
@@ -1676,11 +1679,13 @@ export function MonthlyScheduler({
         for (const claim of overtimeClaimsByScheduleDateCompetency[claimBucketKey] ?? []) {
           const claimEmployee = employeeMap[claim.employeeId];
 
-          if (
-            claimEmployee?.scheduleId !== activeSchedule.id
-          ) {
-            filledCells += 1;
-            filledOnDate += 1;
+          // Any overtime claim covering this competency fills the post — including
+          // a same-shift competency swap. Only borrowed (other-shift) coverage is
+          // flagged as overtime; a same-shift swap is a normal fill.
+          filledCells += 1;
+          filledOnDate += 1;
+
+          if (claimEmployee?.scheduleId !== activeSchedule.id) {
             hasOvertime = true;
           }
         }
@@ -3158,6 +3163,7 @@ export function MonthlyScheduler({
                 });
               }}
             >
+              <option value="all">All shifts</option>
               {snapshot.schedules.map((schedule) => (
                 <option key={schedule.id} value={schedule.id}>
                   {schedule.name}
@@ -3466,6 +3472,12 @@ export function MonthlyScheduler({
                         if (canManageSetBuilder) {
                           setSelectedSetAnchorDate(cell.date);
                           setSelectedCoverageCompetencyId(null);
+                        }
+
+                        if (completedSetDates.has(cell.date)) {
+                          setStatusMessage(
+                            "This week is locked. Reopen the set to edit shifts — you can still add a note.",
+                          );
                         }
 
                         const projectedAssignment = getProjectedAssignmentForCell(cell.employeeId, cell.date);

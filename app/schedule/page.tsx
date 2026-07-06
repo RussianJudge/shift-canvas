@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 
+import { AllShiftsGrid } from "@/components/all-shifts-grid";
 import { MonthlyScheduler } from "@/components/monthly-scheduler";
 import { ScheduleRouteLoading } from "@/components/route-loading";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
@@ -28,6 +29,10 @@ async function ScheduleBoard({
     getSchedulePageSnapshot(month, session, initialSelectedScheduleId),
     getScheduleEmployeeOrder(session),
   ]);
+
+  if (initialSelectedScheduleId === "all") {
+    return <AllShiftsGrid snapshot={scopeScheduleSnapshot(snapshot, session)} month={month} />;
+  }
 
   return (
     <MonthlyScheduler
