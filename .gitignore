@@ -1,7 +1,10 @@
 .next
 node_modules
+.env
 .env.local
 dist
 *.log
 supabase/.temp
 .vercel
+.superpowers
+.DS_Store
