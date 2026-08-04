@@ -14,10 +14,15 @@ test("swap overtime rows move the team worker to the originally required coverag
     coverageCompetencyId: "comp-post-1",
     swapEmployeeId: "emp-team",
     dates,
+    targetScheduleId: "schedule-601",
     shiftKindForDate: () => "DAY",
   });
 
   assert.equal(rows.length, 3);
+  assert.deepEqual(
+    rows.map((row) => row.schedule_id),
+    ["schedule-601", "schedule-601", "schedule-601"],
+  );
   assert.deepEqual(
     rows.map((row) => row.assignment_date),
     dates,
