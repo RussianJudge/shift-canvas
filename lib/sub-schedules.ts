@@ -86,3 +86,18 @@ export function buildProjectedAssignmentIndex(projectedAssignments: StoredAssign
     return map;
   }, {});
 }
+
+export function resolveSubScheduleRowEmployeeIds(input: {
+  assignedEmployeeIds: string[];
+  memberEmployeeIds: string[];
+  addedEmployeeIds: string[];
+  carryWorkersAcrossMonths: boolean;
+}) {
+  return Array.from(
+    new Set([
+      ...input.assignedEmployeeIds,
+      ...(input.carryWorkersAcrossMonths ? input.memberEmployeeIds : []),
+      ...input.addedEmployeeIds,
+    ]),
+  );
+}
