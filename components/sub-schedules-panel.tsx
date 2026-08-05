@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import {
   deleteSubSchedule,
   saveSubScheduleAssignments,
+  saveSubScheduleMembers,
   saveSubSchedules,
 } from "@/app/actions";
 import { AppDateSelector } from "@/components/app-date-selector";
@@ -19,7 +20,7 @@ import {
   getScheduleById,
   getTimeCodeMap,
 } from "@/lib/scheduling";
-import { getManualEntryTimeCodes } from "@/lib/sub-schedules";
+import { getManualEntryTimeCodes, resolveSubScheduleRowEmployeeIds } from "@/lib/sub-schedules";
 import type {
   Competency,
   DeleteSubScheduleInput,
@@ -438,6 +439,21 @@ function SubScheduleSettingsModal({
             />
             <span>Active</span>
           </label>
+
+          <label className="subschedule-status-toggle">
+            <input
+              type="checkbox"
+              checked={subSchedule.carryWorkersAcrossMonths}
+              disabled={isBusy}
+              onChange={(event) =>
+                onChange((current) => ({
+                  ...current,
+                  carryWorkersAcrossMonths: event.target.checked,
+                }))
+              }
+            />
+            <span>Keep the same workers every month</span>
+          </label>
         </div>
 
         {issues.length > 0 ? <p className="toolbar-status">{issues[0]}</p> : null}
@@ -762,14 +778,28 @@ export function SubSchedulesPanel({
       ),
     [draftAssignmentSelections],
   );
+  const memberEmployeeIds = useMemo(
+    () =>
+      activeSubSchedule
+        ? snapshot.subScheduleMembers
+            .filter((member) => member.subScheduleId === activeSubSchedule.id)
+            .map((member) => member.employeeId)
+        : [],
+    [activeSubSchedule, snapshot.subScheduleMembers],
+  );
   const rowEmployeeIds = useMemo(
     () =>
-      Array.from(new Set([...assignedEmployeeIds, ...addedEmployeeIds])).sort((left, right) => {
+      resolveSubScheduleRowEmployeeIds({
+        assignedEmployeeIds: Array.from(assignedEmployeeIds),
+        memberEmployeeIds,
+        addedEmployeeIds,
+        carryWorkersAcrossMonths: activeSubSchedule?.carryWorkersAcrossMonths ?? false,
+      }).sort((left, right) => {
         const leftName = employeeMap[left]?.name ?? left;
         const rightName = employeeMap[right]?.name ?? right;
         return leftName.localeCompare(rightName);
       }),
-    [addedEmployeeIds, assignedEmployeeIds, employeeMap],
+    [activeSubSchedule, addedEmployeeIds, assignedEmployeeIds, employeeMap, memberEmployeeIds],
   );
   const availableEmployeesToAdd = useMemo(
     () => employees.filter((employee) => !rowEmployeeIds.includes(employee.id)),
@@ -923,6 +953,65 @@ export function SubSchedulesPanel({
     setEmployeeToAddId("");
     setIsEmployeePickerOpen(false);
     setAssignmentMessage("");
+
+    if (!activeSubSchedule?.carryWorkersAcrossMonths) {
+      return;
+    }
+
+    const nextMemberIds = Array.from(new Set([...memberEmployeeIds, employeeId]));
+
+    startAssignmentSaveTransition(async () => {
+      const result = await saveSubScheduleMembers({
+        subScheduleId: activeSubSchedule.id,
+        employeeIds: nextMemberIds,
+      });
+
+      if (!result.ok) {
+        setAssignmentMessage(result.message);
+        return;
+      }
+
+      router.refresh();
+    });
+  }
+
+  function handleRemoveEmployeeRow(employeeId: string) {
+    if (!activeSubSchedule) {
+      return;
+    }
+
+    const employeeName = employeeMap[employeeId]?.name ?? "this worker";
+    const hasWorkThisMonth = assignedEmployeeIds.has(employeeId);
+    const message = hasWorkThisMonth
+      ? `Remove ${employeeName} from this sub-schedule's monthly list? They have work assigned in ${formatMonthLabel(
+          snapshot.month,
+        )}, so their row stays visible here. This only stops them carrying forward to months where they have none.`
+      : `Remove ${employeeName} from this sub-schedule's monthly list? They will stop appearing automatically in new months. You can add them back at any time.`;
+
+    if (typeof window !== "undefined" && !window.confirm(message)) {
+      return;
+    }
+
+    setAddedEmployeeIds((current) => current.filter((id) => id !== employeeId));
+
+    startAssignmentSaveTransition(async () => {
+      const result = await saveSubScheduleMembers({
+        subScheduleId: activeSubSchedule.id,
+        employeeIds: memberEmployeeIds.filter((id) => id !== employeeId),
+      });
+
+      if (!result.ok) {
+        setAssignmentMessage(result.message);
+        return;
+      }
+
+      setAssignmentMessage(
+        hasWorkThisMonth
+          ? "Removed from the monthly list — still shown here because they have work this month."
+          : "",
+      );
+      router.refresh();
+    });
   }
 
   function handleCellChange(employeeId: string, date: string, selection: SubScheduleCellSelection) {
@@ -1151,6 +1240,17 @@ export function SubSchedulesPanel({
                         <strong>{employee.name}</strong>
                         <span>{homeSchedule?.name ?? "Unassigned"}</span>
                       </div>
+                      {activeSubSchedule.carryWorkersAcrossMonths ? (
+                        <button
+                          type="button"
+                          className="table-action table-action--danger"
+                          aria-label={`Remove ${employee.name}`}
+                          disabled={!isPersistedActiveSubSchedule || activeSubSchedule.isArchived}
+                          onClick={() => handleRemoveEmployeeRow(employee.id)}
+                        >
+                          ×
+                        </button>
+                      ) : null}
                     </div>,
                     ...monthDays.map((day, dayIndex) => {
                       const key = createSubScheduleCellKey(employee.id, day.date);

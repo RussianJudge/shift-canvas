@@ -25,6 +25,7 @@ import type {
   SaveSchedulesInput,
     SaveSubScheduleAssignmentsInput,
     SaveSubScheduleCompetenciesInput,
+    SaveSubScheduleMembersInput,
     SaveSubSchedulesInput,
   SaveTimeCodesInput,
   SetScheduleCompletionInput,
@@ -5331,6 +5332,7 @@ export async function saveSubSchedules(input: SaveSubSchedulesInput) {
     name: update.name.trim(),
     summary_time_code_id: update.summaryTimeCodeId,
     is_archived: update.isArchived,
+    carry_workers_across_months: update.carryWorkersAcrossMonths,
     ...toDatabaseScope(sessionScope),
   }));
 
@@ -5663,6 +5665,121 @@ export async function saveSubScheduleCompetencies(input: SaveSubScheduleCompeten
   return {
     ok: true,
     message: "Sub-schedule competencies saved to Supabase.",
+  };
+}
+
+/** Persists the worker roster that a sub-schedule carries across months. */
+export async function saveSubScheduleMembers(input: SaveSubScheduleMembersInput) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins or leaders can change sub-schedule workers.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Sub-schedule workers are unavailable.",
+    };
+  }
+
+  const subScheduleResult = await supabase
+    .from("sub_schedules")
+    .select("id, is_archived, company_id, site_id, business_area_id")
+    .eq("id", input.subScheduleId)
+    .maybeSingle();
+
+  const subSchedule = subScheduleResult.data as ({ id: string; is_archived: boolean } & ScopedDatabaseRow) | null;
+
+  if (subScheduleResult.error || !subSchedule) {
+    return {
+      ok: false,
+      message: "Could not resolve the selected sub-schedule.",
+    };
+  }
+
+  if (!canAccessScope(session, scopeFromRow(subSchedule))) {
+    return {
+      ok: false,
+      message: "You do not have permission to edit that sub-schedule.",
+    };
+  }
+
+  if (subSchedule.is_archived) {
+    return {
+      ok: false,
+      message: "Archived sub-schedules are read-only.",
+    };
+  }
+
+  const employeeIds = Array.from(new Set(input.employeeIds.filter(Boolean)));
+  const employeeRowsResult =
+    employeeIds.length > 0
+      ? await supabase
+          .from("employees")
+          .select("id, company_id, site_id, business_area_id")
+          .in("id", employeeIds)
+      : { data: [], error: null };
+
+  const employeeRows = (employeeRowsResult.data as Array<{ id: string } & ScopedDatabaseRow> | null) ?? [];
+
+  if (employeeRowsResult.error || employeeRows.length !== employeeIds.length) {
+    return {
+      ok: false,
+      message: "Could not resolve one or more selected workers.",
+    };
+  }
+
+  for (const row of employeeRows) {
+    if (!canAccessScope(session, scopeFromRow(row))) {
+      return {
+        ok: false,
+        message: "You do not have permission to add one or more of those workers.",
+      };
+    }
+  }
+
+  const subScheduleScope = scopeFromRow(subSchedule);
+
+  const { error: deleteError } = await supabase
+    .from("sub_schedule_members")
+    .delete()
+    .eq("sub_schedule_id", input.subScheduleId);
+
+  if (deleteError) {
+    return {
+      ok: false,
+      message: `Could not clear existing sub-schedule workers: ${deleteError.message}`,
+    };
+  }
+
+  if (employeeIds.length > 0) {
+    const { error: insertError } = await supabase.from("sub_schedule_members").insert(
+      employeeIds.map((employeeId) => ({
+        sub_schedule_id: input.subScheduleId,
+        employee_id: employeeId,
+        ...toDatabaseScope(subScheduleScope),
+      })),
+    );
+
+    if (insertError) {
+      return {
+        ok: false,
+        message: `Could not save sub-schedule workers: ${insertError.message}`,
+      };
+    }
+  }
+
+  revalidatePath("/sub-schedules");
+
+  return {
+    ok: true,
+    message: "Sub-schedule workers saved.",
   };
 }
 
