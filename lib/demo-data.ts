@@ -141,4 +141,5 @@ export const demoSchedulerSnapshot: SchedulerSnapshot = {
   completedSets: [],
   subSchedules: [],
   subScheduleAssignments: [],
+  subScheduleMembers: [],
 };

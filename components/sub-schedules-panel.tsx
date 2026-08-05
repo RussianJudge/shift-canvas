@@ -38,6 +38,7 @@ type EditableSubSchedule = {
   summaryTimeCodeId: string;
   isArchived: boolean;
   competencyIds: string[];
+  carryWorkersAcrossMonths: boolean;
 };
 
 type SubScheduleCellSelection = {
@@ -91,6 +92,7 @@ function normalizeSubSchedule(subSchedule: EditableSubSchedule): SubScheduleUpda
     name: subSchedule.name.trim(),
     summaryTimeCodeId: subSchedule.summaryTimeCodeId,
     isArchived: subSchedule.isArchived,
+    carryWorkersAcrossMonths: subSchedule.carryWorkersAcrossMonths,
   };
 }
 
@@ -582,6 +584,7 @@ export function SubSchedulesPanel({
         summaryTimeCodeId: subSchedule.summaryTimeCodeId,
         isArchived: subSchedule.isArchived,
         competencyIds: subSchedule.competencyIds,
+        carryWorkersAcrossMonths: subSchedule.carryWorkersAcrossMonths,
       })),
     [snapshot.subSchedules],
   );
@@ -814,6 +817,7 @@ export function SubSchedulesPanel({
       summaryTimeCodeId: defaultSummaryTimeCodeId,
       isArchived: false,
       competencyIds: [],
+      carryWorkersAcrossMonths: false,
     };
 
     setSubSchedules((current) => [nextSubSchedule, ...current]);

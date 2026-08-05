@@ -97,6 +97,7 @@ export interface SubSchedule extends OrganizationScope {
   summaryTimeCodeId: string;
   isArchived: boolean;
   competencyIds: string[];
+  carryWorkersAcrossMonths: boolean;
 }
 
 export interface SubScheduleAssignment extends OrganizationScope {
@@ -107,6 +108,11 @@ export interface SubScheduleAssignment extends OrganizationScope {
   competencyId: string | null;
   timeCodeId: string | null;
   notes?: string | null;
+}
+
+export interface SubScheduleMember extends OrganizationScope {
+  subScheduleId: string;
+  employeeId: string;
 }
 
 export interface OvertimeClaim extends OrganizationScope {
@@ -206,6 +212,7 @@ export interface SchedulerSnapshot {
   completedSets: CompletedSet[];
   subSchedules: SubSchedule[];
   subScheduleAssignments: SubScheduleAssignment[];
+  subScheduleMembers: SubScheduleMember[];
 }
 
 export interface SchedulePageSnapshot
@@ -407,6 +414,7 @@ export interface SubScheduleUpdate {
   name: string;
   summaryTimeCodeId: string;
   isArchived: boolean;
+  carryWorkersAcrossMonths: boolean;
 }
 
 export interface SaveSubSchedulesInput {
@@ -420,6 +428,11 @@ export interface DeleteSubScheduleInput {
 export interface SaveSubScheduleCompetenciesInput {
   subScheduleId: string;
   competencyIds: string[];
+}
+
+export interface SaveSubScheduleMembersInput {
+  subScheduleId: string;
+  employeeIds: string[];
 }
 
 export interface SubScheduleAssignmentUpdate {

@@ -38,6 +38,7 @@ import type {
   StoredAssignment,
   SubSchedule,
   SubScheduleAssignment,
+  SubScheduleMember,
   TimeCode,
 } from "@/lib/types";
 
@@ -126,6 +127,7 @@ type SubScheduleRow = {
   name: string;
   summary_time_code_id: string;
   is_archived: boolean;
+  carry_workers_across_months: boolean;
   company_id: string;
   site_id: string;
   business_area_id: string;
@@ -134,6 +136,14 @@ type SubScheduleRow = {
 type SubScheduleCompetencyRow = {
   sub_schedule_id: string;
   competency_id: string;
+  company_id: string;
+  site_id: string;
+  business_area_id: string;
+};
+
+type SubScheduleMemberRow = {
+  sub_schedule_id: string;
+  employee_id: string;
   company_id: string;
   site_id: string;
   business_area_id: string;
@@ -480,6 +490,7 @@ function emptySnapshot(month: string, overrides: Partial<SchedulerSnapshot> = {}
     completedSets: [],
     subSchedules: [],
     subScheduleAssignments: [],
+    subScheduleMembers: [],
     ...overrides,
   };
 }
@@ -667,6 +678,7 @@ function mapSubSchedules(rows: SubScheduleRow[], subScheduleCompetencyRows: SubS
     summaryTimeCodeId: row.summary_time_code_id,
     isArchived: row.is_archived,
     competencyIds: competencyIdsBySubSchedule[row.id] ?? [],
+    carryWorkersAcrossMonths: row.carry_workers_across_months,
     companyId: row.company_id,
     siteId: row.site_id,
     businessAreaId: row.business_area_id,
@@ -682,6 +694,16 @@ function mapSubScheduleAssignments(rows: SubScheduleAssignmentRow[]) {
     competencyId: row.competency_id,
     timeCodeId: row.time_code_id,
     notes: row.notes,
+    companyId: row.company_id,
+    siteId: row.site_id,
+    businessAreaId: row.business_area_id,
+  }));
+}
+
+function mapSubScheduleMembers(rows: SubScheduleMemberRow[]) {
+  return rows.map<SubScheduleMember>((row) => ({
+    subScheduleId: row.sub_schedule_id,
+    employeeId: row.employee_id,
     companyId: row.company_id,
     siteId: row.site_id,
     businessAreaId: row.business_area_id,
@@ -1246,6 +1268,7 @@ export async function getSchedulerSnapshot(month: string, session?: AppSession |
     completedSets: mapCompletedSets((completedSetsResult.data as CompletedSetRow[] | null) ?? []),
     subSchedules: mapSubSchedules(subScheduleRows, subScheduleCompetencyRows),
     subScheduleAssignments: mappedSubScheduleAssignments,
+    subScheduleMembers: [],
   };
 }
 
@@ -1537,6 +1560,7 @@ export async function getScheduleReferenceSnapshot(
       : [],
     subSchedules: mappedSubSchedules,
     subScheduleAssignments: mappedSubScheduleAssignments,
+    subScheduleMembers: [],
   };
 }
 
@@ -1809,6 +1833,7 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     subScheduleAssignments: mapSubScheduleAssignments(
       (subScheduleAssignmentsResult.data as SubScheduleAssignmentRow[] | null) ?? [],
     ),
+    subScheduleMembers: [],
   };
 }
 
@@ -1828,8 +1853,15 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
   }
 
   const { monthStart, monthEnd } = getMonthBounds(month);
-  const [scheduleReference, competenciesResult, timeCodesResult, subSchedulesResult, subScheduleCompetenciesResult, subScheduleAssignmentsResult] =
-    await Promise.all([
+  const [
+    scheduleReference,
+    competenciesResult,
+    timeCodesResult,
+    subSchedulesResult,
+    subScheduleCompetenciesResult,
+    subScheduleAssignmentsResult,
+    subScheduleMembersResult,
+  ] = await Promise.all([
       getScopedSchedulesWithEmployees(session, { includeEmployeeCompetencies: true }),
       applySessionScope(
         supabase.from("competencies").select("id, code, label, color_token, required_staff, company_id, site_id, business_area_id"),
@@ -1842,7 +1874,7 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
       applySessionScope(
         supabase
           .from("sub_schedules")
-          .select("id, name, summary_time_code_id, is_archived, company_id, site_id, business_area_id"),
+          .select("id, name, summary_time_code_id, is_archived, carry_workers_across_months, company_id, site_id, business_area_id"),
         session,
       )
         .order("is_archived")
@@ -1866,6 +1898,12 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
           .order("employee_id")
           .order("sub_schedule_id"),
       ),
+      applySessionScope(
+        supabase
+          .from("sub_schedule_members")
+          .select("sub_schedule_id, employee_id, company_id, site_id, business_area_id"),
+        session,
+      ),
     ]);
 
   logSnapshotQueryErrors("Sub-schedules snapshot", [
@@ -1875,6 +1913,7 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
     ["sub_schedules", subSchedulesResult.error],
     ["sub_schedule_competencies", subScheduleCompetenciesResult.error],
     ["sub_schedule_assignments", subScheduleAssignmentsResult.error],
+    ["sub_schedule_members", subScheduleMembersResult.error],
   ]);
 
   return emptySnapshot(month, {
@@ -1887,6 +1926,9 @@ export async function getSubSchedulesSnapshot(month: string, session?: AppSessio
     ),
     subScheduleAssignments: mapSubScheduleAssignments(
       (subScheduleAssignmentsResult.data as SubScheduleAssignmentRow[] | null) ?? [],
+    ),
+    subScheduleMembers: mapSubScheduleMembers(
+      (subScheduleMembersResult.data as SubScheduleMemberRow[] | null) ?? [],
     ),
   });
 }
@@ -2121,6 +2163,7 @@ export async function getSchedulesSnapshot(month: string, session?: AppSession |
     completedSets: [],
     subSchedules: [],
     subScheduleAssignments: [],
+    subScheduleMembers: [],
   };
 }
 
@@ -2219,6 +2262,7 @@ export async function getCompetenciesSnapshot(month: string, session?: AppSessio
       (subScheduleCompetenciesResult.data as SubScheduleCompetencyRow[] | null) ?? [],
     ),
     subScheduleAssignments: [],
+    subScheduleMembers: [],
   };
 }
 
@@ -2252,6 +2296,7 @@ export async function getTimeCodesSnapshot(month: string, session?: AppSession |
     completedSets: [],
     subSchedules: [],
     subScheduleAssignments: [],
+    subScheduleMembers: [],
   };
 }
 
