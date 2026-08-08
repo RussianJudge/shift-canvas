@@ -29,6 +29,7 @@ import type {
   ManualOvertimePosting,
   MutualShiftApplication,
   MutualShiftPosting,
+  MutualSettings,
   MutualsSnapshot,
   OvertimeClaim,
   ProductionUnit,
@@ -2436,9 +2437,54 @@ export async function getScheduleEmployeeOrder(session?: AppSession | null) {
   );
 }
 
+type MutualSettingsRow = {
+  max_shifts_per_posting: number | null;
+  posting_horizon_months: number;
+  require_leader_approval: boolean;
+};
+
+/**
+ * Defaults match the behaviour that was hardcoded before the settings table
+ * existed, so an unconfigured scope — or one whose migration has not been
+ * applied yet — behaves exactly as it did before.
+ */
+export const DEFAULT_MUTUAL_SETTINGS: MutualSettings = {
+  maxShiftsPerPosting: null,
+  postingHorizonMonths: 12,
+  requireLeaderApproval: true,
+};
+
+export async function readMutualSettings(session?: AppSession | null): Promise<MutualSettings> {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    return DEFAULT_MUTUAL_SETTINGS;
+  }
+
+  const result = await applySessionScope(
+    supabase
+      .from("mutual_settings")
+      .select("max_shifts_per_posting, posting_horizon_months, require_leader_approval"),
+    session,
+  ).maybeSingle();
+
+  const row = result.data as MutualSettingsRow | null;
+
+  if (result.error || !row) {
+    return DEFAULT_MUTUAL_SETTINGS;
+  }
+
+  return {
+    maxShiftsPerPosting: row.max_shifts_per_posting,
+    postingHorizonMonths: row.posting_horizon_months,
+    requireLeaderApproval: row.require_leader_approval,
+  };
+}
+
 export async function getMutualsSnapshot(month: string, session?: AppSession | null): Promise<MutualsSnapshot> {
   const scheduleReference = await getScopedSchedulesWithEmployees(session);
   const supabase = getDataClient();
+  const settings = await readMutualSettings(session);
 
   if (!supabase) {
     console.error("Mutuals snapshot unavailable: SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
@@ -2446,6 +2492,7 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
       month,
       schedules: scheduleReference?.schedules ?? [],
       postings: [],
+      settings,
     };
   }
 
@@ -2471,6 +2518,7 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
       month,
       schedules: scheduleReference?.schedules ?? [],
       postings: [],
+      settings,
     };
   }
 
@@ -2584,6 +2632,7 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
     month,
     schedules: scheduleReference?.schedules ?? [],
     postings,
+    settings,
   };
 }
 

@@ -233,10 +233,23 @@ export interface SchedulePageSnapshot
   completedSetDateKeys: string[];
 }
 
+export interface MutualSettings {
+  maxShiftsPerPosting: number | null;
+  postingHorizonMonths: number;
+  requireLeaderApproval: boolean;
+}
+
+export interface SaveMutualSettingsInput {
+  maxShiftsPerPosting: number | null;
+  postingHorizonMonths: number;
+  requireLeaderApproval: boolean;
+}
+
 export interface MutualsSnapshot {
   month: string;
   schedules: Schedule[];
   postings: MutualShiftPosting[];
+  settings: MutualSettings;
 }
 
 export interface ProfileSnapshot {

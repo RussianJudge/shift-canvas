@@ -10,6 +10,7 @@ import {
   applyToMutualPosting,
   cancelAcceptedMutual,
   createMutualPosting,
+  saveMutualSettings,
   withdrawMutualApplication,
   withdrawMutualPosting,
 } from "@/app/actions";
@@ -20,7 +21,7 @@ import {
   getMonthDays,
   shiftForDate,
 } from "@/lib/scheduling";
-import type { AppSession, MutualShiftPosting, MutualsSnapshot, ShiftKind } from "@/lib/types";
+import type { AppSession, MutualSettings, MutualShiftPosting, MutualsSnapshot, ShiftKind } from "@/lib/types";
 
 function getCurrentUtcMonthKey() {
   return new Date().toISOString().slice(0, 7);
@@ -92,6 +93,105 @@ function getLeaderApprovalLabel({
 }
 
 /** Reusable date grid used for both posting and applying to mutual swaps. */
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8.25a3.75 3.75 0 1 1 0 7.5a3.75 3.75 0 0 1 0-7.5Z" />
+      <path d="M19.5 12a7.46 7.46 0 0 0-.15-1.5l2.1-1.62l-2-3.46l-2.48 1a7.6 7.6 0 0 0-2.6-1.5L14 2.25h-4l-.38 2.67a7.6 7.6 0 0 0-2.6 1.5l-2.48-1l-2 3.46l2.1 1.62a7.4 7.4 0 0 0 0 3l-2.1 1.62l2 3.46l2.48-1a7.6 7.6 0 0 0 2.6 1.5l.38 2.67h4l.38-2.67a7.6 7.6 0 0 0 2.6-1.5l2.48 1l2-3.46l-2.1-1.62c.1-.49.15-.99.15-1.5Z" />
+    </svg>
+  );
+}
+
+function MutualSettingsModal({
+  settings,
+  isSaving,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  settings: MutualSettings;
+  isSaving: boolean;
+  onChange: (updater: (settings: MutualSettings) => MutualSettings) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Mutual settings</span>
+            <h2 className="assignment-modal__title">Rules for this business area</h2>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
+            Close
+          </button>
+        </div>
+
+        <div className="modal-form-grid">
+          <label className="field">
+            <span>Max shifts per posting</span>
+            <input
+              type="number"
+              min={1}
+              placeholder="No limit"
+              value={settings.maxShiftsPerPosting ?? ""}
+              disabled={isSaving}
+              onChange={(event) =>
+                onChange((current) => ({
+                  ...current,
+                  maxShiftsPerPosting: event.target.value === "" ? null : Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+
+          <label className="field">
+            <span>Post up to this many months ahead</span>
+            <input
+              type="number"
+              min={1}
+              value={settings.postingHorizonMonths}
+              disabled={isSaving}
+              onChange={(event) =>
+                onChange((current) => ({
+                  ...current,
+                  postingHorizonMonths: Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+
+          <label className="subschedule-status-toggle">
+            <input
+              type="checkbox"
+              checked={settings.requireLeaderApproval}
+              disabled={isSaving}
+              onChange={(event) =>
+                onChange((current) => ({
+                  ...current,
+                  requireLeaderApproval: event.target.checked,
+                }))
+              }
+            />
+            <span>Require leader approval before a mutual takes effect</span>
+          </label>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
+            Cancel
+          </button>
+          <button type="button" className="primary-button" onClick={onSave} disabled={isSaving}>
+            {isSaving ? "Saving..." : "Save settings"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 function MutualDatePicker({
   title,
   dates,
@@ -135,9 +235,8 @@ function MutualDatePicker({
 /**
  * Modal used when a user offers their own shifts against an existing mutual.
  *
- * The available dates are already filtered to the ones the applicant is
- * working while the original poster is off, so the picker only shows dates that
- * could form a valid swap.
+ * The picker shows every date the applicant is working, including ones the
+ * poster also works, so day/night shifts can be swapped between them.
  */
 function MutualApplyModal({
   viewer,
@@ -174,18 +273,10 @@ function MutualApplyModal({
   );
   const [offerMonth, setOfferMonth] = useState(monthOptions[0] ?? getCurrentUtcMonthKey());
   const schedule = employee ? snapshot.schedules.find((entry) => entry.id === employee.scheduleId) ?? null : null;
-  const postingOwner = employeeMap[posting.ownerEmployeeId];
-  const postingOwnerSchedule = postingOwner
-    ? snapshot.schedules.find((entry) => entry.id === postingOwner.scheduleId) ?? null
-    : null;
   const availableDates =
-    employee && schedule && postingOwnerSchedule
+    employee && schedule
       ? getMonthDays(offerMonth)
-          .filter(
-            (day) =>
-              shiftForDate(schedule, day.date) !== "OFF" &&
-              shiftForDate(postingOwnerSchedule, day.date) === "OFF",
-          )
+          .filter((day) => shiftForDate(schedule, day.date) !== "OFF")
           .map((day) => ({ date: day.date, shiftKind: shiftForDate(schedule, day.date) }))
       : [];
 
@@ -246,7 +337,7 @@ function MutualApplyModal({
           dates={availableDates}
           selectedDates={selectedDates}
           onToggle={onToggleDate}
-          helper={`${selectedDates.length}/${posting.dates.length} selected · only dates ${posting.ownerEmployeeName} is off`}
+          helper={`${selectedDates.length}/${posting.dates.length} selected`}
         />
 
         <div className="metrics-transfer-actions">
@@ -476,6 +567,8 @@ export function MutualsPanel({
   );
   const [applicationDates, setApplicationDates] = useState<string[]>([]);
   const [isSubmitting, startTransition] = useTransition();
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [draftSettings, setDraftSettings] = useState<MutualSettings>(snapshot.settings);
   const [isMonthLoading, startMonthTransition] = useTransition();
 
   const selectedPostingEmployee = selectedPostingEmployeeId ? employeeMap[selectedPostingEmployeeId] ?? null : null;
@@ -675,6 +768,20 @@ export function MutualsPanel({
           className="mutuals-year-pager"
           onChange={handleYearChange}
         />
+        {viewer.role === "admin" ? (
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => {
+              setDraftSettings(snapshot.settings);
+              setIsSettingsModalOpen(true);
+            }}
+            aria-label="Mutual settings"
+            title="Mutual settings"
+          >
+            <SettingsIcon />
+          </button>
+        ) : null}
       </div>
 
       <div className="workspace-toolbar workspace-toolbar--personnel-page mutuals-search-bar">
@@ -1137,6 +1244,27 @@ export function MutualsPanel({
           onCancel={() => setCancelAcceptedPostingId(null)}
           onConfirm={() => runAction(() => cancelAcceptedMutual({ postingId: cancelAcceptedPosting.id }))}
           isSubmitting={isSubmitting}
+        />
+      ) : null}
+
+      {isSettingsModalOpen ? (
+        <MutualSettingsModal
+          settings={draftSettings}
+          isSaving={isSubmitting}
+          onChange={(updater) => setDraftSettings((current) => updater(current))}
+          onClose={() => setIsSettingsModalOpen(false)}
+          onSave={() => {
+            startTransition(async () => {
+              const result = await saveMutualSettings(draftSettings);
+
+              setStatusMessage(result.message);
+
+              if (result.ok) {
+                setIsSettingsModalOpen(false);
+                loadMutualsMonth(viewMonth);
+              }
+            });
+          }}
         />
       ) : null}
     </section>

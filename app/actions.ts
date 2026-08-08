@@ -24,6 +24,7 @@ import type {
   SaveScheduleCompetenciesInput,
   SaveSchedulesInput,
     SaveSubScheduleAssignmentsInput,
+    SaveMutualSettingsInput,
     SaveSubScheduleCompetenciesInput,
     SaveSubScheduleMembersInput,
     SaveSubSchedulesInput,
@@ -33,7 +34,7 @@ import type {
   WithdrawMutualApplicationInput,
   WithdrawMutualPostingInput,
 } from "@/lib/types";
-import { getScheduleReferenceSnapshot } from "@/lib/data";
+import { getScheduleReferenceSnapshot, readMutualSettings } from "@/lib/data";
 import {
   buildOvertimeAssignmentNote,
   buildSwapOvertimeAssignmentRows,
@@ -141,21 +142,23 @@ function getCurrentUtcYearEndDateKey() {
   return `${getCurrentUtcYearKey()}-12-31`;
 }
 
-function getMutualPostingDateWindowError(dates: string[]) {
-  const currentYear = getCurrentUtcYearKey();
+/**
+ * Upper bound only. The rule this replaced allowed any date in the current
+ * calendar year, including past ones, so leaving the lower bound open keeps
+ * back-dated corrections working exactly as before.
+ */
+function getMutualHorizonError(dates: string[], horizonMonths: number, label: string) {
+  const now = new Date();
+  const limitKey = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + horizonMonths, now.getUTCDate()),
+  )
+    .toISOString()
+    .slice(0, 10);
 
-  if (dates.some((date) => date.slice(0, 4) !== currentYear)) {
-    return "Mutual postings must use dates from the current year.";
-  }
-
-  return null;
-}
-
-function getMutualApplicationDateWindowError(dates: string[]) {
-  const currentYear = getCurrentUtcYearKey();
-
-  if (dates.some((date) => date.slice(0, 4) !== currentYear)) {
-    return "Mutual applications must stay within the current year.";
+  if (dates.some((date) => date > limitKey)) {
+    return `Mutual ${label} cannot be scheduled more than ${horizonMonths} month${
+      horizonMonths === 1 ? "" : "s"
+    } ahead (through ${limitKey}).`;
   }
 
   return null;
@@ -3344,7 +3347,18 @@ export async function createMutualPosting(input: CreateMutualPostingInput) {
     };
   }
 
-  const mutualDateWindowError = getMutualPostingDateWindowError(dates);
+  const mutualSettings = await readMutualSettings(session);
+
+  if (mutualSettings.maxShiftsPerPosting !== null && dates.length > mutualSettings.maxShiftsPerPosting) {
+    return {
+      ok: false,
+      message: `Mutual postings are limited to ${mutualSettings.maxShiftsPerPosting} shift${
+        mutualSettings.maxShiftsPerPosting === 1 ? "" : "s"
+      }.`,
+    };
+  }
+
+  const mutualDateWindowError = getMutualHorizonError(dates, mutualSettings.postingHorizonMonths, "postings");
 
   if (mutualDateWindowError) {
     return {
@@ -3852,7 +3866,12 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     };
   }
 
-  const mutualDateWindowError = getMutualApplicationDateWindowError(dates);
+  const mutualSettings = await readMutualSettings(session);
+  const mutualDateWindowError = getMutualHorizonError(
+    dates,
+    mutualSettings.postingHorizonMonths,
+    "applications",
+  );
 
   if (mutualDateWindowError) {
     return {
@@ -3870,8 +3889,6 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
   const employeeMap = getEmployeeMap(snapshot.schedules);
   const employee = employeeMap[input.employeeId];
   const employeeSchedule = employee ? getScheduleById(snapshot, employee.scheduleId) : null;
-  const postingOwner = employeeMap[posting.owner_employee_id];
-  const postingOwnerSchedule = postingOwner ? getScheduleById(snapshot, posting.owner_schedule_id) : null;
 
   if (!employee || !employeeSchedule) {
     return {
@@ -3893,20 +3910,6 @@ export async function applyToMutualPosting(input: ApplyToMutualPostingInput) {
     return {
       ok: false,
       message: "Mutual applications can only offer shifts the employee is scheduled to work.",
-    };
-  }
-
-  if (!postingOwner || !postingOwnerSchedule) {
-    return {
-      ok: false,
-      message: "Could not validate the original mutual worker for this posting.",
-    };
-  }
-
-  if (dates.some((date) => shiftForDate(postingOwnerSchedule, date) !== "OFF")) {
-    return {
-      ok: false,
-      message: "Offered shifts must be on dates the original worker is off.",
     };
   }
 
@@ -4071,10 +4074,31 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     };
   }
 
+  const acceptSettings = await readMutualSettings(session);
+
+  /**
+   * With leader approval switched off the posting goes straight to `accepted`,
+   * so the schedule rows that `approveMutualPosting` would have written have to
+   * be written here instead. Applying before the status update keeps a failure
+   * from leaving an accepted posting with no swap on the schedule.
+   */
+  if (!acceptSettings.requireLeaderApproval) {
+    const applyResult = await applyAcceptedMutualToSchedule({
+      supabase,
+      session,
+      posting,
+      application,
+    });
+
+    if (!applyResult.ok) {
+      return applyResult;
+    }
+  }
+
   const { error: postingError } = await supabase
     .from("mutual_shift_postings")
     .update({
-      status: "pending_leader_approval",
+      status: acceptSettings.requireLeaderApproval ? "pending_leader_approval" : "accepted",
       accepted_application_id: input.applicationId,
       owner_leader_approved_at: null,
       owner_leader_approved_by_employee_id: null,
@@ -4107,9 +4131,86 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
 
+  if (!acceptSettings.requireLeaderApproval) {
+    revalidatePath("/schedule");
+    revalidatePath("/schedule/print");
+    revalidatePath("/metrics");
+    revalidatePath("/overtime");
+  }
+
   return {
     ok: true,
-    message: "Mutual application accepted. Waiting on both shift leaders.",
+    message: acceptSettings.requireLeaderApproval
+      ? "Mutual application accepted. Waiting on both shift leaders."
+      : "Mutual application accepted and applied to the schedule.",
+  };
+}
+
+/** Saves the mutual rules for the caller's company/site/business area. */
+export async function saveMutualSettings(input: SaveMutualSettingsInput) {
+  const session = await requireActionRole(["admin"]);
+
+  if (!session) {
+    return {
+      ok: false,
+      message: "Only admins can change mutual settings.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet. Mutual settings are unavailable.",
+    };
+  }
+
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return {
+      ok: false,
+      message: "Your organizational scope is incomplete. Ask an admin to update your profile.",
+    };
+  }
+
+  if (input.maxShiftsPerPosting !== null && input.maxShiftsPerPosting < 1) {
+    return {
+      ok: false,
+      message: "Max shifts per posting must be at least 1, or blank for no limit.",
+    };
+  }
+
+  if (input.postingHorizonMonths < 1) {
+    return {
+      ok: false,
+      message: "The posting window must be at least 1 month.",
+    };
+  }
+
+  const { error } = await supabase.from("mutual_settings").upsert(
+    {
+      ...toDatabaseScope(sessionScope),
+      max_shifts_per_posting: input.maxShiftsPerPosting,
+      posting_horizon_months: input.postingHorizonMonths,
+      require_leader_approval: input.requireLeaderApproval,
+    },
+    { onConflict: "company_id,site_id,business_area_id" },
+  );
+
+  if (error) {
+    return {
+      ok: false,
+      message: `Could not save mutual settings: ${error.message}`,
+    };
+  }
+
+  revalidatePath("/mutuals");
+
+  return {
+    ok: true,
+    message: "Mutual settings saved.",
   };
 }
 
