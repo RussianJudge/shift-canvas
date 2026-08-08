@@ -6189,6 +6189,11 @@ button.workspace-nav-link {
     width: 2rem;
     height: 2rem;
   }
+  /* Floating toggle is 2.6rem tall (0.2 toolbar + 0.2 + 2rem icon + 0.2). */
+  .scheduler-toolbar,
+  .panel-heading {
+    padding-top: 3rem;
+  }
   /* Keep the "Open/Close Menu" text for screen readers, hide it visually */
   .workspace-mobile-toggle strong {
     position: absolute;
@@ -6536,17 +6541,6 @@ textarea::placeholder {
 }
 
 /* ============================================================
-   Mobile — clear the floating Menu button so it doesn't cover
-   the date selector / page header.
-   ============================================================ */
-@media (max-width: 600px) {
-  .scheduler-toolbar,
-  .panel-heading {
-    padding-top: 3.1rem;
-  }
-}
-
-/* ============================================================
    Shifts page — icon action buttons (add / revert / save),
    kept inline on every size including mobile.
    ============================================================ */
@@ -6669,14 +6663,6 @@ textarea::placeholder {
 /* Set builder padding to match the toolbar above */
 .set-builder__surface {
   padding: 12px;
-}
-
-/* Increase top toolbar clearance under the floating menu (mobile) */
-@media (max-width: 600px) {
-  .scheduler-toolbar,
-  .panel-heading {
-    padding-top: 3.5rem;
-  }
 }
 
 /* Panel heading margin */
