@@ -10,17 +10,19 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "Schwifty",
-    // Transparent status bar so the app draws under the camera/notch.
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
   },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  // Let the app extend into the safe area (flow up under the notch).
-  viewportFit: "cover",
-  // Match the header / toolbar surface so the top safe-area bar blends in.
+  /**
+   * No `viewportFit: "cover"`. With it, the page draws under the status bar and
+   * `themeColor` is ignored there, so the notch area showed the page's own --bg
+   * against the lighter --surface toolbar below it. Letting the browser own that
+   * strip means themeColor paints it, and it matches the toolbar everywhere.
+   */
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#242427" },

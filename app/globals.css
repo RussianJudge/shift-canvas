@@ -113,39 +113,10 @@ html {
   background-attachment: fixed;
 }
 
-/**
- * Standalone iOS draws the page under the notch with a transparent status bar,
- * so whatever sits at the top of the page shows through it. Paint that inset to
- * match, or it reads as a band of the wrong colour.
- *
- * The match differs by page: workspace screens put the `--surface` toolbar at
- * the top, while the auth and landing screens run on the plain `--bg` page. So
- * default to `--bg` and override only inside the workspace shell.
- *
- * Collapses to zero height wherever `safe-area-inset-top` is 0 — every browser,
- * and every device without a notch.
- */
-body::before {
-  content: "";
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: env(safe-area-inset-top);
-  background: var(--bg);
-  z-index: 40;
-  pointer-events: none;
-}
-
-body:has(.workspace-frame)::before {
-  background: var(--surface);
-}
-
 body {
   margin: 0;
   min-height: 100vh;
   min-height: 100dvh;
-  overscroll-behavior: none;
   color: var(--ink);
   font-family: var(--font-body), sans-serif;
   -webkit-font-smoothing: antialiased;
