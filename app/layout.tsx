@@ -10,7 +10,8 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "Schwifty",
-    statusBarStyle: "default",
+    // Transparent status bar so the standalone home-screen app draws under it.
+    statusBarStyle: "black-translucent",
   },
 };
 
@@ -18,11 +19,13 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   /**
-   * No `viewportFit: "cover"`. With it, the page draws under the status bar and
-   * `themeColor` is ignored there, so the notch area showed the page's own --bg
-   * against the lighter --surface toolbar below it. Letting the browser own that
-   * strip means themeColor paints it, and it matches the toolbar everywhere.
+   * The app is used from the Home Screen, not a Safari tab — confirmed against
+   * a real device via the iOS Simulator. `themeColor` only reaches the notch
+   * area in a plain browser tab; in standalone with viewportFit: "cover" the
+   * page draws under the status bar and paints that region itself, which is
+   * what the safe-area strip below is for.
    */
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#242427" },
