@@ -44,14 +44,6 @@ type PendingCsvImport = {
   summary: string;
 };
 
-type InviteDraft = {
-  employeeId: string;
-  role: AppRole;
-  firstName: string;
-  lastName: string;
-  email: string;
-};
-
 type PendingAccountLink = {
   email: string;
   employeeId: string;
@@ -90,16 +82,6 @@ function createDraftEmployee() {
     role: "Operator",
     scheduleId: "",
     competencyIds: [],
-  };
-}
-
-function createInviteDraft(): InviteDraft {
-  return {
-    employeeId: "",
-    role: "worker",
-    firstName: "",
-    lastName: "",
-    email: "",
   };
 }
 
@@ -529,6 +511,277 @@ function getEmployeeIssues(employee: EditableEmployee) {
   return Object.values(getEmployeeFieldIssues(employee));
 }
 
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8.25a3.75 3.75 0 1 1 0 7.5a3.75 3.75 0 0 1 0-7.5Z" />
+      <path d="M19.5 12a7.46 7.46 0 0 0-.15-1.5l2.1-1.62l-2-3.46l-2.48 1a7.6 7.6 0 0 0-2.6-1.5L14 2.25h-4l-.38 2.67a7.6 7.6 0 0 0-2.6 1.5l-2.48-1l-2 3.46l2.1 1.62a7.4 7.4 0 0 0 0 3l-2.1 1.62l2 3.46l2.48-1a7.6 7.6 0 0 0 2.6 1.5l.38 2.67h4l.38-2.67a7.6 7.6 0 0 0 2.6-1.5l2.48 1l2-3.46l-2.1-1.62c.1-.49.15-.99.15-1.5Z" />
+    </svg>
+  );
+}
+
+function EmployeeSettingsModal({
+  employee,
+  emailIssue,
+  inviteRole,
+  canInviteElevatedRoles,
+  inviteLink,
+  statusMessage,
+  isBusy,
+  onEmailChange,
+  onInviteRoleChange,
+  onSendInvite,
+  onCopyLink,
+  onRemove,
+  onClose,
+}: {
+  employee: EditableEmployee;
+  emailIssue?: string;
+  inviteRole: AppRole;
+  canInviteElevatedRoles: boolean;
+  inviteLink: string;
+  statusMessage: string;
+  isBusy: boolean;
+  onEmailChange: (next: string) => void;
+  onInviteRoleChange: (next: AppRole) => void;
+  onSendInvite: () => void;
+  onCopyLink: () => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={isBusy ? undefined : onClose}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Personnel</span>
+            <h2 className="assignment-modal__title">{getEditableEmployeeDisplayName(employee)}</h2>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose} disabled={isBusy}>
+            Close
+          </button>
+        </div>
+
+        <div className="modal-form-grid">
+          <label className="field">
+            <span>Email</span>
+            <input
+              type="email"
+              value={employee.email}
+              placeholder="email@company.com"
+              disabled={isBusy}
+              onChange={(event) => onEmailChange(event.target.value)}
+            />
+            {emailIssue ? <p className="row-issue">{emailIssue}</p> : null}
+          </label>
+
+          <label className="field">
+            <span>Invite as</span>
+            <select
+              value={inviteRole}
+              disabled={isBusy || !canInviteElevatedRoles}
+              onChange={(event) => onInviteRoleChange(event.target.value as AppRole)}
+            >
+              <option value="worker">Worker</option>
+              {canInviteElevatedRoles ? <option value="leader">Leader</option> : null}
+              {canInviteElevatedRoles ? <option value="admin">Admin</option> : null}
+            </select>
+          </label>
+        </div>
+
+        <div className="assignment-modal__footer">
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={onSendInvite}
+            disabled={isBusy || !employee.email.trim() || Boolean(emailIssue)}
+          >
+            {isBusy ? "Working..." : inviteLink ? "Resend sign-up link" : "Send sign-up link"}
+          </button>
+          {inviteLink ? (
+            <button type="button" className="ghost-button" onClick={onCopyLink} disabled={isBusy}>
+              Copy link
+            </button>
+          ) : null}
+        </div>
+
+        {inviteLink ? (
+          <label className="field invite-builder__link">
+            <span>Sign-up link</span>
+            <input readOnly value={inviteLink} onFocus={(event) => event.currentTarget.select()} />
+          </label>
+        ) : null}
+
+        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+
+        <div className="assignment-modal__danger-zone">
+          <div>
+            <strong>Remove employee</strong>
+            <span>Removes {getEditableEmployeeDisplayName(employee)} from Personnel.</span>
+          </div>
+          <button
+            type="button"
+            className="table-action table-action--danger"
+            onClick={onRemove}
+            disabled={isBusy}
+          >
+            Remove
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function AddEmployeeModal({
+  employee,
+  fieldIssues,
+  schedules,
+  sendInvite,
+  inviteRole,
+  canInviteElevatedRoles,
+  isSaving,
+  onChange,
+  onSendInviteChange,
+  onInviteRoleChange,
+  onClose,
+  onSubmit,
+}: {
+  employee: EditableEmployee;
+  fieldIssues: EmployeeFieldIssues;
+  schedules: SchedulerSnapshot["schedules"];
+  sendInvite: boolean;
+  inviteRole: AppRole;
+  canInviteElevatedRoles: boolean;
+  isSaving: boolean;
+  onChange: (updater: (employee: EditableEmployee) => EditableEmployee) => void;
+  onSendInviteChange: (next: boolean) => void;
+  onInviteRoleChange: (next: AppRole) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const issues = Object.values(fieldIssues).filter(Boolean);
+
+  return createPortal(
+    <div className="assignment-modal-backdrop" onClick={onClose}>
+      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="assignment-modal__header">
+          <div>
+            <span className="assignment-modal__eyebrow">Personnel</span>
+            <h2 className="assignment-modal__title">Add an employee</h2>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
+            Close
+          </button>
+        </div>
+
+        <div className="modal-form-grid">
+          <label className="field">
+            <span>First name</span>
+            <input
+              value={employee.firstName}
+              disabled={isSaving}
+              onChange={(event) => onChange((current) => ({ ...current, firstName: event.target.value }))}
+            />
+            {fieldIssues.firstName ? <p className="row-issue">{fieldIssues.firstName}</p> : null}
+          </label>
+
+          <label className="field">
+            <span>Last name</span>
+            <input
+              value={employee.lastName}
+              disabled={isSaving}
+              onChange={(event) => onChange((current) => ({ ...current, lastName: event.target.value }))}
+            />
+            {fieldIssues.lastName ? <p className="row-issue">{fieldIssues.lastName}</p> : null}
+          </label>
+
+          <label className="field">
+            <span>Email</span>
+            <input
+              type="email"
+              value={employee.email}
+              disabled={isSaving}
+              onChange={(event) => onChange((current) => ({ ...current, email: event.target.value }))}
+            />
+            {fieldIssues.email ? <p className="row-issue">{fieldIssues.email}</p> : null}
+          </label>
+
+          <label className="field">
+            <span>Role title</span>
+            <input
+              value={employee.role}
+              placeholder="Operator"
+              disabled={isSaving}
+              onChange={(event) => onChange((current) => ({ ...current, role: event.target.value }))}
+            />
+          </label>
+
+          <label className="field">
+            <span>Shift</span>
+            <select
+              value={employee.scheduleId}
+              disabled={isSaving}
+              onChange={(event) => onChange((current) => ({ ...current, scheduleId: event.target.value }))}
+            >
+              <option value="">Unassigned</option>
+              {schedules.map((schedule) => (
+                <option key={schedule.id} value={schedule.id}>
+                  {schedule.name}
+                </option>
+              ))}
+            </select>
+            {fieldIssues.scheduleId ? <p className="row-issue">{fieldIssues.scheduleId}</p> : null}
+          </label>
+
+          <label className="subschedule-status-toggle">
+            <input
+              type="checkbox"
+              checked={sendInvite}
+              disabled={isSaving}
+              onChange={(event) => onSendInviteChange(event.target.checked)}
+            />
+            <span>Send an account invite to this email</span>
+          </label>
+
+          {sendInvite ? (
+            <label className="field">
+              <span>Invite as</span>
+              <select
+                value={inviteRole}
+                disabled={isSaving || !canInviteElevatedRoles}
+                onChange={(event) => onInviteRoleChange(event.target.value as AppRole)}
+              >
+                <option value="worker">Worker</option>
+                {canInviteElevatedRoles ? <option value="leader">Leader</option> : null}
+                {canInviteElevatedRoles ? <option value="admin">Admin</option> : null}
+              </select>
+            </label>
+          ) : null}
+        </div>
+
+        {issues.length > 0 ? <p className="toolbar-status">{issues[0]}</p> : null}
+
+        <div className="assignment-modal__footer">
+          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={onSubmit}
+            disabled={isSaving || issues.length > 0}
+          >
+            {isSaving ? "Saving..." : sendInvite ? "Add and invite" : "Add employee"}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 export function PersonnelPanel({
   snapshot,
   viewer,
@@ -575,20 +828,19 @@ export function PersonnelPanel({
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const [pendingCsvImport, setPendingCsvImport] = useState<PendingCsvImport | null>(null);
   const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
+  const [sendInviteOnAdd, setSendInviteOnAdd] = useState(true);
+  const [inviteRoleOnAdd, setInviteRoleOnAdd] = useState<AppRole>("worker");
   const [pendingRemoveEmployeeId, setPendingRemoveEmployeeId] = useState<string | null>(null);
+  const [settingsEmployeeId, setSettingsEmployeeId] = useState<string | null>(null);
+  const [settingsInviteRole, setSettingsInviteRole] = useState<AppRole>("worker");
+  const [settingsInviteLink, setSettingsInviteLink] = useState("");
+  const [settingsStatusMessage, setSettingsStatusMessage] = useState("");
   const [pendingCompetencyRemoval, setPendingCompetencyRemoval] = useState<PendingCompetencyRemoval | null>(null);
-  const [showInviteBuilder, setShowInviteBuilder] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
-  const [inviteDraft, setInviteDraft] = useState<InviteDraft>(createInviteDraft);
-  const [inviteLink, setInviteLink] = useState("");
-  const [inviteStatusMessage, setInviteStatusMessage] = useState("");
   const [pendingAccountLink, setPendingAccountLink] = useState<PendingAccountLink | null>(null);
   const [isSaving, startSaveTransition] = useTransition();
-  const [isCreatingInvite, startInviteTransition] = useTransition();
   const [isLinkingExistingAccount, startLinkAccountTransition] = useTransition();
-  const canManageInvites = viewer.role === "admin" || viewer.role === "leader";
   const canInviteAdmin = viewer.role === "admin";
-  const canInviteLeader = viewer.role === "admin";
   const scheduleNameById = useMemo(
     () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
     [snapshot.schedules],
@@ -606,16 +858,6 @@ export function PersonnelPanel({
         ]),
       ),
     [snapshot.competencies],
-  );
-  const employeeOptions = useMemo(
-    () =>
-      [...employees].sort(
-        (left, right) =>
-          left.lastName.localeCompare(right.lastName) ||
-          left.firstName.localeCompare(right.firstName) ||
-          left.email.localeCompare(right.email),
-      ),
-    [employees],
   );
   const baselineMap = useMemo(
     () => new Map(baselineEmployees.map((employee) => [employee.id, normalizeEmployee(employee)])),
@@ -712,44 +954,11 @@ export function PersonnelPanel({
     setDraftEmployee(null);
     setPendingRemoveEmployeeId(null);
     setPendingCompetencyRemoval(null);
-    setShowInviteBuilder(false);
     setShowActionsMenu(false);
-    setInviteDraft(createInviteDraft());
-    setInviteLink("");
-    setInviteStatusMessage("");
     setPendingAccountLink(null);
     lastPersonnelSaveSignatureRef.current = "";
   }, [initialEmployees]);
 
-  useEffect(() => {
-    if (!inviteDraft.employeeId) {
-      return;
-    }
-
-    const employee = employeeOptions.find((entry) => entry.id === inviteDraft.employeeId);
-
-    if (!employee) {
-      return;
-    }
-
-    setInviteDraft((current) => ({
-      ...current,
-      firstName: employee.firstName,
-      lastName: employee.lastName,
-      email: employee.email || current.email,
-    }));
-  }, [employeeOptions, inviteDraft.employeeId]);
-
-  useEffect(() => {
-    if (canInviteAdmin || inviteDraft.role === "worker") {
-      return;
-    }
-
-    setInviteDraft((current) => ({
-      ...current,
-      role: "worker",
-    }));
-  }, [canInviteAdmin, inviteDraft.role]);
 
   useEffect(() => {
     if (!showActionsMenu) {
@@ -778,8 +987,10 @@ export function PersonnelPanel({
   }, [showActionsMenu]);
 
   const hasValidationErrors = invalidEmployeeIds.size > 0;
-  const draftEmployeeIssues = draftEmployee ? getEmployeeIssues(draftEmployee) : [];
   const draftEmployeeFieldIssues = draftEmployee ? getEmployeeFieldIssues(draftEmployee) : {};
+  const settingsEmployee = settingsEmployeeId
+    ? employees.find((employee) => employee.id === settingsEmployeeId) ?? null
+    : null;
   const pendingRemoveEmployee = pendingRemoveEmployeeId
     ? employees.find((employee) => employee.id === pendingRemoveEmployeeId) ?? null
     : null;
@@ -985,6 +1196,11 @@ export function PersonnelPanel({
     setStatusMessage("");
   }
 
+  /**
+   * Saves the employee before inviting rather than letting autosave get to it.
+   * `createAccountInvite` resolves the employee row by id and refuses when it
+   * is missing, so the invite cannot be fired until the insert has landed.
+   */
   function handleCreateEmployee() {
     if (!draftEmployee) {
       return;
@@ -993,13 +1209,72 @@ export function PersonnelPanel({
     const issues = getEmployeeIssues(draftEmployee);
 
     if (issues.length > 0) {
-      setStatusMessage("Complete the new employee row before adding it.");
+      setStatusMessage("Complete the new employee before adding them.");
       return;
     }
 
-    setEmployees((current) => [{ ...draftEmployee }, ...current]);
-    setDraftEmployee(null);
-    setStatusMessage("Employee added. Autosave will run shortly.");
+    const newEmployee = { ...draftEmployee };
+    const shouldInvite = sendInviteOnAdd;
+    const inviteRole = inviteRoleOnAdd;
+
+    startSaveTransition(async () => {
+      const saveResult = await savePersonnel({
+        updates: [normalizeEmployee(newEmployee)],
+        deletedEmployeeIds: [],
+      } as SavePersonnelInput);
+
+      if (!saveResult.ok) {
+        setStatusMessage(saveResult.message);
+        return;
+      }
+
+      setEmployees((current) => [{ ...newEmployee }, ...current]);
+      setBaselineEmployees((current) => [{ ...newEmployee }, ...current]);
+      setDraftEmployee(null);
+
+      if (!shouldInvite) {
+        setStatusMessage("Employee added.");
+        return;
+      }
+
+      const inviteResult = await createAccountInvite({
+        email: newEmployee.email,
+        firstName: newEmployee.firstName,
+        lastName: newEmployee.lastName,
+        role: inviteRole,
+        employeeId: newEmployee.id,
+      });
+
+      /**
+       * An account already exists on that address, so it has to be linked to the
+       * new employee rather than invited again.
+       */
+      if (
+        !inviteResult.ok &&
+        "requiresAccountLink" in inviteResult &&
+        inviteResult.requiresAccountLink
+      ) {
+        setPendingAccountLink({
+          email: newEmployee.email.trim().toLowerCase(),
+          employeeId: newEmployee.id,
+          employeeName: getEditableEmployeeDisplayName(newEmployee),
+          existingDisplayName:
+            ("existingDisplayName" in inviteResult && inviteResult.existingDisplayName) ||
+            newEmployee.email.trim().toLowerCase(),
+          role: inviteRole,
+          firstName: newEmployee.firstName,
+          lastName: newEmployee.lastName,
+        });
+        setStatusMessage("Employee added. An account already uses that email — link it to continue.");
+        return;
+      }
+
+      setStatusMessage(
+        inviteResult.ok
+          ? "Employee added and account invite sent."
+          : `Employee added, but the invite could not be sent: ${inviteResult.message}`,
+      );
+    });
   }
 
   async function handleCsvImport(event: ChangeEvent<HTMLInputElement>) {
@@ -1194,14 +1469,70 @@ export function PersonnelPanel({
     setPendingCsvImport(null);
   }
 
-  function handleRemoveEmployee(employeeId: string) {
-    const employee = employees.find((entry) => entry.id === employeeId);
+  /**
+   * The employee has to exist in the database before an invite can reference it,
+   * so a freshly typed email is saved first rather than left to autosave.
+   */
+  function handleSendSettingsInvite(employee: EditableEmployee) {
+    startSaveTransition(async () => {
+      setSettingsStatusMessage("");
 
-    if (!employee) {
+      if (JSON.stringify(baselineMap.get(employee.id)) !== JSON.stringify(normalizeEmployee(employee))) {
+        const saveResult = await savePersonnel({
+          updates: [normalizeEmployee(employee)],
+          deletedEmployeeIds: [],
+        } as SavePersonnelInput);
+
+        if (!saveResult.ok) {
+          setSettingsStatusMessage(saveResult.message);
+          return;
+        }
+
+        setBaselineEmployees((current) =>
+          current.map((entry) => (entry.id === employee.id ? { ...employee } : entry)),
+        );
+      }
+
+      const result = await createAccountInvite({
+        email: employee.email,
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        role: settingsInviteRole,
+        employeeId: employee.id,
+      });
+
+      if (!result.ok && "requiresAccountLink" in result && result.requiresAccountLink) {
+        setPendingAccountLink({
+          email: employee.email.trim().toLowerCase(),
+          employeeId: employee.id,
+          employeeName: getEditableEmployeeDisplayName(employee),
+          existingDisplayName:
+            ("existingDisplayName" in result && result.existingDisplayName) || employee.email.trim().toLowerCase(),
+          role: settingsInviteRole,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+        });
+        setSettingsEmployeeId(null);
+        setStatusMessage("An account already uses that email — link it to continue.");
+        return;
+      }
+
+      setSettingsStatusMessage(result.message);
+      setSettingsInviteLink(result.ok && "inviteUrl" in result && result.inviteUrl ? result.inviteUrl : "");
+    });
+  }
+
+  async function handleCopySettingsInviteLink() {
+    if (!settingsInviteLink) {
       return;
     }
 
-    setPendingRemoveEmployeeId(employeeId);
+    try {
+      await navigator.clipboard.writeText(settingsInviteLink);
+      setSettingsStatusMessage("Sign-up link copied to clipboard.");
+    } catch {
+      setSettingsStatusMessage("Could not copy automatically. Select the link and copy it manually.");
+    }
   }
 
   function handleConfirmRemoveEmployee() {
@@ -1223,51 +1554,6 @@ export function PersonnelPanel({
     setStatusMessage(`${employeeName} removed. Autosave will run shortly.`);
   }
 
-  function handleInviteDraftChange<K extends keyof InviteDraft>(key: K, value: InviteDraft[K]) {
-    setInviteDraft((current) => ({
-      ...current,
-      [key]: value,
-    }));
-  }
-
-  function handleCreateInvite() {
-    startInviteTransition(async () => {
-      const selectedEmployee = inviteDraft.employeeId
-        ? employeeOptions.find((entry) => entry.id === inviteDraft.employeeId) ?? null
-        : null;
-      const result = await createAccountInvite({
-        email: inviteDraft.email,
-        firstName: inviteDraft.firstName,
-        lastName: inviteDraft.lastName,
-        role: inviteDraft.role,
-        employeeId: inviteDraft.employeeId || null,
-      });
-
-      if (!result.ok && "requiresAccountLink" in result && result.requiresAccountLink && inviteDraft.employeeId) {
-        setInviteLink("");
-        setPendingAccountLink({
-          email: inviteDraft.email.trim().toLowerCase(),
-          employeeId: inviteDraft.employeeId,
-          employeeName: selectedEmployee ? getEditableEmployeeDisplayName(selectedEmployee) : "this employee",
-          existingDisplayName:
-            ("existingDisplayName" in result && result.existingDisplayName) || inviteDraft.email.trim().toLowerCase(),
-          role: inviteDraft.role,
-          firstName: inviteDraft.firstName,
-          lastName: inviteDraft.lastName,
-        });
-      } else {
-        setPendingAccountLink(null);
-      }
-
-      setInviteStatusMessage(result.message);
-      setInviteLink(result.ok && "inviteUrl" in result && result.inviteUrl ? result.inviteUrl : "");
-
-      if (result.ok) {
-        setShowInviteBuilder(true);
-      }
-    });
-  }
-
   function handleConfirmLinkExistingAccount() {
     if (!pendingAccountLink) {
       return;
@@ -1282,28 +1568,14 @@ export function PersonnelPanel({
         employeeId: pendingAccountLink.employeeId,
       });
 
-      setInviteStatusMessage(result.message);
-      setInviteLink("");
+      setStatusMessage(result.message);
 
       if (result.ok) {
         setPendingAccountLink(null);
-        setShowInviteBuilder(true);
       }
     });
   }
 
-  async function handleCopyInviteLink() {
-    if (!inviteLink) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(inviteLink);
-      setInviteStatusMessage("Invite link copied to clipboard.");
-    } catch {
-      setInviteStatusMessage("Could not copy automatically. Copy the invite link manually.");
-    }
-  }
 
   return (
     <>
@@ -1374,18 +1646,6 @@ export function PersonnelPanel({
                 >
                   Add employee
                 </button>
-                {canManageInvites ? (
-                  <button
-                    type="button"
-                    className="ghost-button personnel-actions-menu__item"
-                    onClick={() => {
-                      setShowActionsMenu(false);
-                      setShowInviteBuilder((current) => !current);
-                    }}
-                  >
-                    {showInviteBuilder ? "Hide invite builder" : "Invite account"}
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   className="ghost-button personnel-actions-menu__item"
@@ -1420,121 +1680,6 @@ export function PersonnelPanel({
         </div>
       </div>
 
-      {canManageInvites && showInviteBuilder ? (
-        <section className="invite-builder">
-          <div className="invite-builder__header">
-            <div>
-              <strong>Create Account Invite</strong>
-              <p>
-                Generate a secure sign-up link that assigns the invited workspace profile on the server.
-              </p>
-            </div>
-            <div className="planner-actions">
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => {
-                  setInviteDraft(createInviteDraft());
-                  setInviteLink("");
-                  setInviteStatusMessage("");
-                }}
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-
-	          <div className="invite-builder__grid">
-            <label className="field">
-              <span>App role</span>
-              <select
-                value={inviteDraft.role}
-                onChange={(event) => handleInviteDraftChange("role", event.target.value as AppRole)}
-              >
-                <option value="worker">Worker</option>
-                {canInviteLeader ? <option value="leader">Leader</option> : null}
-                {canInviteAdmin ? <option value="admin">Admin</option> : null}
-              </select>
-            </label>
-
-            <label className="field">
-              <span>Link employee</span>
-              <select
-                value={inviteDraft.employeeId}
-                onChange={(event) => handleInviteDraftChange("employeeId", event.target.value)}
-              >
-                <option value="">None</option>
-                {employeeOptions.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {getEditableEmployeeDisplayName(employee)}{employee.email ? ` · ${employee.email}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field">
-              <span>First Name</span>
-              <input
-                type="text"
-                value={inviteDraft.firstName}
-                onChange={(event) => handleInviteDraftChange("firstName", event.target.value)}
-              />
-            </label>
-
-            <label className="field">
-              <span>Last Name</span>
-              <input
-                type="text"
-                value={inviteDraft.lastName}
-                onChange={(event) => handleInviteDraftChange("lastName", event.target.value)}
-              />
-            </label>
-
-            <label className="field invite-builder__email">
-              <span>Email</span>
-              <input
-                type="email"
-                value={inviteDraft.email}
-                placeholder="you@company.com"
-                onChange={(event) => handleInviteDraftChange("email", event.target.value)}
-              />
-            </label>
-          </div>
-
-          <p className="toolbar-status">
-            {viewer.role === "leader"
-              ? "Leaders can send worker invites for linked employees on their own shift."
-              : inviteDraft.role === "admin"
-              ? "Admin invites can be standalone or linked to an employee."
-              : "Leader and worker invites should be linked to an employee so the correct shift and scope are assigned."}
-          </p>
-
-          <div className="invite-builder__actions">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={handleCreateInvite}
-              disabled={isCreatingInvite || isLinkingExistingAccount}
-            >
-              {isCreatingInvite ? "Creating invite..." : "Create invite"}
-            </button>
-            {inviteLink ? (
-              <button type="button" className="ghost-button" onClick={handleCopyInviteLink}>
-                Copy invite link
-              </button>
-            ) : null}
-          </div>
-
-          {inviteStatusMessage ? <p className="toolbar-status">{inviteStatusMessage}</p> : null}
-
-          {inviteLink ? (
-            <label className="field invite-builder__link">
-              <span>Invite Link</span>
-              <input type="text" readOnly value={inviteLink} />
-            </label>
-          ) : null}
-        </section>
-      ) : null}
 
       {pendingCsvImport ? (
         <section className="import-preview">
@@ -1574,169 +1719,16 @@ export function PersonnelPanel({
             <tr>
               <th className="column-name">First Name</th>
               <th className="column-name">Last Name</th>
-              <th className="column-email">Email</th>
               <th className="column-shift">Shift</th>
               <th className="column-competencies">Competencies</th>
               <th className="column-actions" />
             </tr>
           </thead>
           <tbody>
-            {draftEmployee ? (
-              <tr className="table-row--draft">
-                <td className="column-name">
-                  <div className="table-input-stack">
-                    <input
-                      className="table-input"
-                      placeholder="Enter first name"
-                      value={draftEmployee.firstName}
-                      onChange={(event) =>
-                        setDraftEmployee((current) =>
-                          current
-                            ? {
-                                ...current,
-                                firstName: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                    />
-                    {draftEmployeeFieldIssues.firstName ? (
-                      <p className="row-issue">{draftEmployeeFieldIssues.firstName}</p>
-                    ) : null}
-                  </div>
-                </td>
-                <td className="column-name">
-                  <div className="table-input-stack">
-                    <input
-                      className="table-input"
-                      placeholder="Enter last name"
-                      value={draftEmployee.lastName}
-                      onChange={(event) =>
-                        setDraftEmployee((current) =>
-                          current
-                            ? {
-                                ...current,
-                                lastName: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                    />
-                    {draftEmployeeFieldIssues.lastName ? (
-                      <p className="row-issue">{draftEmployeeFieldIssues.lastName}</p>
-                    ) : null}
-                  </div>
-                </td>
-                <td className="column-email">
-                  <div className="table-input-stack">
-                    <input
-                      className="table-input"
-                      type="email"
-                      placeholder="email@company.com"
-                      value={draftEmployee.email}
-                      onChange={(event) =>
-                        setDraftEmployee((current) =>
-                          current
-                            ? {
-                                ...current,
-                                email: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                    />
-                    {draftEmployeeFieldIssues.email ? (
-                      <p className="row-issue">{draftEmployeeFieldIssues.email}</p>
-                    ) : null}
-                  </div>
-                </td>
-                <td className="column-shift">
-                  <div className="table-input-stack">
-                    <select
-                      className="table-select"
-                      value={draftEmployee.scheduleId}
-                      onChange={(event) =>
-                        setDraftEmployee((current) =>
-                          current
-                            ? {
-                                ...current,
-                                scheduleId: event.target.value,
-                              }
-                            : current,
-                        )
-                      }
-                    >
-                      <option value="">No shift assigned</option>
-                      {snapshot.schedules.map((schedule) => (
-                        <option key={schedule.id} value={schedule.id}>
-                          {schedule.name}
-                        </option>
-                      ))}
-                    </select>
-                    {draftEmployeeFieldIssues.scheduleId ? (
-                      <p className="row-issue">{draftEmployeeFieldIssues.scheduleId}</p>
-                    ) : null}
-                  </div>
-                </td>
-                <td className="column-competencies">
-                  <div className="table-pills table-pills--editable">
-                    {snapshot.competencies.map((competency) => {
-                      const isSelected = draftEmployee.competencyIds.includes(competency.id);
-
-                      return (
-                        <button
-                          type="button"
-                          key={competency.id}
-                          onClick={() =>
-                            setDraftEmployee((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    competencyIds: isSelected
-                                      ? current.competencyIds.filter((id) => id !== competency.id)
-                                      : [...current.competencyIds, competency.id],
-                                  }
-                                : current,
-                            )
-                          }
-                          className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
-                            isSelected ? "legend-pill--selected" : "legend-pill--muted"
-                          }`}
-                          title={competency.label}
-                        >
-                          {competency.code}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </td>
-                <td className="column-actions">
-                  <div className="table-actions-cell">
-                    <div className="table-actions-inline">
-                      <button
-                        type="button"
-                        className="table-action"
-                        onClick={() => setDraftEmployee(null)}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        className="table-action table-action--confirm"
-                        onClick={handleCreateEmployee}
-                        disabled={draftEmployeeIssues.length > 0}
-                      >
-                        Add
-                      </button>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            ) : null}
             {groupedEmployees.map((entry) =>
               entry.type === "group" ? (
                 <tr key={`group-${entry.label}`} className="table-group-row">
-                  <td colSpan={6}>{entry.label}</td>
+                  <td colSpan={5}>{entry.label}</td>
                 </tr>
               ) : (
                 <tr
@@ -1778,23 +1770,6 @@ export function PersonnelPanel({
                         }
                       />
                       {fieldIssues.lastName ? <p className="row-issue">{fieldIssues.lastName}</p> : null}
-                    </div>
-                  </td>
-                  <td className="column-email">
-                    <div className="table-input-stack">
-                      <input
-                        className="table-input"
-                        type="email"
-                        value={entry.value.email}
-                        placeholder="email@company.com"
-                        onChange={(event) =>
-                          updateEmployee(entry.value.id, (current) => ({
-                            ...current,
-                            email: event.target.value,
-                          }))
-                        }
-                      />
-                      {fieldIssues.email ? <p className="row-issue">{fieldIssues.email}</p> : null}
                     </div>
                   </td>
                   <td className="column-shift">
@@ -1842,13 +1817,17 @@ export function PersonnelPanel({
                   </td>
                   <td className="column-actions">
                     <div className="table-actions-cell">
-                      <button
-                        type="button"
-                        className="table-action table-action--danger"
-                        onClick={() => handleRemoveEmployee(entry.value.id)}
-                      >
-                        Remove
-                      </button>
+                      {canInviteAdmin ? (
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Settings for ${getEditableEmployeeDisplayName(entry.value)}`}
+                          title="Employee settings"
+                          onClick={() => setSettingsEmployeeId(entry.value.id)}
+                        >
+                          <SettingsIcon />
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                       </>
@@ -1859,7 +1838,7 @@ export function PersonnelPanel({
             )}
             {groupedEmployees.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={5}>
                   <div className="empty-state">
                     <strong>No employees matched that filter.</strong>
                     <span>Try a different search term, shift, or competency filter.</span>
@@ -1872,6 +1851,48 @@ export function PersonnelPanel({
       </div>
     </section>
 
+    {draftEmployee ? (
+      <AddEmployeeModal
+        employee={draftEmployee}
+        fieldIssues={draftEmployeeFieldIssues}
+        schedules={snapshot.schedules}
+        sendInvite={sendInviteOnAdd}
+        inviteRole={inviteRoleOnAdd}
+        canInviteElevatedRoles={canInviteAdmin}
+        isSaving={isSaving}
+        onChange={(updater) => setDraftEmployee((current) => (current ? updater(current) : current))}
+        onSendInviteChange={setSendInviteOnAdd}
+        onInviteRoleChange={setInviteRoleOnAdd}
+        onClose={() => setDraftEmployee(null)}
+        onSubmit={handleCreateEmployee}
+      />
+    ) : null}
+    {settingsEmployee ? (
+      <EmployeeSettingsModal
+        employee={settingsEmployee}
+        emailIssue={getEmployeeFieldIssues(settingsEmployee).email}
+        inviteRole={settingsInviteRole}
+        canInviteElevatedRoles={canInviteAdmin}
+        inviteLink={settingsInviteLink}
+        statusMessage={settingsStatusMessage}
+        isBusy={isSaving}
+        onEmailChange={(next) =>
+          updateEmployee(settingsEmployee.id, (current) => ({ ...current, email: next }))
+        }
+        onInviteRoleChange={setSettingsInviteRole}
+        onSendInvite={() => handleSendSettingsInvite(settingsEmployee)}
+        onCopyLink={handleCopySettingsInviteLink}
+        onRemove={() => {
+          setSettingsEmployeeId(null);
+          setPendingRemoveEmployeeId(settingsEmployee.id);
+        }}
+        onClose={() => {
+          setSettingsEmployeeId(null);
+          setSettingsInviteLink("");
+          setSettingsStatusMessage("");
+        }}
+      />
+    ) : null}
     {pendingRemoveEmployee ? (
       <RemoveEmployeeModal
         employeeName={getEditableEmployeeDisplayName(pendingRemoveEmployee)}
