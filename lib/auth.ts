@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -126,8 +127,14 @@ function decodeSession(value: string | undefined): AppSession | null {
   }
 }
 
-/** Reads the current signed session cookie, if one exists. */
-export async function getAppSession() {
+/**
+ * Reads the current signed session cookie, if one exists.
+ *
+ * Memoized per request. Resolving a session costs a `profiles` lookup plus four
+ * scope-name queries, and a route with a `loading.tsx` resolves it at least
+ * twice — once for the fallback shell and once for the page.
+ */
+export const getAppSession = cache(async () => {
   const cookieStore = await cookies();
   const cookieSession = decodeSession(cookieStore.get(SESSION_COOKIE)?.value);
 
@@ -229,7 +236,7 @@ export async function getAppSession() {
     activeBusinessAreaId:
       profile.role === "admin" ? cookieSession.activeBusinessAreaId ?? null : profile.business_area_id,
   };
-}
+});
 
 /** Writes a fresh signed session cookie after sign-in. */
 export async function setAppSession(session: AppSession) {
