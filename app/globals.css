@@ -113,11 +113,28 @@ html {
   background-attachment: fixed;
 }
 
+/**
+ * Standalone iOS draws the page under the notch with a transparent status bar,
+ * so that strip shows `--bg` while the toolbar directly below it is `--surface`
+ * — a visible darker band. Paint the inset with the surface colour so the two
+ * meet seamlessly. Collapses to zero height everywhere `safe-area-inset-top` is
+ * 0, which is every browser and every device without a notch.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: var(--surface);
+  z-index: 40;
+  pointer-events: none;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
-  /* Standalone iOS draws under the notch, so vh overshoots the visible area and
-     leaves a strip that scrolls away at the top. */
   min-height: 100dvh;
   overscroll-behavior: none;
   color: var(--ink);
