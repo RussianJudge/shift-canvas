@@ -820,6 +820,7 @@ function buildDisplayEmployeesForSchedule({
         ? existingDates
         : [...existingDates, assignment.date].sort(),
       overtimeCompetencyByDate: borrowedRowsByEmployee[employee.id]?.overtimeCompetencyByDate,
+      loanDates: existingLoanDates.length > 0 ? existingLoanDates : undefined,
     };
   }
 
