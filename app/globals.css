@@ -6206,7 +6206,9 @@ button.workspace-nav-link {
    ============================================================ */
 @media (max-width: 600px) {
   .workspace-mobile-toolbar {
-    padding: 0.2rem 0 0;
+    /* Clears the notch/Dynamic Island directly; falls back to a flat 0.6rem
+       wherever safe-area-inset-top is 0 (Android, browser tabs, no notch). */
+    padding: max(0.6rem, env(safe-area-inset-top)) 0 1rem;
   }
   .workspace-mobile-toggle.ghost-button {
     min-height: 0;
@@ -6223,10 +6225,12 @@ button.workspace-nav-link {
     width: 2rem;
     height: 2rem;
   }
-  /* Floating toggle is 2.6rem tall (0.2 toolbar + 0.2 + 2rem icon + 0.2). */
+  /* Floating toggle is ~3rem tall including its own padding and the 1rem gap
+     below it; add the safe-area inset on top so content clears both the
+     button and the notch on devices where the toggle sits lower. */
   .scheduler-toolbar,
   .panel-heading {
-    padding-top: 3rem;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 3rem);
   }
   /* Keep the "Open/Close Menu" text for screen readers, hide it visually */
   .workspace-mobile-toggle strong {
