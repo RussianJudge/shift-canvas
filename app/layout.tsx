@@ -20,9 +20,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Let the app extend into the safe area (flow up under the notch).
   viewportFit: "cover",
+  // Match the header / toolbar surface so the top safe-area bar blends in.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f5f5f7" },
-    { media: "(prefers-color-scheme: dark)", color: "#161618" },
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#242427" },
   ],
 };
 

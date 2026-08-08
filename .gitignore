@@ -8,3 +8,5 @@ supabase/.temp
 .vercel
 .superpowers
 .DS_Store
+*.tsbuildinfo
+.fuse_hidden*
