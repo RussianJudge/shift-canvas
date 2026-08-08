@@ -600,6 +600,7 @@ button.workspace-nav-link {
   display: grid;
   gap: 0;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .landing-hero,
@@ -615,6 +616,7 @@ button.workspace-nav-link {
   gap: 2rem;
   align-items: stretch;
   min-height: 100vh;
+  min-height: 100dvh;
   padding-block: clamp(1.5rem, 4vw, 3rem);
 }
 
@@ -783,6 +785,7 @@ button.workspace-nav-link {
   display: grid;
   place-items: center;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 1.5rem;
 }
 
@@ -790,6 +793,7 @@ button.workspace-nav-link {
   display: grid;
   place-items: center;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 1.5rem;
 }
 
