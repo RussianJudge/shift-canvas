@@ -113,35 +113,6 @@ html {
   background-attachment: fixed;
 }
 
-/**
- * Standalone iOS draws the page under the status bar with viewportFit: "cover",
- * so whatever sits at the top of the page shows through it — themeColor is not
- * consulted there in this mode. Paint that inset to match, or it reads as a
- * band of the wrong colour.
- *
- * The match differs by page: workspace screens put the `--surface` toolbar at
- * the top, while the auth and landing screens run on the plain `--bg` page. So
- * default to `--bg` and override only inside the workspace shell.
- *
- * Collapses to zero height wherever `safe-area-inset-top` is 0 — every browser
- * tab, and every device without a notch.
- */
-body::before {
-  content: "";
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: env(safe-area-inset-top);
-  background: var(--bg);
-  z-index: 40;
-  pointer-events: none;
-}
-
-body:has(.workspace-frame)::before {
-  background: var(--surface);
-}
-
 body {
   margin: 0;
   min-height: 100vh;
@@ -178,7 +149,15 @@ select {
   min-height: 0;
   border: 0;
   border-radius: 0;
-  background: transparent;
+  /**
+   * Standalone iOS draws the page under the status bar with viewportFit:
+   * "cover", so whatever sits behind that transparent status bar is whatever
+   * this element's own background is — themeColor is not consulted there in
+   * that mode. This frame already spans the full height from y:0 with no
+   * offset, so painting it --surface (matching the toolbar it contains) is
+   * enough; no separate element is needed to patch the notch area.
+   */
+  background: var(--surface);
   box-shadow: none;
   overflow: hidden;
   backdrop-filter: none;
