@@ -4783,7 +4783,7 @@ button.workspace-nav-link {
 
   .schedule-grid {
     --schedule-name-column-width: 6.15rem;
-    --schedule-day-column-width: 1.92rem;
+    --schedule-day-column-width: 2.3rem;
   }
 
   .employee-header {
