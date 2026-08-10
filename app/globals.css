@@ -6204,12 +6204,12 @@ button.workspace-nav-link {
     width: 2rem;
     height: 2rem;
   }
-  /* Floating toggle is ~3rem tall including its own padding and the 1rem gap
-     below it; add the safe-area inset on top so content clears both the
-     button and the notch on devices where the toggle sits lower. */
+  /* Floating toggle is ~3rem tall including its own padding; add extra room
+     below it plus the safe-area inset so content clears both the button and
+     the notch on devices where the toggle sits lower. */
   .scheduler-toolbar,
   .panel-heading {
-    padding-top: calc(env(safe-area-inset-top, 0px) + 3rem);
+    padding-top: calc(env(safe-area-inset-top, 0px) + 3.75rem);
   }
   /* Keep the "Open/Close Menu" text for screen readers, hide it visually */
   .workspace-mobile-toggle strong {
