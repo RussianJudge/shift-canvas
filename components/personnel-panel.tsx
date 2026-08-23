@@ -641,10 +641,12 @@ function AddEmployeeModal({
   sendInvite,
   inviteRole,
   canInviteElevatedRoles,
+  inviteLink,
   isSaving,
   onChange,
   onSendInviteChange,
   onInviteRoleChange,
+  onCopyLink,
   onClose,
   onSubmit,
 }: {
@@ -654,14 +656,58 @@ function AddEmployeeModal({
   sendInvite: boolean;
   inviteRole: AppRole;
   canInviteElevatedRoles: boolean;
+  inviteLink: string;
   isSaving: boolean;
   onChange: (updater: (employee: EditableEmployee) => EditableEmployee) => void;
   onSendInviteChange: (next: boolean) => void;
   onInviteRoleChange: (next: AppRole) => void;
+  onCopyLink: () => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
   const issues = Object.values(fieldIssues).filter(Boolean);
+
+  /**
+   * The employee is already saved by the time a link exists, so the form
+   * below (still bound to local draft state) would silently do nothing if
+   * edited. Swap to a plain confirmation view instead of leaving it live.
+   */
+  if (inviteLink) {
+    return createPortal(
+      <div className="assignment-modal-backdrop" onClick={onClose}>
+        <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="assignment-modal__header">
+            <div>
+              <span className="assignment-modal__eyebrow">Personnel</span>
+              <h2 className="assignment-modal__title">{getEditableEmployeeDisplayName(employee)} added</h2>
+            </div>
+            <button type="button" className="ghost-button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+
+          <p className="toolbar-status">
+            An account invite was sent to {employee.email}. You can also send this sign-up link manually.
+          </p>
+
+          <label className="field invite-builder__link">
+            <span>Sign-up link</span>
+            <input readOnly value={inviteLink} onFocus={(event) => event.currentTarget.select()} />
+          </label>
+
+          <div className="assignment-modal__footer">
+            <button type="button" className="ghost-button" onClick={onCopyLink}>
+              Copy link
+            </button>
+            <button type="button" className="primary-button" onClick={onClose}>
+              Done
+            </button>
+          </div>
+        </section>
+      </div>,
+      document.body,
+    );
+  }
 
   return createPortal(
     <div className="assignment-modal-backdrop" onClick={onClose}>
@@ -830,6 +876,7 @@ export function PersonnelPanel({
   const [draftEmployee, setDraftEmployee] = useState<EditableEmployee | null>(null);
   const [sendInviteOnAdd, setSendInviteOnAdd] = useState(true);
   const [inviteRoleOnAdd, setInviteRoleOnAdd] = useState<AppRole>("worker");
+  const [addInviteLink, setAddInviteLink] = useState("");
   const [pendingRemoveEmployeeId, setPendingRemoveEmployeeId] = useState<string | null>(null);
   const [settingsEmployeeId, setSettingsEmployeeId] = useState<string | null>(null);
   const [settingsInviteRole, setSettingsInviteRole] = useState<AppRole>("worker");
@@ -952,6 +999,7 @@ export function PersonnelPanel({
     setSelectedCompetencyFilter("all");
     setPendingCsvImport(null);
     setDraftEmployee(null);
+    setAddInviteLink("");
     setPendingRemoveEmployeeId(null);
     setPendingCompetencyRemoval(null);
     setShowActionsMenu(false);
@@ -1193,6 +1241,7 @@ export function PersonnelPanel({
   function handleAddEmployee() {
     setShowActionsMenu(false);
     setDraftEmployee((current) => current ?? createDraftEmployee());
+    setAddInviteLink("");
     setStatusMessage("");
   }
 
@@ -1230,9 +1279,9 @@ export function PersonnelPanel({
 
       setEmployees((current) => [{ ...newEmployee }, ...current]);
       setBaselineEmployees((current) => [{ ...newEmployee }, ...current]);
-      setDraftEmployee(null);
 
       if (!shouldInvite) {
+        setDraftEmployee(null);
         setStatusMessage("Employee added.");
         return;
       }
@@ -1254,6 +1303,7 @@ export function PersonnelPanel({
         "requiresAccountLink" in inviteResult &&
         inviteResult.requiresAccountLink
       ) {
+        setDraftEmployee(null);
         setPendingAccountLink({
           email: newEmployee.email.trim().toLowerCase(),
           employeeId: newEmployee.id,
@@ -1269,12 +1319,33 @@ export function PersonnelPanel({
         return;
       }
 
-      setStatusMessage(
-        inviteResult.ok
-          ? "Employee added and account invite sent."
-          : `Employee added, but the invite could not be sent: ${inviteResult.message}`,
-      );
+      if (!inviteResult.ok) {
+        setDraftEmployee(null);
+        setStatusMessage(`Employee added, but the invite could not be sent: ${inviteResult.message}`);
+        return;
+      }
+
+      /**
+       * Keep the modal open so the admin can copy the sign-up link and send it
+       * manually — the automated email invite isn't the only way it reaches the
+       * new employee.
+       */
+      setAddInviteLink("inviteUrl" in inviteResult && inviteResult.inviteUrl ? inviteResult.inviteUrl : "");
+      setStatusMessage("Employee added and account invite sent.");
     });
+  }
+
+  async function handleCopyAddInviteLink() {
+    if (!addInviteLink) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(addInviteLink);
+      setStatusMessage("Sign-up link copied to clipboard.");
+    } catch {
+      setStatusMessage("Could not copy automatically. Select the link and copy it manually.");
+    }
   }
 
   async function handleCsvImport(event: ChangeEvent<HTMLInputElement>) {
@@ -1859,11 +1930,16 @@ export function PersonnelPanel({
         sendInvite={sendInviteOnAdd}
         inviteRole={inviteRoleOnAdd}
         canInviteElevatedRoles={canInviteAdmin}
+        inviteLink={addInviteLink}
         isSaving={isSaving}
         onChange={(updater) => setDraftEmployee((current) => (current ? updater(current) : current))}
         onSendInviteChange={setSendInviteOnAdd}
         onInviteRoleChange={setInviteRoleOnAdd}
-        onClose={() => setDraftEmployee(null)}
+        onCopyLink={handleCopyAddInviteLink}
+        onClose={() => {
+          setDraftEmployee(null);
+          setAddInviteLink("");
+        }}
         onSubmit={handleCreateEmployee}
       />
     ) : null}
