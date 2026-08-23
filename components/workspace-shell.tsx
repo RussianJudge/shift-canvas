@@ -82,8 +82,20 @@ type NavLinkProps = {
   activeHref: string;
   label: string;
   icon: React.ReactNode;
+  isFinePointer: boolean;
   onNavigate: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
 };
+
+/**
+ * next/link's shipped .d.ts resolves to the legacy Pages Router props and
+ * doesn't know about this App Router-only prop, even though it exists in the
+ * packaged runtime (next/dist/client/app-dir/link.js) and that router's own
+ * link.d.ts. Spreading a separately-typed object sidesteps TypeScript's
+ * excess-property check, which only fires on object literals.
+ */
+function dynamicHoverProps(isFinePointer: boolean): { unstable_dynamicOnHover?: boolean } {
+  return isFinePointer ? { unstable_dynamicOnHover: true } : {};
+}
 
 /** Small presentational wrapper so nav link semantics stay consistent everywhere. */
 function NavLink({
@@ -91,6 +103,7 @@ function NavLink({
   activeHref,
   label,
   icon,
+  isFinePointer,
   onNavigate,
 }: NavLinkProps) {
   const pathname = usePathname();
@@ -99,7 +112,8 @@ function NavLink({
   return (
     <Link
       href={href}
-      prefetch={false}
+      prefetch={isFinePointer ? undefined : false}
+      {...dynamicHoverProps(isFinePointer)}
       className={`workspace-nav-link ${isActive ? "workspace-nav-link--active" : ""}`}
       title={label}
       aria-current={isActive ? "page" : undefined}
@@ -275,6 +289,13 @@ export function WorkspaceShell({
    */
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
+  /**
+   * Touch devices bypass client-side routing entirely (see
+   * useDocumentNavigation below), so hover-driven prefetch only ever matters
+   * on a fine-pointer device. Detected in an effect, not at render, so the
+   * server-rendered markup and the first client render match.
+   */
+  const [isFinePointer, setIsFinePointer] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(initialAdminScope);
   const [isAdminScopeCollapsed, setIsAdminScopeCollapsed] = useState(true);
@@ -283,6 +304,10 @@ export function WorkspaceShell({
   const navigationGuardRef = useRef<WorkspaceNavigationGuard | null>(null);
   const setNavigationGuard = useCallback<WorkspaceNavigationGuardSetter>((guard) => {
     navigationGuardRef.current = guard;
+  }, []);
+
+  useEffect(() => {
+    setIsFinePointer(window.matchMedia("(hover: hover) and (pointer: fine)").matches);
   }, []);
 
   useEffect(() => {
@@ -436,7 +461,8 @@ export function WorkspaceShell({
     <div className="workspace-nav-notifications">
       <Link
         href="/notifications"
-        prefetch={false}
+        prefetch={isFinePointer ? undefined : false}
+        {...dynamicHoverProps(isFinePointer)}
         className={`workspace-nav-link ${pathname === "/notifications" ? "workspace-nav-link--active" : ""}`}
         title="Notifications"
         aria-current={pathname === "/notifications" ? "page" : undefined}
@@ -497,6 +523,7 @@ export function WorkspaceShell({
                   activeHref={item.href}
                   label={item.label}
                   icon={item.icon}
+                  isFinePointer={isFinePointer}
                   onNavigate={handleNavLinkNavigate}
                 />
               );
