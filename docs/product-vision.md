@@ -20,7 +20,7 @@ They need to:
 - Manage overtime opportunities
 - Review and approve mutual shift exchanges
 - Track employee qualifications and competency coverage
-- Publish reliable schedules
+- Keep schedules accurate and current
 - Understand workforce trends
 
 ### Employees
@@ -63,8 +63,9 @@ feel like connected parts of one workforce-management workflow.
 
 ### Trustworthy actions
 
-Publishing, approving, deleting, merging, or overwriting information
-must have clear consequences and appropriate confirmation.
+Approving, deleting, or overwriting information must have clear consequences
+and appropriate confirmation. Schedule edits save directly and take effect
+immediately; the interface must not suggest a review step that does not exist.
 
 ### Preserve context
 
@@ -104,11 +105,13 @@ It should not feel:
 
 ## Core product model
 
-The main schedule is the authoritative published schedule.
+The main schedule is the authoritative schedule.
 
-Sub-schedules are focused planning contexts that can be reviewed and
-published or merged into the main schedule. They should feel like
-alternate schedule contexts rather than separate applications.
+Sub-schedules are focused working contexts whose assignments are already
+live on the main schedule — they are projected onto it at read time, with
+no draft, publish, or merge step. They should feel like alternate schedule
+contexts rather than separate applications, and the interface must never
+present their content as pending or unpublished.
 
 Overtime and mutual requests should connect clearly to the schedule and
 affected employees.
@@ -129,4 +132,4 @@ The redesign is successful when users can:
 - Compare employees, shifts, qualifications, and requests efficiently
 - Use the application at common desktop sizes without losing context
 - Perform essential employee actions comfortably on mobile
-- Trust the status and consequences of publishing or approval actions
+- Trust the status and consequences of saving and approval actions

@@ -65,12 +65,14 @@ Helpers: `canAccessScope`, `scopeFromRow`, `toDatabaseScope`, `getSessionScope` 
 
 ## Styling architecture
 
-- This project does not use Tailwind CSS.
-- Do not install Tailwind or introduce another styling framework.
-- Inspect the existing CSS architecture before making changes.
-- Reuse the current approach: global CSS, CSS Modules, styled components,
-  component styles, or whichever system the repository already uses.
-- Define shared design tokens with CSS custom properties where compatible.
+- Schwifty styles itself with **one global stylesheet** (`app/globals.css`,
+  ~6,700 lines) and **CSS custom properties** on `:root`, with a
+  `prefers-color-scheme: dark` block overriding those properties.
+- There are no CSS Modules, no Sass, no CSS-in-JS, and no component library.
+  Do not introduce Tailwind, CSS Modules, Sass, or another styling framework —
+  including during the redesign.
+- Extend the existing stylesheet and reuse the existing custom properties.
+  A new token needs a dark value in the same change.
 - Create reusable component classes instead of duplicating page-specific CSS.
 - Preserve the current build tooling and stylesheet-loading order.
 - Avoid inline styles except for genuinely dynamic values.
@@ -159,7 +161,6 @@ Approved visual references are stored in `docs/ui_redesign/`.
 
 - Inspect existing components and behavior before editing.
 - Reuse shared components and existing dependencies.
-- Prefer Tailwind classes backed by semantic CSS variables or tokens.
 - Avoid page-specific duplication of common controls and styles.
 - Keep visual changes separate from behavioral changes where practical.
 - Preserve loading, empty, error, permission, and responsive states.

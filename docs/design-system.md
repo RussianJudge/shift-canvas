@@ -6,9 +6,12 @@ This document defines Schwifty's shared visual language. Approved mockups in
 `docs/ui_redesign/` control page-specific layout; the existing application
 controls functionality and data.
 
-The project does not use Tailwind. Do not install Tailwind or another styling
-framework. Implement these rules through the project's verified CSS architecture
-using shared variables and reusable components where appropriate.
+Schwifty styles itself with a single global stylesheet (`app/globals.css`) and
+CSS custom properties declared on `:root`. That is the whole styling
+architecture — there are no CSS Modules, no Sass, no CSS-in-JS, and no component
+library. Tailwind, CSS Modules, Sass, or any other styling framework **must not
+be introduced during this redesign.** Implement every rule below by extending the
+existing stylesheet and reusing or adding custom properties.
 
 ## Product character
 
@@ -70,6 +73,7 @@ Map these targets to existing project tokens instead of duplicating them:
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --radius-pill: 999px;
 }
 ```
 
@@ -104,7 +108,7 @@ element is worse than either alone.
 | `--color-warning-bg` / `-text` | `--hue-amber-fill` / `-text` | translucent + light text | Reuse the hue family |
 | `--color-leave-bg` / `-text` | `--hue-rose-fill` / `-text` | translucent + light text | Reuse the hue family |
 | `--color-neutral-bg` | `--hue-slate-fill` | translucent | Reuse the hue family |
-| `--radius-sm` `md` `lg` | `--radius-sm` `--radius` `--radius-lg` | `10px` `14px` `20px` | Decide — see note |
+| `--radius-sm` `md` `lg` | `--radius-sm` `--radius` `--radius-lg` | `10px` `14px` `20px` | Adopt `6/8/12px` — see note |
 | `--space-1…8` | *(none)* | — | New tokens; see note |
 | `--color-sidebar*` (4) | *(none)* | — | New tokens |
 
@@ -115,10 +119,38 @@ correctly over any surface and inverts cleanly to white-alpha in dark mode. The
 solid `#dfe4e7` target would need a dark twin and would band against tinted grid
 cells. Keep alpha.
 
-**Radii disagree materially.** The app is much rounder — 10/14/20px against the
-target's 6/8/12px. This is a visible identity change across every card, button,
-and input, not a rounding error. Pick one deliberately; the mockups look closer
-to the smaller set.
+**Radii: adopt the tighter scale, but the tokens are not the real work.** The app
+is much rounder — 10/14/20px against the target's 6/8/12px. Softer corners read
+as consumer product; tighter corners read as operational tooling, which is what
+the mockups and the product-character list both call for. The target scale wins.
+
+Retuning the four token values would change almost nothing, though. The
+stylesheet has **97 `border-radius` declarations and only 17 use a token.** The
+other 80 are hardcoded across **14 distinct rem values** — `0.7`, `0.75`, `0.8`,
+`0.85`, `0.9`, `0.95`, `1`, `1.1`, `1.15`, `1.2`, `1.25`, `1.5`, `1.7`, `2rem`.
+The single most common radius in the file is a hardcoded `1rem` (15
+occurrences), which is not a token at all. Several of these differ by less than
+a pixel and were clearly never deliberate choices.
+
+Target scale:
+
+| Token | Value | Applies to |
+|---|---|---|
+| `--radius-sm` | `6px` | Inputs, selects, badges, small controls |
+| `--radius-md` | `8px` | Buttons, cards, menus, grid cells |
+| `--radius-lg` | `12px` | Panels, modals, elevated containers |
+| `--radius-pill` | `999px` | Pills and avatars — unchanged |
+
+Collapse the hardcoded values into those buckets: `0.7–0.85rem` → `sm`,
+`0.9–1rem` → `md`, `1.1–1.25rem` → `lg`, `1.5–2rem` → `lg`. The 15 `999px`
+declarations are pills and stay as `--radius-pill`. Keep `--radius` as an alias
+for `--radius-md` so nothing breaks mid-migration.
+
+**Migrate per component during Phase 2, not as a sweep.** When the button
+classes become a single `Button` component, roughly 20 declarations collapse
+into one; same for cards, inputs, and modals. A global find-and-replace across
+97 declarations changes every surface at once, and with no component tests and
+manual-only verification, any regression becomes impossible to attribute.
 
 **There are no spacing tokens.** `--space-*` does not exist; spacing is raw rem
 values inline throughout 6,700 lines. Introducing the scale is worthwhile but is
@@ -137,6 +169,14 @@ create a duplicate where the later one silently wins.
 
 Schwifty ships a full dark theme and it is not optional. Every token above needs
 a dark counterpart, and every page must be checked in both themes.
+
+**Decision: light-first, dark preserved.** The mockups are light-mode only and
+each redesign phase is designed and reviewed in light mode. Dark mode is not
+dropped: because it is token-driven, a phase that only edits tokens and
+token-reading rules keeps working in dark automatically. The obligation during
+Phases 2–8 is therefore narrow — add a dark value for every new token, never
+hardcode a colour — and dark-mode visual polish is deferred to Phase 9, where
+every redesigned page is reviewed in dark and its remaining defects fixed.
 
 ### How it works today
 
@@ -276,10 +316,18 @@ accent colour.
 
 - The schedule grid is the primary working surface.
 - Month uses an employee-by-day grid with compact cells, weekend shading, today
-  indication, and sticky employee/date context where feasible.
-- Week uses seven wider employee-by-day columns, not an appointment timeline.
-  Show only supported shift, time, duration, exception, conflict, and open-shift
-  data.
+  indication, and sticky employee/date context where feasible. **Month is the
+  only view that exists today** — it is the sole schedule surface the redesign
+  restyles.
+- Week and Day are **new features, not restyling.** No implementation exists in
+  the codebase; the mockups' `Month | Week | Day` control and the mobile
+  day-list are proposals. The specification below describes the target once
+  those views are built, and must not be read as describing something to
+  reskin. Building them is separate scoped work with its own approval — see
+  `scheduling-behavior.md`.
+- When built, Week uses seven wider employee-by-day columns, not an appointment
+  timeline. Show only supported shift, time, duration, exception, conflict, and
+  open-shift data.
 - Map real time codes to semantic styles after inspecting the data. Use neutral
   treatment for unknown codes.
 - Avoid unnecessary nested scrolling.

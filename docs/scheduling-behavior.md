@@ -20,44 +20,64 @@ If this document conflicts with verified behavior, stop and report the conflict.
 
 ## Schedule contexts
 
-The Main Schedule is the authoritative published schedule. Always show the
-selected schedule, date range, view, and whether content is published, draft,
-pending, or staged.
+The Main Schedule is the authoritative schedule. Always show the selected
+schedule, date range, and view.
 
-Sub-schedules are planning contexts that publish or merge changes into Main.
-Approved direction:
+**Sub-schedule assignments are live on Main.** There is no draft, publish,
+merge, promote, or conflict-resolution workflow, and none is to be built during
+this redesign. `buildProjectedSubScheduleAssignments` (`lib/sub-schedules.ts`)
+synthesises sub-schedule assignments onto the Main grid at read time, on every
+snapshot load, and `filterAssignmentsShadowedBySubSchedules` removes the real
+rows they shadow. A sub-schedule edit reaches Main as soon as its ~2.5 second
+autosave completes.
 
-- Present Main and sub-schedules as contexts in the main Schedule experience.
-- Prefer a schedule selector over a permanent Sub-Schedules sidebar item.
-- Preserve each sub-schedule's employees, shifts, codes, notes, settings, status,
-  and permissions.
-- Clearly identify unpublished content.
-- Never imply sub-schedule edits are live on Main.
+The only status axis is `is_archived`, surfaced as an "Active" toggle. Archived
+sub-schedules are read-only.
 
-These remain proposals until verified and approved:
+Consequences for the UI:
 
-- URL-backed schedule selection.
-- “Review & publish to Main” or “Review & merge” terminology.
-- A review screen for affected employees, dates, changes, and conflicts.
-- Overwrite, skip, or manual conflict resolution.
+- Never label sub-schedule content as unpublished, draft, pending, or staged —
+  no such state exists.
+- Never present publish, merge, promote, or review-and-approve actions.
+- Main-grid cells sourced from a sub-schedule are read-only and must keep
+  saying so ("managed by {subScheduleName}").
+- Preserve each sub-schedule's employees, shifts, codes, notes, settings, and
+  permissions.
+
+Phase 5 may present Main and sub-schedules as selectable contexts in the
+Schedule experience. **That is a navigation and presentation change only** and
+must preserve live projection semantics. URL-backed schedule selection is a
+frontend behavioural change requiring its own scope and tests; it is not
+implied by the selector.
 
 Do not remove the existing route or navigation until its replacement is
 complete, tested, and reachable.
 
 ## Views and navigation
 
-Month, Week, Day, and mobile presentations should share the same schedule
-context and date model unless existing behavior says otherwise.
+**Only Month exists today.** `components/monthly-scheduler.tsx` renders an
+employee-by-day grid for a calendar month and nothing else. Week, Day, and the
+mobile day-list in the mockups are **new features, not visual work.** So is the
+`Month | Week | Day` control itself — adding it before the views exist would
+create a control with no working behavior, which the non-negotiable rules
+prohibit.
 
-Preserve selected schedule, date, team, filters, timezone, locale, overnight
-handling, navigation, editing, permissions, and deep links.
+Treat building them as domain work: new date-range logic, new data shaping, new
+interaction handling, its own scope and approval. It cannot be folded into a
+redesign phase.
 
-- Month: employee-by-day roster.
-- Week: seven-day employee roster, not an appointment timeline.
-- Day/mobile: may use a selected-day employee list.
+Once they exist, all presentations should share the same schedule context and
+date model unless existing behavior says otherwise, and must preserve selected
+schedule, date, team, filters, timezone, locale, overnight handling, navigation,
+editing, permissions, and deep links.
 
-Changing presentation must not change data. URL persistence is a behavioral
-change; verify routing, defaults, invalid values, and browser history first.
+- Month: employee-by-day roster. *(exists)*
+- Week: seven-day employee roster, not an appointment timeline. *(not built)*
+- Day/mobile: may use a selected-day employee list. *(not built)*
+
+Changing the presentation of an existing view must not change data. URL
+persistence is a behavioral change; verify routing, defaults, invalid values,
+and browser history first.
 
 ## Shift integrity
 
@@ -92,18 +112,22 @@ conflict is blocking or advisory.
 Keep exceptions distinct from conflicts unless the data model combines them.
 Never rely on colour alone.
 
-## Publishing and merging
+## Saving
 
-Before changing publishing, verify:
+There is no publishing step to change. Edits reach the authoritative schedule
+through autosave, and the redesign must not introduce a publish gate in front
+of it.
 
-- What is published and whether it replaces, appends, or merges.
-- Which employees and dates are affected.
-- Validation, conflict, visibility, permission, audit, and reversibility rules.
-- Partial-failure and concurrent-change behavior.
+Save models differ by page and must be preserved as they are: the Schedule grid
+autosaves ~5s after the last edit; sub-schedule assignments autosave ~2.5s;
+Personnel autosaves on a debounced signature; Competencies, Time Codes and
+Shifts use explicit Save with Revert. Preserve each page's existing model,
+including its disabled-state logic, and never claim completion before the
+server action returns success.
 
-Name the target and scope accurately, prevent duplicate submission, show
-blocking conflicts before confirmation, and preserve context on success or
-failure. Never claim completion before the authoritative operation succeeds.
+One destructive behaviour to preserve deliberately: `saveSubScheduleAssignments`
+hard-deletes conflicting `schedule_assignments` rows, refusing only when the
+conflict is overtime-, mutual-, or loan-generated.
 
 ## Related workflows
 
@@ -155,8 +179,8 @@ server failure, stale data, concurrency, partial success, and retry states.
   unchanged.
 - **Frontend behavioral:** navigation, URL state, review steps, or cross-route
   state preservation.
-- **Domain/contract:** statuses, conflict or eligibility rules, publish
-  semantics, APIs, or schemas.
+- **Domain/contract:** statuses, conflict or eligibility rules, save and
+  projection semantics, APIs, or schemas.
 
 Visual changes may proceed in redesign phases. Frontend behavior needs explicit
 scope and tests. Domain/contract changes require separate approval.
@@ -172,8 +196,9 @@ Before each scheduling change:
 4. Report conflicts or unknowns.
 5. Implement only the authorized change type and run relevant checks.
 
-Phase 1 must verify the schedule/time-code models, publish/merge semantics,
-statuses and conflicts, view implementations, state persistence, overtime and
+Phase 1 must verify the schedule/time-code models, sub-schedule projection and
+save semantics, statuses and conflicts, the Month view implementation, state
+persistence, overtime and
 mutual rules, competency relationships, permissions, timezone handling,
 audit/rollback behavior, and expected dataset sizes.
 
