@@ -11,16 +11,16 @@
     system-ui, "Helvetica Neue", sans-serif;
 
   /* Canvas + surfaces */
-  --bg: #f5f5f7;
-  --bg-tint: #f0f0f3;
+  --bg: #fafaf8;
+  --bg-tint: #f3f3ef;
   --surface: #ffffff;
-  --surface-2: #fbfbfd;
+  --surface-2: #f5f6f5;
   --surface-strong: #ffffff;
   --surface-translucent: rgba(255, 255, 255, 0.72);
 
   /* Ink */
-  --ink: #1d1d1f;
-  --muted: #6e6e73;
+  --ink: #17232c;
+  --muted: #64727d;
   --faint: #8a8a8f;
 
   /* Lines */
@@ -28,11 +28,11 @@
   --line-strong: rgba(0, 0, 0, 0.14);
 
   /* Accent (brand orange, refined) */
-  --accent: #f97316;
-  --accent-strong: #ea580c;
+  --accent: #f35b20;
+  --accent-strong: #dc4e17;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(249, 115, 22, 0.12);
-  --accent-ring: rgba(249, 115, 22, 0.28);
+  --accent-soft: rgba(243, 91, 32, 0.12);
+  --accent-ring: rgba(243, 91, 32, 0.28);
   --team-accent: var(--accent);
 
   /* Radii */
@@ -6269,9 +6269,9 @@ button.workspace-nav-link {
    DARK MODE batch — form fields + danger/add controls
    ============================================================ */
 :root {
-  --danger: #b91c1c;
-  --danger-soft: rgba(185, 28, 28, 0.10);
-  --danger-border: rgba(185, 28, 28, 0.26);
+  --danger: #c84242;
+  --danger-soft: rgba(200, 66, 66, 0.10);
+  --danger-border: rgba(200, 66, 66, 0.26);
 }
 @media screen and (prefers-color-scheme: dark) {
   :root {
@@ -6283,9 +6283,12 @@ button.workspace-nav-link {
 
 /* Bare inputs across Personnel, Shifts, Competencies, Time codes,
    Sub-schedules now follow the token palette instead of browser white. */
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-select,
-textarea {
+/* The :not() chain here scores (0,3,1) and would outrank the single-class
+   .ui-input / .ui-select primitive rules, so those opt out explicitly. No
+   existing element carries those classes, so nothing on a current page moves. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.ui-input),
+select:not(.ui-select),
+textarea:not(.ui-input) {
   background-color: var(--surface);
   color: var(--ink);
   border-color: var(--line);

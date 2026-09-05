@@ -1,0 +1,148 @@
+/* ============================================================
+   Semantic token layer
+   ------------------------------------------------------------
+   Names the *role* a value plays so components stop reaching for
+   raw palette tokens. Wherever globals.css already owns an
+   equivalent value this aliases it with var() rather than
+   restating it — one source of truth, and dark mode is inherited
+   for free through the existing prefers-color-scheme block.
+
+   Only tokens with a literal value below need a dark counterpart;
+   they all have one in the dark block at the end of this file.
+
+   Loaded after globals.css (see app/layout.tsx). Custom properties
+   resolve at use time, so order only matters for redefinition.
+   ============================================================ */
+
+:root {
+  /* ---- Brand + interaction ------------------------------------ */
+  --color-primary: var(--accent);
+  --color-primary-hover: var(--accent-strong);
+  --color-primary-active: #c2430f;
+  --color-primary-soft: var(--accent-soft);
+  --color-primary-ink: var(--accent-ink);
+
+  /* ---- Canvas + surfaces -------------------------------------- */
+  --color-canvas: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-2);
+  --color-surface-raised: var(--surface-strong);
+
+  /* ---- Text ---------------------------------------------------- */
+  --color-text: var(--ink);
+  --color-text-secondary: var(--muted);
+  --color-text-muted: var(--faint);
+  --color-text-on-fill: #ffffff;
+
+  /* ---- Borders ------------------------------------------------- */
+  /* Alpha, not solid: composites over any surface and inverts
+     cleanly in dark. See design-system.md. */
+  --color-border: var(--line);
+  --color-border-strong: var(--line-strong);
+
+  /* ---- Sidebar ------------------------------------------------- */
+  /* Genuinely new — there is no dark navy shell today, so these have
+     nothing to alias and carry literal values in both themes. */
+  --color-sidebar: #142633;
+  --color-sidebar-raised: #1b3342;
+  --color-sidebar-text: #f7f9fa;
+  --color-sidebar-muted: #9eacb5;
+  --color-sidebar-border: rgba(255, 255, 255, 0.1);
+
+  /* ---- Status ---------------------------------------------------
+     Mapped onto the existing --hue-* family, which is already
+     redefined wholesale for dark mode. */
+  --color-success-bg: var(--hue-teal-fill);
+  --color-success-border: var(--hue-teal-border);
+  --color-success-text: var(--hue-teal-text);
+
+  --color-info-bg: var(--hue-blue-fill);
+  --color-info-border: var(--hue-blue-border);
+  --color-info-text: var(--hue-blue-text);
+
+  --color-warning-bg: var(--hue-amber-fill);
+  --color-warning-border: var(--hue-amber-border);
+  --color-warning-text: var(--hue-amber-text);
+
+  --color-leave-bg: var(--hue-rose-fill);
+  --color-leave-border: var(--hue-rose-border);
+  --color-leave-text: var(--hue-rose-text);
+
+  --color-neutral-bg: var(--hue-slate-fill);
+  --color-neutral-border: var(--hue-slate-border);
+  --color-neutral-text: var(--hue-slate-text);
+
+  /* Conflict and destructive share the danger palette today but are
+     named apart so a later phase can separate them without a sweep. */
+  --color-conflict-bg: var(--danger-soft);
+  --color-conflict-border: var(--danger-border);
+  --color-conflict-text: var(--danger);
+
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+  --color-danger-ink: #ffffff;
+
+  /* ---- Focus ---------------------------------------------------- */
+  --focus-ring-color: var(--accent-ring);
+  --focus-ring: 0 0 0 3px var(--focus-ring-color);
+  --focus-outline-width: 2px;
+
+  /* ---- Spacing --------------------------------------------------
+     Identical in both themes. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ---- Radii ----------------------------------------------------
+     Purpose-named on purpose. The legacy --radius-sm/--radius/
+     --radius-lg scale (10/14/20px) still backs ~17 existing call
+     sites and 80 more are hardcoded; retuning those names here would
+     restyle every page at once. design-system.md calls for migrating
+     per component instead, so primitives adopt the tighter target
+     scale under new names and the legacy tokens are left alone.
+     Equivalence: field = sm (6), control = md (8), surface = lg (12). */
+  --radius-field: 6px;
+  --radius-control: 8px;
+  --radius-surface: 12px;
+  --radius-round: var(--radius-pill);
+
+  /* ---- Elevation ------------------------------------------------
+     Aliases; the underlying shadows already have dark values tuned
+     heavier (0.4–0.55 alpha) in globals.css. */
+  --shadow-raised: var(--shadow-sm);
+  --shadow-overlay: var(--shadow-md);
+  --shadow-dialog: var(--shadow-lg);
+
+  /* ---- Control sizing ------------------------------------------- */
+  --control-height-sm: 30px;
+  --control-height-md: 36px;
+  --control-height-lg: 44px;
+  --control-padding-sm: 0 var(--space-2);
+  --control-padding-md: 0 var(--space-3);
+  --control-padding-lg: 0 var(--space-4);
+  --control-font-sm: 0.8125rem;
+  --control-font-md: 0.875rem;
+  --control-font-lg: 0.9375rem;
+}
+
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    /* The accent lightens in dark rather than darkening, so the
+       pressed state goes lighter than hover, not darker. */
+    --color-primary-active: #ffad7c;
+
+    --color-text-on-fill: #17232c;
+    --color-danger-ink: #1a0a0a;
+
+    --color-sidebar: #1b2733;
+    --color-sidebar-raised: #24333f;
+    --color-sidebar-text: #f7f9fa;
+    --color-sidebar-muted: #9eacb5;
+    --color-sidebar-border: rgba(255, 255, 255, 0.12);
+  }
+}

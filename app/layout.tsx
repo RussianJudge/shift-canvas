@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 
 import "./globals.css";
+import "./tokens.css";
+import "./primitives.css";
 
 export const metadata: Metadata = {
   title: "Schwifty",
