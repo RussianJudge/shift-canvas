@@ -319,14 +319,13 @@ accent colour.
   indication, and sticky employee/date context where feasible. **Month is the
   only view that exists today** — it is the sole schedule surface the redesign
   restyles.
-- Week and Day are **new features, not restyling.** No implementation exists in
-  the codebase; the mockups' `Month | Week | Day` control and the mobile
-  day-list are proposals. The specification below describes the target once
-  those views are built, and must not be read as describing something to
-  reskin. Building them is separate scoped work with its own approval — see
-  `scheduling-behavior.md`.
-- When built, Week uses seven wider employee-by-day columns, not an appointment
-  timeline. Show only supported shift, time, duration, exception, conflict, and
+- Week and Day are **new features, not restyling** — no implementation exists.
+  **Week is in scope for Phase 4**, built against the approved mockup. **Day is
+  deferred** and must not be built. The view switcher ships with Week in Phase 4
+  and offers only the views that exist. The mobile day-list remains a proposal.
+  See `scheduling-behavior.md`.
+- Week uses seven wider employee-by-day columns, not an appointment timeline.
+  Show only supported shift, time, duration, exception, conflict, and
   open-shift data.
 - Map real time codes to semantic styles after inspecting the data. Use neutral
   treatment for unknown codes.

@@ -57,14 +57,17 @@ complete, tested, and reachable.
 
 **Only Month exists today.** `components/monthly-scheduler.tsx` renders an
 employee-by-day grid for a calendar month and nothing else. Week, Day, and the
-mobile day-list in the mockups are **new features, not visual work.** So is the
-`Month | Week | Day` control itself — adding it before the views exist would
-create a control with no working behavior, which the non-negotiable rules
-prohibit.
+mobile day-list are **new features, not visual work** — new date-range logic,
+new data shaping, new interaction handling.
 
-Treat building them as domain work: new date-range logic, new data shaping, new
-interaction handling, its own scope and approval. It cannot be folded into a
-redesign phase.
+Scope as approved:
+
+- **Week is in scope for Phase 4**, built against the approved mockup.
+- **Day is deferred.** It has no approved scope and must not be built.
+- The `Month | Week | Day` control ships in Phase 4 alongside Week, as a
+  segmented control offering only the views that exist. Adding a Day tab before
+  the view exists would create a control with no working behavior, which the
+  non-negotiable rules prohibit.
 
 Once they exist, all presentations should share the same schedule context and
 date model unless existing behavior says otherwise, and must preserve selected
@@ -72,8 +75,8 @@ schedule, date, team, filters, timezone, locale, overnight handling, navigation,
 editing, permissions, and deep links.
 
 - Month: employee-by-day roster. *(exists)*
-- Week: seven-day employee roster, not an appointment timeline. *(not built)*
-- Day/mobile: may use a selected-day employee list. *(not built)*
+- Week: seven-day employee roster, not an appointment timeline. *(Phase 4)*
+- Day/mobile: may use a selected-day employee list. *(deferred)*
 
 Changing the presentation of an existing view must not change data. URL
 persistence is a behavioral change; verify routing, defaults, invalid values,

@@ -16,6 +16,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { setAdminViewingScope, signOut } from "@/app/auth-actions";
 import { BrandLockup } from "@/components/brand-lockup";
+import { Button, IconButton } from "@/components/ui/button";
+import { Select } from "@/components/ui/field";
 import type { AppNotification, AppSession } from "@/lib/types";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
@@ -36,6 +38,25 @@ export function useWorkspaceNavigationGuard(guard: WorkspaceNavigationGuard | nu
       setNavigationGuard(null);
     };
   }, [guard, setNavigationGuard]);
+}
+
+/**
+ * Initials come from whatever display name the session actually carries, which
+ * may be a single word or an email local part. Anything we cannot derive a
+ * letter from returns null and the avatar is omitted rather than faked.
+ */
+function deriveInitials(displayName: string) {
+  const words = displayName.trim().split(/[\s@._-]+/).filter(Boolean);
+
+  if (words.length === 0) {
+    return null;
+  }
+
+  const first = words[0]?.[0] ?? "";
+  const last = words.length > 1 ? words[words.length - 1]?.[0] ?? "" : "";
+  const initials = `${first}${last}`.toUpperCase();
+
+  return /^[A-Z]{1,2}$/.test(initials) ? initials : null;
 }
 
 function getCurrentMonthKey(now = new Date()) {
@@ -419,6 +440,7 @@ export function WorkspaceShell({
 
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
   const selectedMonth = searchParams.get("month");
+  const viewerInitials = useMemo(() => deriveInitials(viewer.displayName), [viewer.displayName]);
 
   const handleNavLinkNavigate = async (event: MouseEvent<HTMLAnchorElement>, href: string) => {
     setIsMobileSidebarOpen(false);
@@ -479,7 +501,7 @@ export function WorkspaceShell({
 
   return (
     <WorkspaceNavigationGuardContext.Provider value={setNavigationGuard}>
-      <main className="shell">
+      <div className="shell">
         <section
           className={`workspace-frame ${isCollapsed ? "workspace-frame--collapsed" : ""} ${
             isMobileSidebarMode ? "workspace-frame--mobile" : ""
@@ -496,15 +518,14 @@ export function WorkspaceShell({
               <span>{viewer.role === "admin" ? "Administrator" : viewer.displayName}</span>
             </div>
             {!isMobileSidebarMode ? (
-              <button
-                type="button"
+              <IconButton
                 className="sidebar-toggle"
                 onClick={() => setIsCollapsed((current) => !current)}
-                aria-label={isCollapsed ? "Expand toolbar" : "Collapse toolbar"}
+                label={isCollapsed ? "Expand toolbar" : "Collapse toolbar"}
                 aria-pressed={isCollapsed}
-              >
-                <SidebarToggleIcon collapsed={isCollapsed} />
-              </button>
+                size="sm"
+                icon={<SidebarToggleIcon collapsed={isCollapsed} />}
+              />
             ) : null}
           </div>
 
@@ -558,97 +579,108 @@ export function WorkspaceShell({
 
                 {!isAdminScopeCollapsed ? (
                   <div className="workspace-admin-scope__fields">
-                    <label className="field workspace-admin-scope__field">
-                      <span>Site</span>
-                      <select
-                        value={adminScope.activeSiteId ?? ""}
-                        onChange={(event) => {
-                          const nextSiteId = event.target.value || null;
+                    <Select
+                      label="Site"
+                      fieldClassName="workspace-admin-scope__field"
+                      value={adminScope.activeSiteId ?? ""}
+                      onChange={(event) => {
+                        const nextSiteId = event.target.value || null;
 
-                          startScopeTransition(async () => {
-                            const result = await setAdminViewingScope({
-                              siteId: nextSiteId,
-                              businessAreaId: null,
-                            });
-
-                            if (!result.ok) {
-                              return;
-                            }
-
-                            setAdminScope((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    activeSiteId: nextSiteId,
-                                    activeBusinessAreaId: null,
-                                  }
-                                : current,
-                            );
-                            router.refresh();
+                        startScopeTransition(async () => {
+                          const result = await setAdminViewingScope({
+                            siteId: nextSiteId,
+                            businessAreaId: null,
                           });
-                        }}
-                        disabled={isUpdatingScope}
-                      >
-                        <option value="">All sites</option>
-                        {adminScope.sites.map((site) => (
-                          <option key={site.id} value={site.id}>
-                            {site.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
 
-                    <label className="field workspace-admin-scope__field">
-                      <span>Business Area</span>
-                      <select
-                        value={adminScope.activeBusinessAreaId ?? ""}
-                        onChange={(event) => {
-                          const nextBusinessAreaId = event.target.value || null;
+                          if (!result.ok) {
+                            return;
+                          }
 
-                          startScopeTransition(async () => {
-                            const result = await setAdminViewingScope({
-                              siteId: adminScope.activeSiteId ?? null,
-                              businessAreaId: nextBusinessAreaId,
-                            });
+                          setAdminScope((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  activeSiteId: nextSiteId,
+                                  activeBusinessAreaId: null,
+                                }
+                              : current,
+                          );
+                          router.refresh();
+                        });
+                      }}
+                      disabled={isUpdatingScope}
+                    >
+                      <option value="">All sites</option>
+                      {adminScope.sites.map((site) => (
+                        <option key={site.id} value={site.id}>
+                          {site.name}
+                        </option>
+                      ))}
+                    </Select>
 
-                            if (!result.ok) {
-                              return;
-                            }
+                    <Select
+                      label="Business Area"
+                      fieldClassName="workspace-admin-scope__field"
+                      value={adminScope.activeBusinessAreaId ?? ""}
+                      onChange={(event) => {
+                        const nextBusinessAreaId = event.target.value || null;
 
-                            setAdminScope((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    activeBusinessAreaId: nextBusinessAreaId,
-                                  }
-                                : current,
-                            );
-                            router.refresh();
+                        startScopeTransition(async () => {
+                          const result = await setAdminViewingScope({
+                            siteId: adminScope.activeSiteId ?? null,
+                            businessAreaId: nextBusinessAreaId,
                           });
-                        }}
-                        disabled={isUpdatingScope || !adminScope.activeSiteId}
-                      >
-                        <option value="">{adminScope.activeSiteId ? "All business areas" : "Select a site first"}</option>
-                        {filteredBusinessAreas.map((businessArea) => (
-                          <option key={businessArea.id} value={businessArea.id}>
-                            {businessArea.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+
+                          if (!result.ok) {
+                            return;
+                          }
+
+                          setAdminScope((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  activeBusinessAreaId: nextBusinessAreaId,
+                                }
+                              : current,
+                          );
+                          router.refresh();
+                        });
+                      }}
+                      disabled={isUpdatingScope || !adminScope.activeSiteId}
+                    >
+                      <option value="">{adminScope.activeSiteId ? "All business areas" : "Select a site first"}</option>
+                      {filteredBusinessAreas.map((businessArea) => (
+                        <option key={businessArea.id} value={businessArea.id}>
+                          {businessArea.name}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
                 ) : null}
               </section>
             ) : null}
 
             <form action={signOut} className="workspace-session">
-              <div className="workspace-session__meta">
-                <strong>{viewer.displayName}</strong>
-                <span>{viewer.role}</span>
+              <div className="workspace-session__identity">
+                {viewerInitials ? (
+                  <span className="workspace-session__avatar" aria-hidden="true">
+                    {viewerInitials}
+                  </span>
+                ) : null}
+                <div className="workspace-session__meta">
+                  <strong>{viewer.displayName}</strong>
+                  <span>{viewer.role}</span>
+                </div>
               </div>
-              <button type="submit" className="ghost-button workspace-session__signout">
+              <Button
+                type="submit"
+                variant="secondary"
+                size="sm"
+                fullWidth
+                className="workspace-session__signout"
+              >
                 Sign out
-              </button>
+              </Button>
             </form>
           </div>
         </aside>
@@ -662,28 +694,26 @@ export function WorkspaceShell({
           />
         ) : null}
 
-        <div className="workspace-content">
+        <main className="workspace-content">
           {isMobileSidebarMode ? (
             <div className="workspace-mobile-toolbar">
-              <button
-                type="button"
-                className="ghost-button workspace-mobile-toggle"
+              <Button
+                variant="secondary"
+                className="workspace-mobile-toggle"
                 onClick={() => setIsMobileSidebarOpen((current) => !current)}
                 aria-expanded={isMobileSidebarOpen}
                 aria-controls="workspace-primary-navigation"
               >
-                <span className="workspace-nav-icon workspace-mobile-toggle__icon">
-                  <MobileMenuIcon />
-                </span>
-                <strong>Menu</strong>
-              </button>
+                <MobileMenuIcon />
+                Menu
+              </Button>
             </div>
           ) : null}
 
           {children}
-        </div>
+        </main>
       </section>
-      </main>
+      </div>
     </WorkspaceNavigationGuardContext.Provider>
   );
 }

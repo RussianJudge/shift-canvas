@@ -1,0 +1,379 @@
+/* ============================================================
+   Application shell — Phase 3
+   ------------------------------------------------------------
+   Scoped to the shared frame only: sidebar, navigation, workspace
+   and account controls, page canvas, and page-header chrome. No
+   page content is styled here.
+
+   Loaded last (see app/layout.tsx) so it wins on source order
+   against the shell rules already scattered through globals.css.
+   Specificity is matched selector-for-selector where a legacy rule
+   is more specific; there is no !important and no cascade layer.
+   ============================================================ */
+
+/* ---- Frame -------------------------------------------------- */
+
+.workspace-frame {
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+
+/* Both rules are (0,1,0) and this file is later in source order than
+   globals.css, so the collapsed width has to be restated here or the base
+   rule above silently wins and the grid column stays expanded. */
+.workspace-frame--collapsed {
+  grid-template-columns: 4.75rem minmax(0, 1fr);
+}
+
+/* ---- Sidebar ------------------------------------------------ */
+
+.workspace-sidebar {
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-3);
+  background: var(--color-sidebar);
+  border-right: 1px solid var(--color-sidebar-border);
+  color: var(--color-sidebar-text);
+}
+
+/* globals.css sets the sidebar background again inside a dark-mode
+   media query; this file is later in source order, so the navy holds
+   in both themes. Restated for the same reason. */
+@media screen and (prefers-color-scheme: dark) {
+  .workspace-sidebar {
+    background: var(--color-sidebar);
+  }
+}
+
+.workspace-brand-row {
+  padding-inline: var(--space-2);
+}
+
+.workspace-brand {
+  gap: var(--space-1);
+  padding: 0;
+}
+
+.workspace-brand span,
+.workspace-sidebar .panel-eyebrow {
+  color: var(--color-sidebar-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+}
+
+.sidebar-toggle.ui-button {
+  background: transparent;
+  border-color: var(--color-sidebar-border);
+  color: var(--color-sidebar-muted);
+}
+
+.sidebar-toggle.ui-button:hover:not(:disabled) {
+  background: var(--color-sidebar-raised);
+  border-color: var(--color-sidebar-border);
+  color: var(--color-sidebar-text);
+}
+
+/* The collapse control is a toggle, so it carries aria-pressed; the
+   primitive's generic pressed treatment is tuned for a light surface. */
+.sidebar-toggle.ui-button[aria-pressed="true"] {
+  background: var(--color-sidebar-raised);
+  color: var(--color-sidebar-text);
+}
+
+.sidebar-toggle.ui-button:focus-visible {
+  outline-color: var(--color-sidebar-text);
+}
+
+/* ---- Navigation --------------------------------------------- */
+
+.workspace-nav {
+  gap: 2px;
+}
+
+.workspace-nav-link {
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  border-color: transparent;
+  color: var(--color-sidebar-muted);
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.workspace-nav-link:hover {
+  background: var(--color-sidebar-raised);
+  color: var(--color-sidebar-text);
+}
+
+.workspace-nav-link:focus-visible {
+  outline: var(--focus-outline-width) solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* The icon chip is gone — the mockups use bare line icons — but the
+   element still sizes and aligns the glyph. */
+.workspace-nav-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.workspace-nav-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.workspace-nav-link strong {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* Selected state is carried by aria-current on the link itself, so the
+   orange fill is reinforcement rather than the only signal. Weight
+   shifts too, for anyone who cannot separate the hues. */
+.workspace-nav-link--active,
+.workspace-nav-link--active:hover {
+  background: var(--color-primary);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-primary-ink);
+}
+
+.workspace-nav-link--active .workspace-nav-icon {
+  background: transparent;
+  border: 0;
+  color: var(--color-primary-ink);
+}
+
+.workspace-nav-link--active strong {
+  color: var(--color-primary-ink);
+  font-weight: 600;
+}
+
+.workspace-nav-notifications {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-sidebar-border);
+}
+
+/* Only ever rendered when a real unread count is supplied. */
+.workspace-notifications__badge {
+  min-width: 1.1rem;
+  height: 1.1rem;
+  border-radius: var(--radius-round);
+  background: var(--color-primary);
+  color: var(--color-primary-ink);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+/* ---- Workspace control -------------------------------------- */
+
+.workspace-sidebar-bottom {
+  gap: var(--space-2);
+}
+
+.workspace-admin-scope {
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-sidebar-raised);
+  border: 1px solid var(--color-sidebar-border);
+  border-radius: var(--radius-control);
+}
+
+.workspace-admin-scope__heading strong {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-sidebar-text);
+}
+
+.workspace-admin-scope__heading span {
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  color: var(--color-sidebar-muted);
+}
+
+.workspace-admin-scope__chevron {
+  width: 1.4rem;
+  height: 1.4rem;
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-sidebar-muted);
+  border-radius: var(--radius-field);
+}
+
+.workspace-admin-scope__toggle:hover .workspace-admin-scope__chevron {
+  background: var(--color-sidebar);
+  border-color: var(--color-sidebar-border);
+  color: var(--color-sidebar-text);
+}
+
+.workspace-admin-scope__toggle:focus-visible {
+  outline: var(--focus-outline-width) solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-field);
+}
+
+.workspace-admin-scope__fields {
+  gap: var(--space-2);
+}
+
+.workspace-admin-scope__field .ui-field__label {
+  color: var(--color-sidebar-muted);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workspace-admin-scope__field .ui-select {
+  height: var(--control-height-sm);
+  font-size: var(--control-font-sm);
+}
+
+/* ---- Account control ---------------------------------------- */
+
+.workspace-session {
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) 0;
+  border-top: 1px solid var(--color-sidebar-border);
+}
+
+/* The nav is the only part that should absorb a short viewport; the brand,
+   workspace and account blocks stay put and the list scrolls between them. */
+.workspace-sidebar .workspace-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+}
+
+.workspace-sidebar {
+  overflow-y: hidden;
+}
+
+.workspace-session__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Initials are derived from the session display name, never hardcoded,
+   and the block renders without an avatar when none can be derived. */
+.workspace-session__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-round);
+  background: var(--color-sidebar-raised);
+  border: 1px solid var(--color-sidebar-border);
+  color: var(--color-sidebar-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.workspace-session__meta {
+  min-width: 0;
+}
+
+.workspace-session__meta strong {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-sidebar-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-session__meta span {
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  color: var(--color-sidebar-muted);
+}
+
+.workspace-session__signout.ui-button {
+  background: transparent;
+  border-color: var(--color-sidebar-border);
+  color: var(--color-sidebar-muted);
+}
+
+.workspace-session__signout.ui-button:hover:not(:disabled) {
+  background: var(--color-sidebar-raised);
+  color: var(--color-sidebar-text);
+}
+
+.workspace-session__signout.ui-button:focus-visible {
+  outline-color: var(--color-sidebar-text);
+}
+
+/* ---- Page canvas -------------------------------------------- */
+
+.workspace-content {
+  padding: var(--space-4);
+  background: var(--color-canvas);
+}
+
+/* ---- Page frame + header ------------------------------------
+   .panel-frame / .panel-heading / .panel-title are the shared page
+   chrome every route already renders. Restyling them here changes no
+   page markup. */
+
+.panel-frame {
+  border-radius: var(--radius-surface);
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-raised);
+}
+
+.panel-heading {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.panel-title {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+}
+
+/* ---- Collapsed sidebar --------------------------------------
+   globals.css carries these as (0,2,0) descendant rules, some inside
+   media queries. Matched here rather than escalated. */
+
+.workspace-sidebar--collapsed .workspace-nav-link {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.workspace-sidebar--collapsed .workspace-session {
+  padding-inline: 0;
+}
+
+.workspace-sidebar--collapsed .workspace-session__identity {
+  justify-content: center;
+}
+
+.workspace-sidebar--collapsed .workspace-brand-row {
+  justify-content: center;
+}
+
+/* ---- Responsive ---------------------------------------------
+   The mobile drawer is Phase 9 work; these keep it functional and
+   on-token without redesigning it. */
+
+@media (max-width: 600px) {
+  .workspace-sidebar--mobile {
+    background: var(--color-sidebar);
+  }
+
+  .workspace-mobile-toggle.ui-button {
+    gap: var(--space-2);
+  }
+}

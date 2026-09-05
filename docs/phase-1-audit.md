@@ -325,7 +325,8 @@ navigation and presentation change only.**
 | Token consolidation, radii, primitives | **Visual** |
 | URL-backed schedule selection | **Frontend behavioural** |
 | Sub-Schedules selector on `/schedule` | **Frontend behavioural** |
-| Week / Day views, mobile day-list | **Frontend behavioural** (new feature) |
+| Week view + view switcher | **Frontend behavioural** (new feature) — Phase 4 |
+| Day view, mobile day-list | **Deferred** — not in this redesign |
 | KPI stat row (Coverage / Open / Conflicts) | **Domain** — no verified formula exists |
 | Publish / merge sub-schedules | **Not in scope** — decided against; no workflow will be built |
 | Auto-fill | **Domain** — no implementation |
@@ -383,8 +384,9 @@ Recommended primitives, ordered by duplication removed:
 6. **`Toolbar` / `PageHeader`** — `workspace-toolbar--actions` +
    `planner-actions` + `toolbar-status-wrap`, repeated per page.
 7. **`EmptyState`** — exists as a class, not a component; Profile diverges.
-8. **`SegmentedControl`** — does not exist; needed for Month/Week/Day and the
-   Metrics tabs *if and when* those views are built.
+8. **`SegmentedControl`** — does not exist. Correctly deferred in Phase 2 for
+   want of a real adoption; **create or finalize it in Phase 4**, where the
+   Month/Week switcher is its first genuine use.
 9. **`EmployeeCell`** — avatar initials + name + role, in the mockups on four
    pages; avatar initials do not exist today.
 
@@ -635,10 +637,13 @@ grouped rows.
 
 **Commit boundary.** One per page.
 
-### Phase 4 — Schedule month view
+### Phase 4 — Schedule month view, plus Week
 
-**Scope.** Restyle the **existing month grid only.** No Week, no Day, no tabs,
-no KPI row, no Auto-fill, no Publish.
+**Scope.** Restyle the existing month grid, and build **Week** against the
+approved mockup with a `SegmentedControl` offering only the views that exist.
+**No Day view**, no KPI row, no Auto-fill, no Publish. Week is a new feature
+with its own date-range logic and data shaping — scope it as such, not as
+restyling.
 
 **Files.** `components/monthly-scheduler.tsx`,
 `components/schedule-assignment-modal.tsx`, `app/globals.css`
