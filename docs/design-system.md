@@ -278,6 +278,22 @@ page touched by a redesign phase should be looked at in both, with particular
 attention to borders, shadows, disabled states, and anything layered on the
 accent colour.
 
+## Page frames
+
+Top-level page frames are full-workspace structural regions, not cards. Do not
+apply a max-width, outer border, outer radius, shadow, or isolated surface
+background to an entire page. Use surface treatment for meaningful internal
+sections only.
+
+The page root is `.panel-frame` (and `.panel`, which Profile still uses). It
+fills the workspace width, takes its height from `min-height` against the
+scrolling `.workspace-content` — never a viewport unit — and lets the canvas
+show through. Readable gutters come from the shell's `.workspace-content`
+padding, not from the page.
+
+Tables, forms, posting rows, metric cards, dialogs, and other focused sections
+keep their own surface, border, and radius where that aids scanning.
+
 ## Typography and surfaces
 
 - Use the existing sans-serif typeface; otherwise prefer Inter, Geist, or a

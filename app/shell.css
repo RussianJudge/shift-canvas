@@ -323,12 +323,28 @@
 /* ---- Page frame + header ------------------------------------
    .panel-frame / .panel-heading / .panel-title are the shared page
    chrome every route already renders. Restyling them here changes no
-   page markup. */
+   page markup.
 
-.panel-frame {
-  border-radius: var(--radius-surface);
-  border-color: var(--color-border);
-  box-shadow: var(--shadow-raised);
+   The top-level frame is a structural region, not a card: it fills the
+   workspace, shows the canvas through, and carries no border, radius,
+   shadow, max-width or centring margin. Meaningful internal sections
+   (tables, posting rows, metric cards, dialogs) keep their own surface
+   treatment — see docs/design-system.md.
+
+   `.panel` is the same page root under a different name; Profile is its
+   only caller. Height comes from min-height against the scrolling
+   .workspace-content, never a viewport unit. */
+
+.panel-frame,
+.panel {
+  min-height: 100%;
+  min-width: 0;
+  max-width: none;
+  margin-inline: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .panel-heading {
@@ -369,6 +385,16 @@
    on-token without redesigning it. */
 
 @media (max-width: 600px) {
+  /* The sidebar becomes an absolutely-positioned drawer here, so the grid must
+     collapse to one column. globals.css already says so, but its rule and the
+     base .workspace-frame rule above are both (0,1,0) and this file loads
+     later — a media query adds no specificity, so it has to be restated or the
+     232px track keeps squeezing the page. */
+  .workspace-frame,
+  .workspace-frame--collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .workspace-sidebar--mobile {
     background: var(--color-sidebar);
   }
