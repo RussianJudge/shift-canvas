@@ -18,9 +18,13 @@ import { setAdminViewingScope, signOut } from "@/app/auth-actions";
 import { BrandLockup } from "@/components/brand-lockup";
 import { Button, IconButton } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
+import {
+  SIDEBAR_COLLAPSE_STORAGE_KEY,
+  resolveSidebarCollapseForViewport,
+  serializeSidebarCollapsePreference,
+} from "@/lib/sidebar-preference";
 import type { AppNotification, AppSession } from "@/lib/types";
 
-const SIDEBAR_COLLAPSE_STORAGE_KEY = "shift-canvas-sidebar-collapsed";
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
 
@@ -322,6 +326,8 @@ export function WorkspaceShell({
   const [isAdminScopeCollapsed, setIsAdminScopeCollapsed] = useState(true);
   const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
   const [isUpdatingScope, startScopeTransition] = useTransition();
+  /** null until the first viewport measurement, so mount counts as a change. */
+  const wasMobileSidebarModeRef = useRef<boolean | null>(null);
   const navigationGuardRef = useRef<WorkspaceNavigationGuard | null>(null);
   const setNavigationGuard = useCallback<WorkspaceNavigationGuardSetter>((guard) => {
     navigationGuardRef.current = guard;
@@ -336,13 +342,24 @@ export function WorkspaceShell({
       return;
     }
 
-    const storedPreference = window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY);
-
     const updateSidebarMode = () => {
       const nextIsMobileSidebarMode = window.innerWidth < MOBILE_SIDEBAR_MAX_WIDTH;
+      const nextIsCollapsed = resolveSidebarCollapseForViewport({
+        isMobileSidebarMode: nextIsMobileSidebarMode,
+        wasMobileSidebarMode: wasMobileSidebarModeRef.current,
+        // Read per call. Reading once when the effect mounts goes stale the
+        // moment the user toggles the sidebar, and every later resize would
+        // restore — and re-persist — the preference they just replaced.
+        storedPreference: window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY),
+      });
+
+      wasMobileSidebarModeRef.current = nextIsMobileSidebarMode;
       setIsMobileSidebarMode(nextIsMobileSidebarMode);
       setIsMobileSidebarOpen(false);
-      setIsCollapsed(nextIsMobileSidebarMode ? false : storedPreference === "true");
+
+      if (nextIsCollapsed !== null) {
+        setIsCollapsed(nextIsCollapsed);
+      }
     };
 
     updateSidebarMode();
@@ -362,7 +379,10 @@ export function WorkspaceShell({
       return;
     }
 
-    window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, String(isCollapsed));
+    window.localStorage.setItem(
+      SIDEBAR_COLLAPSE_STORAGE_KEY,
+      serializeSidebarCollapsePreference(isCollapsed),
+    );
   }, [isCollapsed, isMobileSidebarMode]);
 
   useEffect(() => {
