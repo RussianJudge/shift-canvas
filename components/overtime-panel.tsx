@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 import {
@@ -11,6 +10,10 @@ import {
   releaseOvertimePosting,
 } from "@/app/actions";
 import { AppDateSelector } from "@/components/app-date-selector";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Select, TextInput } from "@/components/ui/field";
+import { Modal } from "@/components/ui/modal";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
@@ -502,74 +505,67 @@ function OvertimeEligibilityReportModal({
   eligibleEmployees: Array<{ id: string; name: string; scheduleName: string }>;
   onClose: () => void;
 }) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section className="assignment-modal overtime-eligibility-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Eligible employees</h2>
-            <p className="assignment-modal__context">
-              Employees currently eligible to claim this overtime posting.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
-            Close
-          </button>
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Overtime"
+      title="Eligible employees"
+      description="Employees currently eligible to claim this overtime posting."
+      size="lg"
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <div className="overtime-summary-grid">
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Schedule</span>
+          <strong>
+            {posting.targetMode === "main" ? `Main schedule · Shift ${posting.scheduleName}` : posting.scheduleName}
+          </strong>
         </div>
-
-        <div className="overtime-eligibility-modal__summary">
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Schedule</span>
-            <strong>
-              {posting.targetMode === "main" ? `Main schedule · Shift ${posting.scheduleName}` : posting.scheduleName}
-            </strong>
-          </div>
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Assignment</span>
-            <strong>
-              {posting.competencyCode} · {posting.competencyLabel}
-            </strong>
-          </div>
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Dates</span>
-            <strong>
-              {formatShortDate(posting.dates[0])} - {formatShortDate(posting.dates[posting.dates.length - 1])}
-            </strong>
-          </div>
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Shift count</span>
-            <strong>{getShiftLabel(posting.shiftKind, posting.dates.length)}</strong>
-          </div>
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Open slots</span>
-            <strong>
-              {posting.openShifts} open shift{posting.openShifts === 1 ? "" : "s"}
-            </strong>
-          </div>
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Assignment</span>
+          <strong>
+            {posting.competencyCode} · {posting.competencyLabel}
+          </strong>
         </div>
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Dates</span>
+          <strong>
+            {formatShortDate(posting.dates[0])} - {formatShortDate(posting.dates[posting.dates.length - 1])}
+          </strong>
+        </div>
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Shift count</span>
+          <strong>{getShiftLabel(posting.shiftKind, posting.dates.length)}</strong>
+        </div>
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Open slots</span>
+          <strong>
+            {posting.openShifts} open shift{posting.openShifts === 1 ? "" : "s"}
+          </strong>
+        </div>
+      </div>
 
-        {eligibleEmployees.length > 0 ? (
-          <div className="overtime-eligibility-modal__list">
-            {eligibleEmployees.map((employee) => (
-              <div key={employee.id} className="overtime-eligibility-modal__row">
-                <strong>{employee.name}</strong>
-                <span>Shift {employee.scheduleName}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <strong>No eligible employees.</strong>
-            <span>No employees currently meet the claim requirements for this posting.</span>
-          </div>
-        )}
-      </section>
-    </div>,
-    document.body,
+      {eligibleEmployees.length > 0 ? (
+        <div className="overtime-modal-list">
+          {eligibleEmployees.map((employee) => (
+            <div key={employee.id} className="overtime-modal-list__row">
+              <strong>{employee.name}</strong>
+              <span>Shift {employee.scheduleName}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">
+          <strong>No eligible employees.</strong>
+          <span>No employees currently meet the claim requirements for this posting.</span>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -586,41 +582,34 @@ function NightShiftTurnaroundModal({
   onConfirm: () => void;
   isSubmitting: boolean;
 }) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onCancel}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Confirm modified schedule</h2>
-            <p className="assignment-modal__context">
-              {employeeName} is assigned to a night shift immediately before the first overtime day shift on{" "}
-              {formatShortDate(posting.dates[0])}.
-            </p>
-          </div>
-        </div>
-
-        <div className="empty-state">
-          <strong>Confirm before claiming</strong>
-          <span>
-            They must be on a modified schedule and able to work this first overtime shift before the claim is saved.
-          </span>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Overtime"
+      title="Confirm modified schedule"
+      description={`${employeeName} is assigned to a night shift immediately before the first overtime day shift on ${formatShortDate(posting.dates[0])}.`}
+      size="sm"
+      // The claim is in flight; dismissing here would strand the request.
+      dismissible={!isSubmitting}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel} disabled={isSubmitting}>
             Cancel
-          </button>
-          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+          </Button>
+          <Button variant="primary" onClick={onConfirm} loading={isSubmitting}>
             {isSubmitting ? "Claiming..." : "Confirm and claim"}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    >
+      <div className="overtime-modal-note">
+        <strong>Confirm before claiming</strong>
+        <span>
+          They must be on a modified schedule and able to work this first overtime shift before the claim is saved.
+        </span>
+      </div>
+    </Modal>
   );
 }
 
@@ -635,67 +624,57 @@ function DeleteOvertimePostingModal({
   onConfirm: () => void;
   isSubmitting: boolean;
 }) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
   const claimCount = posting.claimedEmployeeIds.length;
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onCancel}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Delete overtime posting?</h2>
-            <p className="assignment-modal__context">
-              {claimCount > 0
-                ? `Delete this posting and release ${claimCount} claim${claimCount === 1 ? "" : "s"}? This will remove the posting and clear the related overtime assignments.`
-                : "Delete this posting? This will remove it from the overtime board."}
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
-            Close
-          </button>
-        </div>
-
-        <div className="overtime-eligibility-modal__summary">
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Schedule</span>
-            <strong>
-              {posting.targetMode === "main" ? `Main schedule · Shift ${posting.scheduleName}` : posting.scheduleName}
-            </strong>
-          </div>
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Assignment</span>
-            <strong>
-              {posting.competencyCode} · {posting.competencyLabel}
-            </strong>
-          </div>
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Dates</span>
-            <strong>
-              {formatShortDate(posting.dates[0])} - {formatShortDate(posting.dates[posting.dates.length - 1])}
-            </strong>
-          </div>
-          <div className="overtime-eligibility-modal__summary-row">
-            <span className="assignment-modal__label">Claims</span>
-            <strong>
-              {claimCount > 0 ? posting.claimedByNames.join(", ") : "No claims"}
-            </strong>
-          </div>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Overtime"
+      title="Delete overtime posting?"
+      description={
+        claimCount > 0
+          ? `Delete this posting and release ${claimCount} claim${claimCount === 1 ? "" : "s"}? This will remove the posting and clear the related overtime assignments.`
+          : "Delete this posting? This will remove it from the overtime board."
+      }
+      // The delete is in flight and is not reversible; hold the dialog open.
+      dismissible={!isSubmitting}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel} disabled={isSubmitting}>
             Keep posting
-          </button>
-          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} loading={isSubmitting}>
             {isSubmitting ? "Deleting..." : "Delete posting"}
-          </button>
+          </Button>
+        </>
+      }
+    >
+      <div className="overtime-summary-grid">
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Schedule</span>
+          <strong>
+            {posting.targetMode === "main" ? `Main schedule · Shift ${posting.scheduleName}` : posting.scheduleName}
+          </strong>
         </div>
-      </section>
-    </div>,
-    document.body,
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Assignment</span>
+          <strong>
+            {posting.competencyCode} · {posting.competencyLabel}
+          </strong>
+        </div>
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Dates</span>
+          <strong>
+            {formatShortDate(posting.dates[0])} - {formatShortDate(posting.dates[posting.dates.length - 1])}
+          </strong>
+        </div>
+        <div className="overtime-summary-row">
+          <span className="overtime-summary-row__label">Claims</span>
+          <strong>{claimCount > 0 ? posting.claimedByNames.join(", ") : "No claims"}</strong>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -736,55 +715,52 @@ function MyOvertimeClaimsModal({
   onRelease: (claim: MyOvertimeClaimRow) => void;
   releasingClaimId: string | null;
 }) {
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section
-        className="assignment-modal overtime-my-claims-modal"
-        aria-label="My overtime claims"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Overtime</span>
-            <h2 className="assignment-modal__title">My claims</h2>
-            <p className="assignment-modal__context">Future overtime claims for {employeeName} after today.</p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-
-        {claims.length > 0 ? (
-          <div className="overtime-my-claims-modal__list">
-            {claims.map((claim) => (
-              <div key={claim.id} className="overtime-my-claims-modal__row">
-                <div>
-                  <strong>{formatShortDate(claim.date)}</strong>
-                  <span>{claim.targetLabel}</span>
-                </div>
-                <div className="overtime-my-claims-modal__actions">
-                  <span className="legend-pill legend-pill--slate">{claim.assignmentLabel}</span>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => onRelease(claim)}
-                    disabled={releasingClaimId === claim.id}
-                  >
-                    {releasingClaimId === claim.id ? "Releasing..." : "Release"}
-                  </button>
-                </div>
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Overtime"
+      title="My claims"
+      description={`Future overtime claims for ${employeeName} after today.`}
+      size="lg"
+      // A release is in flight; closing mid-request hides its outcome.
+      dismissible={releasingClaimId === null}
+      footer={
+        <Button variant="secondary" onClick={onClose} disabled={releasingClaimId !== null}>
+          Close
+        </Button>
+      }
+    >
+      {claims.length > 0 ? (
+        <div className="overtime-modal-list">
+          {claims.map((claim) => (
+            <div key={claim.id} className="overtime-modal-list__row">
+              <div>
+                <strong>{formatShortDate(claim.date)}</strong>
+                <span> · {claim.targetLabel}</span>
               </div>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <strong>No future claims.</strong>
-            <span>You do not have any overtime claims after today.</span>
-          </div>
-        )}
-      </section>
-    </div>,
-    document.body,
+              <div className="overtime-modal-list__actions">
+                <Badge tone="neutral">{claim.assignmentLabel}</Badge>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onRelease(claim)}
+                  loading={releasingClaimId === claim.id}
+                  disabled={releasingClaimId !== null && releasingClaimId !== claim.id}
+                >
+                  {releasingClaimId === claim.id ? "Releasing..." : "Release"}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">
+          <strong>No future claims.</strong>
+          <span>You do not have any overtime claims after today.</span>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -836,26 +812,21 @@ function OvertimeCalendarModal({
     calendarCells.push(null);
   }
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section
-        className="assignment-modal overtime-calendar-modal"
-        aria-label="Overtime calendar"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Overtime</span>
-            <h2 className="assignment-modal__title">Calendar</h2>
-            <p className="assignment-modal__context">
-              {monthLabel} postings using the current filters.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Overtime"
+      title="Calendar"
+      description={`${monthLabel} postings using the current filters.`}
+      size="lg"
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <>
         <div className="overtime-calendar-modal__scroll">
           <div className="overtime-calendar-grid">
             {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => (
@@ -899,9 +870,8 @@ function OvertimeCalendarModal({
             <span>Try changing the overtime filters or showing all postings.</span>
           </div>
         ) : null}
-      </section>
-    </div>,
-    document.body,
+      </>
+    </Modal>
   );
 }
 
@@ -1013,83 +983,94 @@ function ManualOvertimePostingModal({
         .filter((entry) => entry.date >= todayKey)
     : [];
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Create Manual Overtime Posting</h2>
-            <p className="assignment-modal__context">
-              {targetMode === "main"
-                ? "Pick one team, one competency, and dates from the same shift segment. The posting will stay on the board until it is claimed or deleted."
-                : "Pick one sub-schedule, one allowed competency, and dates. The posting will stay on the board until it is claimed or deleted."}
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
-            Close
-          </button>
-        </div>
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Overtime"
+      title="Create manual overtime posting"
+      description={
+        targetMode === "main"
+          ? "Pick one team, one competency, and dates from the same shift segment. The posting will stay on the board until it is claimed or deleted."
+          : "Pick one sub-schedule, one allowed competency, and dates. The posting will stay on the board until it is claimed or deleted."
+      }
+      size="lg"
+      // Creation is in flight; closing would hide whether it succeeded.
+      dismissible={!isSubmitting}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onSubmit} loading={isSubmitting}>
+            {isSubmitting ? "Creating..." : "Create posting"}
+          </Button>
+        </>
+      }
+    >
+      <>
+        <div className="overtime-modal-fields">
+          <Select
+            label="Month"
+            value={selectedMonth}
+            onChange={(event) => onMonthChange(event.target.value)}
+          >
+            {availableMonths.map((month) => (
+              <option key={month} value={month}>
+                {formatMonthLabel(month)}
+              </option>
+            ))}
+          </Select>
 
-        <div className="metrics-transfer-grid">
-          <label className="field">
-            <span>Month</span>
-            <select value={selectedMonth} onChange={(event) => onMonthChange(event.target.value)}>
-              {availableMonths.map((month) => (
-                <option key={month} value={month}>
-                  {formatMonthLabel(month)}
+          <Select
+            label="Schedule"
+            value={selectedTargetKey}
+            onChange={(event) => onTargetChange(event.target.value as OvertimeTargetKey)}
+          >
+            {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}
+            <optgroup label="Sub-schedules">
+              {availableSubSchedules.map((subSchedule) => (
+                <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
+                  {subSchedule.name}
                 </option>
               ))}
-            </select>
-          </label>
-
-          <label className="field">
-            <span>Schedule</span>
-            <select value={selectedTargetKey} onChange={(event) => onTargetChange(event.target.value as OvertimeTargetKey)}>
-              {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}
-              <optgroup label="Sub-schedules">
-                {availableSubSchedules.map((subSchedule) => (
-                  <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
-                    {subSchedule.name}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </label>
+            </optgroup>
+          </Select>
 
           {targetMode === "main" ? (
-            <label className="field">
-              <span>Team</span>
-              <select value={selectedMainScheduleId} onChange={(event) => onMainScheduleChange(event.target.value)}>
-                {snapshot.schedules.map((schedule) => (
-                  <option key={schedule.id} value={schedule.id}>
-                    Shift {schedule.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          <label className="field">
-            <span>Assignment</span>
-            <select value={selectedAssignmentKey} onChange={(event) => onAssignmentChange(event.target.value)}>
-              {availableAssignments.map((assignment) => (
-                <option key={assignment.key} value={assignment.key}>
-                  {assignment.code} · {assignment.label}
+            <Select
+              label="Team"
+              value={selectedMainScheduleId}
+              onChange={(event) => onMainScheduleChange(event.target.value)}
+            >
+              {snapshot.schedules.map((schedule) => (
+                <option key={schedule.id} value={schedule.id}>
+                  Shift {schedule.name}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          ) : null}
 
-          <label className="field">
-            <span>Openings</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={selectedSlotCount}
-              onChange={(event) => onSlotCountChange(Math.max(1, Number(event.target.value || 1)))}
-            />
-          </label>
+          <Select
+            label="Assignment"
+            value={selectedAssignmentKey}
+            onChange={(event) => onAssignmentChange(event.target.value)}
+          >
+            {availableAssignments.map((assignment) => (
+              <option key={assignment.key} value={assignment.key}>
+                {assignment.code} · {assignment.label}
+              </option>
+            ))}
+          </Select>
+
+          <TextInput
+            label="Openings"
+            type="number"
+            min={1}
+            step={1}
+            value={selectedSlotCount}
+            onChange={(event) => onSlotCountChange(Math.max(1, Number(event.target.value || 1)))}
+          />
         </div>
 
         <div className="mutual-picker">
@@ -1138,14 +1119,8 @@ function ManualOvertimePostingModal({
           )}
         </div>
 
-        <div className="metrics-transfer-actions">
-          <button type="button" className="primary-button" onClick={onSubmit} disabled={isSubmitting}>
-            {isSubmitting ? "Creating..." : "Create posting"}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+      </>
+    </Modal>
   );
 }
 
@@ -2201,65 +2176,55 @@ export function OvertimePanel({
     <section className="panel-frame">
       <div className="panel-heading panel-heading--split">
         <h1 className="panel-title">Overtime</h1>
-        {availableMonths.length > 0 ? (
-          <AppDateSelector
-            mode="month"
-            value={snapshot.month}
-            label="Overtime month"
-            availableMonths={availableMonths}
-            onChange={(nextMonth) => router.push(`/overtime?month=${nextMonth}`)}
-          />
-        ) : (
-          <div className="field field--static">
-            <span>Month</span>
-            <strong>No overtime months</strong>
+        {availableMonths.length === 0 ? (
+          <div className="overtime-static-field">
+            <span className="overtime-static-field__label">Month</span>
+            <strong className="overtime-static-field__value">No overtime months</strong>
           </div>
-        )}
+        ) : null}
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--overtime">
+      <div className="overtime-toolbar">
+        <div className="overtime-toolbar__filters">
         {viewer.role === "worker" ? (
-          <div className="field field--static">
-            <span>Claim As</span>
-            <strong>{claimingEmployee?.name ?? viewer.displayName}</strong>
+          <div className="overtime-static-field">
+            <span className="overtime-static-field__label">Claim as</span>
+            <strong className="overtime-static-field__value">
+              {claimingEmployee?.name ?? viewer.displayName}
+            </strong>
           </div>
         ) : (
-          <label className="field">
-            <span>Claim As</span>
-            <select
-              value={claimingEmployeeId}
-              onChange={(event) => setClaimingEmployeeId(event.target.value)}
-            >
-              {allEmployees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Claim as"
+            value={claimingEmployeeId}
+            onChange={(event) => setClaimingEmployeeId(event.target.value)}
+          >
+            {allEmployees.map((employee) => (
+              <option key={employee.id} value={employee.id}>
+                {employee.name}
+              </option>
+            ))}
+          </Select>
         )}
 
-        <label className="field">
-          <span>Schedule</span>
-          <select
-            value={selectedTargetKey}
-            onChange={(event) => setSelectedTargetKey(event.target.value as OvertimeTargetKey)}
-          >
-            <option value="all">All</option>
-            {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}
-            <optgroup label="Sub-schedules">
-              {availableSubSchedules.map((subSchedule) => (
-                <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
-                  {subSchedule.name}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-        </label>
+        <Select
+          label="Schedule"
+          value={selectedTargetKey}
+          onChange={(event) => setSelectedTargetKey(event.target.value as OvertimeTargetKey)}
+        >
+          <option value="all">All</option>
+          {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}
+          <optgroup label="Sub-schedules">
+            {availableSubSchedules.map((subSchedule) => (
+              <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
+                {subSchedule.name}
+              </option>
+            ))}
+          </optgroup>
+        </Select>
 
-        <label className="field">
-          <span>Assignment</span>
-          <select
+          <Select
+            label="Assignment"
             value={selectedAssignmentFilter}
             onChange={(event) => setSelectedAssignmentFilter(event.target.value)}
           >
@@ -2294,60 +2259,57 @@ export function OvertimePanel({
                 {assignment.label}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
 
-        <label className="field">
-          <span>Availability</span>
-          <select
+          <Select
+            label="Availability"
             value={availabilityFilter}
             onChange={(event) => setAvailabilityFilter(event.target.value as OvertimeAvailabilityFilter)}
           >
             <option value="all">All postings</option>
             <option value="available">Available only</option>
-          </select>
-        </label>
-
-        <div className="toolbar-actions overtime-toolbar-actions">
-          <button
-            type="button"
-            className="ghost-button overtime-toolbar-button"
-            onClick={() => setIsCalendarModalOpen(true)}
-            aria-label="Overtime calendar"
-            title="Overtime calendar"
-          >
-            <CalendarIcon />
-            <span>Calendar</span>
-          </button>
-          {viewer.employeeId ? (
-            <button
-              type="button"
-              className="ghost-button overtime-toolbar-button"
-              onClick={() => setIsMyClaimsModalOpen(true)}
-              aria-label="My overtime claims"
-              title="My overtime claims"
-            >
-              <PersonIcon />
-              <span>My claims</span>
-            </button>
-          ) : null}
-          {canManageManualPostings ? (
-            <button
-              type="button"
-              className="ghost-button overtime-toolbar-button overtime-create-posting-button"
-              onClick={() => setIsManualModalOpen(true)}
-              aria-label="Create overtime posting"
-              title="Create overtime posting"
-            >
-              <CreatePostingIcon />
-              <span>Create</span>
-            </button>
-          ) : null}
+          </Select>
         </div>
 
-        <div className="toolbar-status-wrap">
-          {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
-        </div>
+        {availableMonths.length > 0 ? (
+          <div className="overtime-toolbar__month">
+            <AppDateSelector
+              mode="month"
+              value={snapshot.month}
+              label="Overtime month"
+              availableMonths={availableMonths}
+              onChange={(nextMonth) => router.push(`/overtime?month=${nextMonth}`)}
+            />
+          </div>
+        ) : null}
+      </div>
+
+      <div className="overtime-actions-row">
+        <Button variant="secondary" onClick={() => setIsCalendarModalOpen(true)}>
+          <CalendarIcon />
+          Calendar
+        </Button>
+        {viewer.employeeId ? (
+          <Button variant="secondary" onClick={() => setIsMyClaimsModalOpen(true)}>
+            <PersonIcon />
+            My claims
+          </Button>
+        ) : null}
+        {canManageManualPostings ? (
+          <Button variant="secondary" onClick={() => setIsManualModalOpen(true)}>
+            <CreatePostingIcon />
+            Create posting
+          </Button>
+        ) : null}
+
+        <p className="overtime-actions-row__status" role="status" aria-live="polite">
+          {statusMessage}
+        </p>
+      </div>
+
+      <div className="overtime-section-heading">
+        <h2>Available postings</h2>
+        <p>Open overtime opportunities matching your filters</p>
       </div>
 
       <div className="overtime-list">
@@ -2377,163 +2339,181 @@ export function OvertimePanel({
               ? claimActionState[selectedPosting.id] ?? null
               : null;
 
-            return (
-              <section key={group.key} className="overtime-group">
-                <article
-                  className={`overtime-card ${selectedPosting && selectedPosting.openShifts === 0 ? "overtime-card--claimed" : ""}`}
-                >
-                  <div className="overtime-group__header">
-                    <div>
-                      <p className="overtime-card-team">
-                        {selectedTargetMode === "all"
-                          ? selectedPosting?.targetMode === "main"
-                            ? `Shift ${group.scheduleName}`
-                            : group.scheduleName
-                          : selectedTargetMode === "main"
-                            ? `Shift ${group.scheduleName}`
-                            : group.scheduleName}
-                      </p>
-                      <h2 className="overtime-card-title">
-                        {formatShortDate(group.dates[0])} - {formatShortDate(group.dates[group.dates.length - 1])}
-                      </h2>
-                    </div>
-                    <span className="overtime-group__meta">{getShiftLabel(group.shiftKind, group.dates.length)}</span>
-                  </div>
+            const isSwapPosting = Boolean(
+              selectedPosting?.coverageCompetencyId &&
+                selectedPosting?.competencyId &&
+                selectedPosting.coverageCompetencyId !== selectedPosting.competencyId,
+            );
+            const staffedRatio = selectedPosting
+              ? selectedPosting.requiredStaff > 0
+                ? Math.min(1, selectedPosting.staffedPeople / selectedPosting.requiredStaff)
+                : 0
+              : 0;
 
-                  <div className="overtime-option-pills">
-                    {visiblePostings.map((posting) => (
-                      <button
-                        key={posting.id}
-                        type="button"
-                        className={`overtime-option-pill legend-pill legend-pill--${posting.colorToken.toLowerCase()} ${
-                          selectedPosting?.id === posting.id ? "overtime-option-pill--active" : ""
-                        }`}
-                        onClick={() =>
-                          setSelectedPostingByGroup((current) => ({
-                            ...current,
-                            [group.key]: posting.id,
-                          }))
-                        }
-                      >
-                        <strong>{posting.competencyCode.replace("Post ", "")}</strong>
-                        <span>
-                          {posting.coverageCompetencyId && posting.competencyId && posting.coverageCompetencyId !== posting.competencyId
-                            ? `fills ${posting.coverageCompetencyCode}`
-                            : `${posting.openShifts} shift${posting.openShifts === 1 ? "" : "s"}`}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+            return (
+              <article
+                key={group.key}
+                className={`overtime-row ${selectedPosting && selectedPosting.openShifts === 0 ? "overtime-row--filled" : ""}`}
+              >
+                <div className="overtime-row__when">
+                  <span className="overtime-row__eyebrow">
+                    {selectedTargetMode === "all"
+                      ? selectedPosting?.targetMode === "main"
+                        ? `Shift ${group.scheduleName}`
+                        : group.scheduleName
+                      : selectedTargetMode === "main"
+                        ? `Shift ${group.scheduleName}`
+                        : group.scheduleName}
+                  </span>
+                  <h3 className="overtime-row__dates">
+                    {formatShortDate(group.dates[0])} - {formatShortDate(group.dates[group.dates.length - 1])}
+                  </h3>
+                  <span className="overtime-row__shift-count">
+                    {getShiftLabel(group.shiftKind, group.dates.length)}
+                  </span>
+                </div>
+
+                <div className="overtime-row__what">
+                  {visiblePostings.length > 0 ? (
+                    <div className="overtime-option-pills">
+                      {visiblePostings.map((posting) => (
+                        <button
+                          key={posting.id}
+                          type="button"
+                          className="overtime-option-pill"
+                          aria-pressed={selectedPosting?.id === posting.id}
+                          onClick={() =>
+                            setSelectedPostingByGroup((current) => ({
+                              ...current,
+                              [group.key]: posting.id,
+                            }))
+                          }
+                        >
+                          <strong>{posting.competencyCode.replace("Post ", "")}</strong>
+                          <span>
+                            {posting.coverageCompetencyId && posting.competencyId && posting.coverageCompetencyId !== posting.competencyId
+                              ? `fills ${posting.coverageCompetencyCode}`
+                              : `${posting.openShifts} shift${posting.openShifts === 1 ? "" : "s"}`}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
 
                   {selectedPosting ? (
                     <>
-                      <div className="overtime-card-top">
-                        <div>
-                          <p className="overtime-card-team">
-                            {selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
-                              ? `Needed ${selectedPosting.coverageCompetencyCode}`
-                              : selectedPosting.competencyCode}
-                          </p>
-                          <h3 className="overtime-card-title">
-                            {selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
-                              ? selectedPosting.coverageCompetencyLabel
-                              : selectedPosting.competencyLabel}
-                          </h3>
-                        </div>
-                        <div className="metrics-transfer-pill-row">
-                          <span className={`legend-pill legend-pill--${selectedPosting.colorToken.toLowerCase()}`}>
-                            {selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
-                              ? `${selectedPosting.competencyCode.replace("Post ", "")} -> ${selectedPosting.coverageCompetencyCode.replace("Post ", "")}`
-                              : selectedPosting.competencyCode.replace("Post ", "")}
-                          </span>
-                          {selectedPosting.source === "manual" ? (
-                            <span className="legend-pill legend-pill--slate">Manual</span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="overtime-card-meta">
-                        <span>
-                          {selectedPosting.openShifts} open shift{selectedPosting.openShifts === 1 ? "" : "s"}
+                      <div>
+                        <span className="overtime-row__eyebrow">
+                          {isSwapPosting
+                            ? `Needed ${selectedPosting.coverageCompetencyCode}`
+                            : selectedPosting.competencyCode}
                         </span>
-                        <span>{formatStaffCount(selectedPosting.staffedPeople)}/{selectedPosting.requiredStaff} staffed</span>
+                        <h4 className="overtime-row__title">
+                          {isSwapPosting
+                            ? selectedPosting.coverageCompetencyLabel
+                            : selectedPosting.competencyLabel}
+                        </h4>
                       </div>
 
-                      {selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId ? (
-                        <div className="overtime-card-meta">
-                          <span>
-                            Claim {selectedPosting.competencyCode} to fill {selectedPosting.coverageCompetencyCode}
-                            {selectedPosting.swapEmployeeName ? ` via ${selectedPosting.swapEmployeeName}` : " via swap"}
-                          </span>
-                        </div>
+                      <p className="overtime-row__detail">
+                        {selectedPosting.openShifts} open shift{selectedPosting.openShifts === 1 ? "" : "s"}
+                      </p>
+
+                      {isSwapPosting ? (
+                        <p className="overtime-row__detail">
+                          Claim {selectedPosting.competencyCode} to fill {selectedPosting.coverageCompetencyCode}
+                          {selectedPosting.swapEmployeeName ? ` via ${selectedPosting.swapEmployeeName}` : " via swap"}
+                        </p>
                       ) : null}
 
                       {selectedPosting.source === "manual" ? (
-                        <div className="overtime-card-meta">
-                          <span>This posting was added manually by a leader/admin.</span>
-                        </div>
+                        <p className="overtime-row__detail">
+                          This posting was added manually by a leader/admin.
+                        </p>
                       ) : null}
-
-                      <div className="overtime-card-actions">
-                        <span className="overtime-card-hint">
-                          {selectedPosting.claimedByName
-                            ? `${selectedPosting.openShifts === 0 ? "Claimed" : "Partially claimed"} by ${selectedPosting.claimedByNames.join(", ")}${
-                                selectedPosting.coverageCompetencyId && selectedPosting.competencyId && selectedPosting.coverageCompetencyId !== selectedPosting.competencyId
-                                  ? ` · resolves ${selectedPosting.coverageCompetencyCode}`
-                                  : ""
-                              }`
-                            : claimStatus.reason}
-                        </span>
-                        <div className="overtime-card-actions__buttons">
-                          <button
-                            type="button"
-                            className="primary-button"
-                            onClick={() =>
-                              selectedPostingClaimedByViewer
-                                ? handleRelease(selectedPosting)
-                                : handleClaim(selectedPosting)
-                            }
-                            disabled={
-                              Boolean(selectedPostingClaimAction) ||
-                              (!selectedPostingClaimedByViewer && !claimStatus.canClaim)
-                            }
-                          >
-                            {selectedPostingClaimAction
-                              ? selectedPostingClaimAction === "release"
-                                ? "Releasing..."
-                                : "Claiming..."
-                              : selectedPostingClaimedByViewer
-                              ? "Release Posting"
-                              : selectedPosting.openShifts === 0
-                              ? "Claimed"
-                              : "Claim Posting"}
-                          </button>
-                          {canManageManualPostings ? (
-                            <button
-                              type="button"
-                              className="ghost-button"
-                              onClick={() => setEligibilityReportPostingId(selectedPosting.id)}
-                            >
-                              Eligible employees
-                            </button>
-                          ) : null}
-                          {canManageManualPostings &&
-                          selectedPosting.source === "manual" ? (
-                            <button
-                              type="button"
-                              className="ghost-button"
-                              onClick={() => handleDeleteManualPosting(selectedPosting)}
-                              disabled={isManagingManual}
-                            >
-                              {isManagingManual ? "Deleting..." : "Delete Posting"}
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
                     </>
                   ) : null}
-                </article>
-              </section>
+                </div>
+
+                {selectedPosting ? (
+                  <div className="overtime-row__staffing">
+                    <div className="overtime-row__swap">
+                      <Badge tone={selectedPosting.source === "manual" ? "neutral" : "info"}>
+                        {isSwapPosting
+                          ? `${selectedPosting.competencyCode.replace("Post ", "")} → ${selectedPosting.coverageCompetencyCode.replace("Post ", "")}`
+                          : selectedPosting.competencyCode.replace("Post ", "")}
+                      </Badge>
+                      {selectedPosting.source === "manual" ? <Badge tone="neutral">Manual</Badge> : null}
+                    </div>
+                    <span className="overtime-staffing__label">
+                      {formatStaffCount(selectedPosting.staffedPeople)}/{selectedPosting.requiredStaff} staffed
+                    </span>
+                    <div
+                      className="overtime-staffing__track"
+                      role="img"
+                      aria-label={`${formatStaffCount(selectedPosting.staffedPeople)} of ${selectedPosting.requiredStaff} staffed`}
+                    >
+                      <div
+                        className={`overtime-staffing__fill ${staffedRatio >= 1 ? "overtime-staffing__fill--complete" : ""}`}
+                        style={{ width: `${staffedRatio * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedPosting ? (
+                  <div className="overtime-row__actions">
+                    <Button
+                      variant="primary"
+                      onClick={() =>
+                        selectedPostingClaimedByViewer
+                          ? handleRelease(selectedPosting)
+                          : handleClaim(selectedPosting)
+                      }
+                      loading={Boolean(selectedPostingClaimAction)}
+                      disabled={!selectedPostingClaimedByViewer && !claimStatus.canClaim}
+                    >
+                      {selectedPostingClaimAction
+                        ? selectedPostingClaimAction === "release"
+                          ? "Releasing..."
+                          : "Claiming..."
+                        : selectedPostingClaimedByViewer
+                        ? "Release posting"
+                        : selectedPosting.openShifts === 0
+                        ? "Claimed"
+                        : "Claim posting"}
+                    </Button>
+                    {canManageManualPostings ? (
+                      <Button
+                        variant="secondary"
+                        onClick={() => setEligibilityReportPostingId(selectedPosting.id)}
+                      >
+                        Eligible employees
+                      </Button>
+                    ) : null}
+                    {canManageManualPostings && selectedPosting.source === "manual" ? (
+                      <Button
+                        variant="subtle"
+                        className="overtime-danger-action"
+                        onClick={() => handleDeleteManualPosting(selectedPosting)}
+                        loading={isManagingManual}
+                      >
+                        {isManagingManual ? "Deleting..." : "Delete posting"}
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {selectedPosting ? (
+                  <p className="overtime-row__hint">
+                    {selectedPosting.claimedByName
+                      ? `${selectedPosting.openShifts === 0 ? "Claimed" : "Partially claimed"} by ${selectedPosting.claimedByNames.join(", ")}${
+                          isSwapPosting ? ` · resolves ${selectedPosting.coverageCompetencyCode}` : ""
+                        }`
+                      : claimStatus.reason}
+                  </p>
+                ) : null}
+              </article>
             );
           })()
         ))}
@@ -2544,13 +2524,13 @@ export function OvertimePanel({
               <>
                 <strong>No unclaimed overtime postings.</strong>
                 <span>Claimed or filled postings are hidden by the availability filter.</span>
-                <button
-                  type="button"
-                  className="ghost-button empty-state__action"
+                <Button
+                  variant="secondary"
+                  className="empty-state__action"
                   onClick={() => setAvailabilityFilter("all")}
                 >
                   Show all postings
-                </button>
+                </Button>
               </>
             ) : (
               <>

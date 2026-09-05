@@ -4,6 +4,7 @@ import "./globals.css";
 import "./tokens.css";
 import "./primitives.css";
 import "./shell.css";
+import "./overtime.css";
 
 export const metadata: Metadata = {
   title: "Schwifty",

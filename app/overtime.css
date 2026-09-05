@@ -1,0 +1,453 @@
+/* ============================================================
+   Overtime page — Phase 6A
+   ------------------------------------------------------------
+   Scoped to the Overtime route. Loaded after shell.css, so source
+   order settles conflicts with the legacy .overtime-* rules in
+   globals.css; where a legacy rule is more specific it is matched
+   selector-for-selector rather than escalated. No !important.
+
+   Built on the Phase 2 semantic tokens. No new tokens are needed —
+   every colour below already has a light and a dark value.
+   ============================================================ */
+
+/* ---- Filter toolbar ----------------------------------------- */
+
+.overtime-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3) var(--space-4);
+  align-items: end;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.overtime-toolbar__filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+@media (max-width: 1180px) {
+  .overtime-toolbar__filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.overtime-toolbar__month {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.overtime-toolbar .ui-field__label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+/* Read-only "Claim As" for workers, matched to the field rhythm so the
+   toolbar stays aligned whichever role is viewing. */
+.overtime-static-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.overtime-static-field__label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.overtime-static-field__value {
+  display: flex;
+  align-items: center;
+  height: var(--control-height-md);
+  font-size: var(--control-font-md);
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Action row --------------------------------------------- */
+
+.overtime-actions-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-3) 0;
+}
+
+.overtime-actions-row__status {
+  margin-left: auto;
+  min-height: 1rem;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Section heading ---------------------------------------- */
+
+.overtime-section-heading {
+  padding-top: var(--space-2);
+}
+
+.overtime-section-heading h2 {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.overtime-section-heading p {
+  margin: 2px 0 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Posting rows -------------------------------------------
+   Four bands: when/what/staffing/actions. Collapses to two columns
+   and then one as width runs out, so nothing overflows the document. */
+
+.overtime-list {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 0;
+}
+
+.overtime-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 2fr) minmax(150px, 0.9fr) minmax(180px, auto);
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+}
+
+.overtime-row--filled {
+  background: var(--color-surface-muted);
+}
+
+.overtime-row__when {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.overtime-row__eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.overtime-row__dates {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.overtime-row__shift-count {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.overtime-row__what {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.overtime-row__title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.overtime-row__detail {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Posting option pills -----------------------------------
+   Each pill selects a different posting inside the same group. They
+   are real controls, so they keep button semantics and a focus ring. */
+
+.overtime-option-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.overtime-option-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-field);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: var(--control-font-sm);
+  line-height: 1.35;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.overtime-option-pill strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.overtime-option-pill:hover {
+  border-color: var(--color-border-strong);
+}
+
+.overtime-option-pill:focus-visible {
+  outline: var(--focus-outline-width) solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Selection is announced with aria-pressed as well as the accent, so it
+   does not depend on colour. */
+.overtime-option-pill[aria-pressed="true"] {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary-hover);
+}
+
+.overtime-option-pill[aria-pressed="true"] strong {
+  color: var(--color-primary-hover);
+}
+
+/* ---- Staffing ------------------------------------------------ */
+
+.overtime-row__staffing {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+}
+
+.overtime-staffing__label {
+  font-size: var(--control-font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* Rendered from the posting's own staffed/required counts — no derived
+   or estimated figure is introduced here. */
+.overtime-staffing__track {
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--color-neutral-bg);
+  overflow: hidden;
+}
+
+.overtime-staffing__fill {
+  height: 100%;
+  border-radius: var(--radius-round);
+  background: var(--color-info-text);
+  transition: width 200ms ease;
+}
+
+.overtime-staffing__fill--complete {
+  background: var(--color-success-text);
+}
+
+.overtime-row__swap {
+  justify-self: start;
+}
+
+/* ---- Actions -------------------------------------------------- */
+
+.overtime-row__actions {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: stretch;
+  align-content: start;
+  min-width: 0;
+}
+
+/* Destructive here is a text-level action, subordinate to the primary
+   claim and the secondary admin action above it. */
+.overtime-danger-action.ui-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+
+.overtime-danger-action.ui-button:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.overtime-row__hint {
+  grid-column: 2 / -1;
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Modal bodies -------------------------------------------- */
+
+.overtime-summary-grid {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.overtime-summary-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.5fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--control-font-md);
+}
+
+.overtime-summary-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.overtime-summary-row__label {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.overtime-summary-row strong {
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.overtime-modal-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.overtime-modal-list__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-size: var(--control-font-md);
+}
+
+.overtime-modal-list__row strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.overtime-modal-list__row span {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.overtime-modal-list__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.overtime-modal-note {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-control);
+  color: var(--color-warning-text);
+}
+
+.overtime-modal-note strong {
+  font-size: var(--control-font-md);
+  font-weight: 600;
+}
+
+.overtime-modal-note span {
+  font-size: var(--control-font-sm);
+  line-height: 1.45;
+}
+
+.overtime-modal-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+
+/* ---- Responsive ---------------------------------------------
+   Desktop targets are 1280-1920; these keep the page usable below that
+   without pre-empting the Phase 9 mobile design. */
+
+@media (max-width: 1180px) {
+  .overtime-row {
+    grid-template-columns: minmax(140px, 0.9fr) minmax(0, 1.6fr);
+  }
+
+  .overtime-row__staffing,
+  .overtime-row__actions {
+    grid-column: span 2;
+  }
+
+  .overtime-row__actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .overtime-row__actions > .ui-button {
+    flex: 1 1 160px;
+  }
+
+  .overtime-row__hint {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .overtime-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overtime-row__staffing,
+  .overtime-row__actions,
+  .overtime-row__hint {
+    grid-column: 1 / -1;
+  }
+
+  .overtime-toolbar,
+  .overtime-toolbar__filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overtime-toolbar__month {
+    justify-content: flex-start;
+  }
+}

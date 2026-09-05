@@ -125,6 +125,18 @@ export function Modal({
               </p>
             ) : null}
           </div>
+          {dismissible ? (
+            <button
+              type="button"
+              className="ui-modal__close"
+              aria-label="Close dialog"
+              onClick={onClose}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          ) : null}
         </div>
         {children ? <div className="ui-modal__body">{children}</div> : null}
         {footer ? <div className="ui-modal__footer">{footer}</div> : null}
