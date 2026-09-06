@@ -24,6 +24,41 @@
   grid-template-columns: 4.75rem minmax(0, 1fr);
 }
 
+/* ---- Pre-paint collapsed state -------------------------------
+   Set by the inline script in app/layout.tsx before first paint, because
+   the server renders the expanded shell either way — localStorage is not
+   readable there. These mirror what .workspace-sidebar--collapsed does,
+   so the rail is already narrow when the page paints instead of snapping
+   narrow after hydration. WorkspaceShell keeps the attribute current, so
+   it stops matching the moment the user expands. */
+
+html[data-sidebar-collapsed="true"] .workspace-frame {
+  grid-template-columns: 4.75rem minmax(0, 1fr);
+}
+
+html[data-sidebar-collapsed="true"] .workspace-sidebar {
+  width: 4.75rem;
+}
+
+html[data-sidebar-collapsed="true"] .workspace-brand span,
+html[data-sidebar-collapsed="true"] .workspace-brand strong,
+html[data-sidebar-collapsed="true"] .workspace-nav-link strong,
+html[data-sidebar-collapsed="true"] .workspace-notifications__badge,
+html[data-sidebar-collapsed="true"] .workspace-session__meta,
+html[data-sidebar-collapsed="true"] .workspace-admin-scope {
+  display: none;
+}
+
+html[data-sidebar-collapsed="true"] .workspace-nav-link {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+html[data-sidebar-collapsed="true"] .workspace-brand-row,
+html[data-sidebar-collapsed="true"] .workspace-session__identity {
+  justify-content: center;
+}
+
 /* ---- Sidebar ------------------------------------------------ */
 
 .workspace-sidebar {

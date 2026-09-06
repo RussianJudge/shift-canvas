@@ -357,13 +357,34 @@ export function WorkspaceShell({
       return;
     }
 
-    if (isMobileSidebarMode) {
+    // Guard on the ref, not the state. Both isCollapsed and isMobileSidebarMode
+    // start false, and within the mount commit the viewport effect has already
+    // measured while this effect still sees the stale state — so on a phone
+    // this would write "false" over a stored "true" and lose the desktop
+    // preference. null means not measured yet, true means mobile; only a
+    // measured desktop viewport may persist.
+    if (isMobileSidebarMode || wasMobileSidebarModeRef.current !== false) {
       return;
     }
 
     window.localStorage.setItem(
       SIDEBAR_COLLAPSE_STORAGE_KEY,
       serializeSidebarCollapsePreference(isCollapsed),
+    );
+  }, [isCollapsed, isMobileSidebarMode]);
+
+  /**
+   * Hands the pre-paint attribute (set by the inline script in app/layout.tsx)
+   * back to React once it owns the state, so expanding takes effect
+   * immediately instead of fighting the stamped value.
+   */
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    document.documentElement.dataset.sidebarCollapsed = String(
+      isCollapsed && !isMobileSidebarMode,
     );
   }, [isCollapsed, isMobileSidebarMode]);
 
