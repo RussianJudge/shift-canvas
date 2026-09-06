@@ -64,6 +64,16 @@ function PersonIcon() {
   );
 }
 
+/** Paired with the red hint so the blocker is not signalled by colour alone. */
+function BlockedIcon() {
+  return (
+    <svg className="overtime-row__hint-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 8v4.5M12 15.75v.5" />
+    </svg>
+  );
+}
+
 function CalendarIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -407,26 +417,26 @@ function getClaimStatus(
   // Workers can only claim OT that sits on their scheduled days off and does not
   // conflict with any existing assignment already on the calendar.
   if (!employee) {
-    return { canClaim: false, reason: "Select an employee first." };
+    return { canClaim: false, blocking: false, reason: "Select an employee first." };
   }
 
   if (posting.claimedEmployeeIds.includes(employee.id)) {
-    return { canClaim: true, reason: "You already claimed this posting." };
+    return { canClaim: true, blocking: false, reason: "You already claimed this posting." };
   }
 
   if (posting.openShifts === 0) {
-    return { canClaim: false, reason: "This posting is fully claimed." };
+    return { canClaim: false, blocking: false, reason: "This posting is fully claimed." };
   }
 
   if (posting.competencyId && !employee.competencyIds.includes(posting.competencyId)) {
-    return { canClaim: false, reason: "Employee is not qualified for this post." };
+    return { canClaim: false, blocking: true, reason: "Employee is not qualified for this post." };
   }
 
   const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
 
   for (const date of posting.dates) {
     if (hasMutualAssignmentOnDate(snapshot, employee.id, date)) {
-      return { canClaim: false, reason: "Employee has a mutual scheduled on one or more posting dates." };
+      return { canClaim: false, blocking: true, reason: "Employee has a mutual scheduled on one or more posting dates." };
     }
 
     const hasExistingAssignment = snapshot.assignments.some(
@@ -437,7 +447,7 @@ function getClaimStatus(
     );
 
     if (hasExistingAssignment) {
-      return { canClaim: false, reason: "Employee already has an assignment on one or more posting dates." };
+      return { canClaim: false, blocking: true, reason: "Employee already has an assignment on one or more posting dates." };
     }
 
     const hasExistingSubScheduleAssignment = snapshot.subScheduleAssignments.some(
@@ -448,15 +458,15 @@ function getClaimStatus(
     );
 
     if (hasExistingSubScheduleAssignment) {
-      return { canClaim: false, reason: "Employee already has a sub-schedule assignment on one or more posting dates." };
+      return { canClaim: false, blocking: true, reason: "Employee already has a sub-schedule assignment on one or more posting dates." };
     }
 
     if (shiftForDate(employeeSchedule, date) !== "OFF") {
-      return { canClaim: false, reason: "Posting falls on this employee's regular shift." };
+      return { canClaim: false, blocking: true, reason: "Posting falls on this employee's regular shift." };
     }
   }
 
-  return { canClaim: true, reason: "Available to claim." };
+  return { canClaim: true, blocking: false, reason: "Available to claim." };
 }
 
 function needsTurnaroundConfirmation(employee: Employee | null, posting: OvertimePosting, snapshot: SchedulerSnapshot) {
@@ -2331,7 +2341,7 @@ export function OvertimePanel({
             const selectedPosting = selectedPostingCandidate ?? preferredClaimablePosting ?? visiblePostings[0];
             const claimStatus = selectedPosting
               ? getClaimStatus(claimingEmployee, selectedPosting, snapshot, assignmentIndex)
-              : { canClaim: false, reason: "No overtime posting selected." };
+              : { canClaim: false, blocking: false, reason: "No overtime posting selected." };
             const selectedPostingClaimedByViewer = selectedPosting
               ? selectedPosting.claimedEmployeeIds.includes(claimingEmployeeId)
               : false;
@@ -2505,7 +2515,16 @@ export function OvertimePanel({
                 ) : null}
 
                 {selectedPosting ? (
-                  <p className="overtime-row__hint">
+                  <p
+                    className={`overtime-row__hint ${
+                      !selectedPosting.claimedByName && claimStatus.blocking
+                        ? "overtime-row__hint--blocked"
+                        : ""
+                    }`}
+                  >
+                    {!selectedPosting.claimedByName && claimStatus.blocking ? (
+                      <BlockedIcon />
+                    ) : null}
                     {selectedPosting.claimedByName
                       ? `${selectedPosting.openShifts === 0 ? "Claimed" : "Partially claimed"} by ${selectedPosting.claimedByNames.join(", ")}${
                           isSwapPosting ? ` · resolves ${selectedPosting.coverageCompetencyCode}` : ""

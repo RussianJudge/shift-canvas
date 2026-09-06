@@ -304,10 +304,31 @@
 }
 
 .overtime-row__hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   grid-column: 2 / -1;
   margin: 0;
   font-size: var(--control-font-sm);
   color: var(--color-text-secondary);
+}
+
+/* Shown when this employee is blocked from claiming — not qualified, already
+   assigned, mid-mutual, or on their regular shift. A fully-claimed posting and
+   the "select an employee" prompt stay neutral: neither is a problem with the
+   worker. The icon keeps the meaning off colour alone. */
+.overtime-row__hint--blocked {
+  color: var(--color-danger);
+}
+
+.overtime-row__hint-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
 }
 
 /* ---- Modal bodies -------------------------------------------- */
