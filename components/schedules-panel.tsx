@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
 
 import { saveSchedules } from "@/app/actions";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import type { SaveSchedulesInput, ScheduleUpdate, SchedulerSnapshot } from "@/lib/types";
 
 type EditableSchedule = {
@@ -30,37 +31,43 @@ function RemoveScheduleModal({
     return null;
   }
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onCancel}>
-      <section
-        className="assignment-modal mutual-modal"
-        aria-label="Remove shift confirmation"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Shifts</span>
-            <h2 className="assignment-modal__title">Remove shift?</h2>
-            <p className="assignment-modal__context">
-              Remove {scheduleName}? This change will not save until you click Save.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onCancel}>
-            Close
-          </button>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Shifts"
+      title="Remove shift?"
+      description={`Remove ${scheduleName}? This change will not save until you click Save.`}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             Cancel
-          </button>
-          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
             Remove shift
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    />
+  );
+}
+
+function AddShiftIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function RevertIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
+    </svg>
   );
 }
 
@@ -260,70 +267,53 @@ export function SchedulesPanel({
         <h1 className="panel-title">Shifts</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--actions">
-        <div className="planner-actions planner-actions--icons">
-          <button
-            type="button"
-            className="ghost-button icon-button"
-            onClick={handleAddSchedule}
-            aria-label="Add shift"
-            title="Add shift"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="ghost-button icon-button"
+      <div className="shifts-toolbar">
+        {/* These were icon-only. The labels match the other admin pages and
+            make Save and Revert legible without a tooltip; the icons and
+            handlers are unchanged. */}
+        <div className="shifts-toolbar__actions">
+          <Button variant="secondary" onClick={handleAddSchedule}>
+            <AddShiftIcon />
+            Add shift
+          </Button>
+          <Button
+            variant="secondary"
             onClick={handleRevert}
             disabled={isSaving || !hasChanges}
-            aria-label="Revert changes"
-            title="Revert changes"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M9 14L4 9l5-5" />
-              <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="primary-button icon-button schedules-save-button"
+            <RevertIcon />
+            Revert
+          </Button>
+          <Button
+            variant="primary"
             onClick={handleSave}
-            disabled={isSaving || !hasChanges || hasValidationErrors}
-            aria-label={isSaving ? "Saving" : "Save"}
-            title="Save"
+            loading={isSaving}
+            disabled={!hasChanges || hasValidationErrors}
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-              <path d="M17 21v-8H7v8" />
-              <path d="M7 3v5h8" />
-            </svg>
-          </button>
-        </div>
-        <div className="toolbar-status-wrap">
-          {hasValidationErrors ? (
-            <p className="toolbar-status">Fix highlighted shifts before saving.</p>
-          ) : statusMessage ? (
-            <p className="toolbar-status">{statusMessage}</p>
-          ) : null}
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
         </div>
       </div>
 
-      <div className="personnel-table-wrap">
-        <table className="personnel-table">
+      <p className="shifts-status" role="status" aria-live="polite">
+        {hasValidationErrors ? "Fix highlighted shifts before saving." : statusMessage}
+      </p>
+
+      <div className="personnel-table-wrap shifts-table-wrap">
+        <table className="personnel-table shifts-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Start date</th>
-              <th>Day on</th>
-              <th>Night on</th>
-              <th>Off days</th>
-              <th>Cycle</th>
-              <th>Employees</th>
-              <th>Status</th>
-              <th />
+              <th className="shift-col-name">Name</th>
+              <th className="shift-col-date">Start date</th>
+              <th className="shift-col-num">Day on</th>
+              <th className="shift-col-num">Night on</th>
+              <th className="shift-col-num">Off days</th>
+              <th className="shift-col-cycle">Cycle</th>
+              <th className="shift-col-count">Employees</th>
+              <th className="shift-col-status">Status</th>
+              <th className="shift-col-actions">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -407,7 +397,7 @@ export function SchedulesPanel({
                     <span>{schedule.dayShiftDays + schedule.nightShiftDays + schedule.offDays} day cycle</span>
                   </div>
                 </td>
-                <td>{schedule.employeeCount}</td>
+                <td className="shift-col-count">{schedule.employeeCount}</td>
                 <td>
                   <span className={`legend-pill ${schedule.isActive ? "legend-pill--teal" : "legend-pill--slate"}`}>
                     {schedule.isActive ? "Active" : "Inactive"}
@@ -418,9 +408,10 @@ export function SchedulesPanel({
                     {invalidScheduleIds.has(schedule.id) ? (
                       <p className="row-issue">{getScheduleIssues(schedule).join(" · ")}</p>
                     ) : null}
-                    <button
-                      type="button"
-                      className="table-action table-action--danger"
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      className="shifts-remove"
                       onClick={() => handleRemoveSchedule(schedule.id)}
                       disabled={schedule.employeeCount > 0}
                       title={
@@ -430,14 +421,14 @@ export function SchedulesPanel({
                       }
                     >
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 </td>
               </tr>
             ))}
             {schedules.length === 0 ? (
               <tr>
-                  <td colSpan={9}>
+                <td colSpan={9}>
                   <div className="empty-state">
                     <strong>No shifts yet.</strong>
                     <span>Add a shift to start building rotations.</span>

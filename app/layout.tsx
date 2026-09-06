@@ -10,6 +10,7 @@ import "./mutuals.css";
 import "./personnel.css";
 import "./competencies.css";
 import "./time-codes.css";
+import "./shifts.css";
 
 export const metadata: Metadata = {
   title: "Schwifty",

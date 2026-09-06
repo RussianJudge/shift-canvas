@@ -1,0 +1,146 @@
+/* ============================================================
+   Shifts page (/schedules) — Phase 7D
+   ------------------------------------------------------------
+   Scoped to the Shifts administration route. Not /schedule, which
+   is the main roster.
+
+   Table chrome comes from the shared app/data-table.css; only this
+   page's toolbar and column widths live here. No shared rule is
+   changed or duplicated.
+
+   There is no Shifts mockup, so presentation follows the design
+   system and matches Personnel, Competencies and Time Codes.
+   ============================================================ */
+
+/* ---- Toolbar ------------------------------------------------ */
+
+.shifts-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.shifts-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.shifts-status {
+  min-height: 1rem;
+  margin: 0;
+  padding: var(--space-3) 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Columns ------------------------------------------------
+   Name and start date carry the identity; the three rotation
+   counts stay narrow and even so a pattern reads across the row;
+   cycle, employee count and status are derived and read-only.
+
+   The min-width matters: without it the auto table layout squeezes
+   the fixed widths to fit the wrapper and the last columns collapse
+   into each other. With it, overflow goes to the wrapper's own
+   scroller instead. */
+
+.shifts-table {
+  min-width: 58rem;
+}
+
+.shifts-table .shift-col-name {
+  min-width: 8rem;
+}
+
+.shifts-table .shift-col-date {
+  width: 9.5rem;
+}
+
+.shifts-table .shift-col-num {
+  width: 5.5rem;
+}
+
+.shifts-table .shift-col-cycle {
+  width: 7.5rem;
+}
+
+.shifts-table .shift-col-count {
+  width: 6.5rem;
+}
+
+.shifts-table .shift-col-status {
+  width: 6.5rem;
+}
+
+.shifts-table .shift-col-actions {
+  width: 6.5rem;
+  text-align: right;
+}
+
+/* Read-only derived cells sit as text beside the inputs, so they
+   need the same type treatment rather than the muted header one. */
+.shifts-table tbody td.shift-col-count {
+  font-size: var(--control-font-md);
+  color: var(--color-text);
+}
+
+.shifts-table .table-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.shifts-table .table-meta strong {
+  font-size: var(--control-font-md);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.shifts-table .table-meta span {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.shifts-table .table-actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Removal is staged and only applies on Save, and it is blocked
+   outright while employees are still assigned — the disabled state
+   carries that, with the reason in the button's title. */
+.shifts-remove.ui-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+
+.shifts-remove.ui-button:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* ---- Responsive ---------------------------------------------
+   The table keeps its own horizontal scroller from data-table.css. */
+
+@media (max-width: 720px) {
+  .shifts-toolbar {
+    justify-content: stretch;
+  }
+
+  .shifts-toolbar__actions {
+    width: 100%;
+  }
+
+  .shifts-toolbar__actions > .ui-button {
+    flex: 1 1 auto;
+  }
+}
