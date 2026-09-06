@@ -4,6 +4,7 @@ import "./globals.css";
 import "./tokens.css";
 import "./primitives.css";
 import "./shell.css";
+import "./data-table.css";
 import "./overtime.css";
 import "./mutuals.css";
 import "./personnel.css";

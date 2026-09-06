@@ -1,0 +1,125 @@
+/* ============================================================
+   Shared data table
+   ------------------------------------------------------------
+   .personnel-table is a misnomer of history: Personnel, Competencies,
+   Time Codes, Shifts and the workspace loading skeleton all render it.
+   These rules were written for Phase 7A and moved here in 7B so that
+   four pages are not depending on a stylesheet named for one of them.
+
+   Selectors are unchanged, so no component markup moved. Page-specific
+   column widths and chrome stay in each page's own file.
+   ============================================================ */
+
+/* ---- Table --------------------------------------------------
+   The wrapper is the only horizontal scroller, so the competency
+   column can run wide without the document ever scrolling. */
+
+.personnel-table-wrap {
+  margin-top: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.personnel-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.personnel-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-3);
+  background: var(--color-surface-muted);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.personnel-table tbody td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.personnel-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* ---- Group rows --------------------------------------------- */
+
+.personnel-table .table-group-row td {
+  padding: 0;
+  background: var(--color-surface-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.personnel-table .table-input,
+.personnel-table .table-select {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-field);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--control-font-md);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.personnel-table .table-input:hover:not(:disabled),
+.personnel-table .table-select:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.personnel-table .table-input:focus-visible:not(:disabled),
+.personnel-table .table-select:focus-visible:not(:disabled) {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.personnel-table .table-input-stack {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.personnel-table .row-issue {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-danger);
+}
+
+/* Row state is also carried by the inline issue text, so the tint is
+   reinforcement rather than the only signal. */
+.personnel-table .table-row--invalid td {
+  background: var(--color-danger-bg);
+}
+
+.personnel-table .table-row--dirty td {
+  background: var(--color-warning-bg);
+}
+
+.personnel-table .table-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.personnel-table .table-actions-cell {
+  display: flex;
+  justify-content: flex-end;
+}
