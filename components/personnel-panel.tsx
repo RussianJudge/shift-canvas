@@ -2,11 +2,15 @@
 
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
 
 import { savePersonnel } from "@/app/actions";
 import { createAccountInvite, linkExistingAccountToEmployee } from "@/app/auth-actions";
+import { Badge } from "@/components/ui/badge";
+import { Button, IconButton } from "@/components/ui/button";
+import { Select, TextInput } from "@/components/ui/field";
+import { Modal } from "@/components/ui/modal";
 import { formatEmployeeDisplayName, splitEmployeeDisplayName } from "@/lib/employee-names";
+import { deriveInitials } from "@/lib/initials";
 import type { AppRole, AppSession, PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
 
 /**
@@ -106,37 +110,25 @@ function RemoveEmployeeModal({
     return null;
   }
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onCancel}>
-      <section
-        className="assignment-modal mutual-modal"
-        aria-label="Remove employee confirmation"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Personnel</span>
-            <h2 className="assignment-modal__title">Remove employee?</h2>
-            <p className="assignment-modal__context">
-              Remove {employeeName} from Personnel? This change will save automatically after confirmation.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onCancel}>
-            Close
-          </button>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Personnel"
+      title="Remove employee?"
+      description={`Remove ${employeeName} from Personnel? This change will save automatically after confirmation.`}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             Cancel
-          </button>
-          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
             Remove employee
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    />
   );
 }
 
@@ -149,57 +141,39 @@ function CompetencyCleanupWarningModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onCancel}>
-      <section
-        className="assignment-modal personnel-cleanup-modal"
-        aria-label="Removed competency cleanup warning"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Personnel</span>
-            <h2 className="assignment-modal__title">Remove competency?</h2>
-            <p className="assignment-modal__context">
-              Removing {removal.competencyLabel} from {removal.employeeName} will delete the following saved
-              shifts or overtime records.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onCancel}>
-            Close
-          </button>
-        </div>
-
-        <div className="personnel-cleanup-modal__list">
-          {removal.impacts.map((impact) => (
-            <div key={impact.id} className="personnel-cleanup-modal__row">
-              <div>
-                <strong>{impact.type}</strong>
-                <span>{impact.targetLabel}</span>
-              </div>
-              <div>
-                <strong>{impact.competencyLabel}</strong>
-                <span>{formatShortDate(impact.date)}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Personnel"
+      title="Remove competency?"
+      description={`Removing ${removal.competencyLabel} from ${removal.employeeName} will delete the following saved shifts or overtime records.`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             Keep competency
-          </button>
-          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
             Remove and delete listed records
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    >
+      <div className="personnel-cleanup-list">
+        {removal.impacts.map((impact) => (
+          <div key={impact.id} className="personnel-cleanup-list__row">
+            <div>
+              <strong>{impact.type}</strong>
+              <span>{impact.targetLabel}</span>
+            </div>
+            <div>
+              <strong>{impact.competencyLabel}</strong>
+              <span>{formatShortDate(impact.date)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
@@ -214,42 +188,27 @@ function LinkExistingAccountModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={isSubmitting ? undefined : onCancel}>
-      <section
-        className="assignment-modal mutual-modal"
-        aria-label="Link existing account confirmation"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Personnel</span>
-            <h2 className="assignment-modal__title">Link existing account?</h2>
-            <p className="assignment-modal__context">
-              {pendingLink.existingDisplayName || pendingLink.email} already has an account for {pendingLink.email}.
-              Link that account to {pendingLink.employeeName} and assign the {pendingLink.role} role?
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
-            Close
-          </button>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Personnel"
+      title="Link existing account?"
+      description={`${pendingLink.existingDisplayName || pendingLink.email} already has an account for ${pendingLink.email}. Link that account to ${pendingLink.employeeName} and assign the ${pendingLink.role} role?`}
+      size="sm"
+      // Matches the previous backdrop guard: no dismissal while linking.
+      dismissible={!isSubmitting}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel} disabled={isSubmitting}>
             Cancel
-          </button>
-          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+          </Button>
+          <Button variant="primary" onClick={onConfirm} loading={isSubmitting}>
             {isSubmitting ? "Linking..." : "Link account"}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    />
   );
 }
 
@@ -511,6 +470,22 @@ function getEmployeeIssues(employee: EditableEmployee) {
   return Object.values(getEmployeeFieldIssues(employee));
 }
 
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 9l6 6l6-6" />
+    </svg>
+  );
+}
+
 function SettingsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -549,88 +524,77 @@ function EmployeeSettingsModal({
   onRemove: () => void;
   onClose: () => void;
 }) {
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={isBusy ? undefined : onClose}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Personnel</span>
-            <h2 className="assignment-modal__title">{getEditableEmployeeDisplayName(employee)}</h2>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose} disabled={isBusy}>
-            Close
-          </button>
-        </div>
-
-        <div className="modal-form-grid">
-          <label className="field">
-            <span>Email</span>
-            <input
-              type="email"
-              value={employee.email}
-              placeholder="email@company.com"
-              disabled={isBusy}
-              onChange={(event) => onEmailChange(event.target.value)}
-            />
-            {emailIssue ? <p className="row-issue">{emailIssue}</p> : null}
-          </label>
-
-          <label className="field">
-            <span>Invite as</span>
-            <select
-              value={inviteRole}
-              disabled={isBusy || !canInviteElevatedRoles}
-              onChange={(event) => onInviteRoleChange(event.target.value as AppRole)}
-            >
-              <option value="worker">Worker</option>
-              {canInviteElevatedRoles ? <option value="leader">Leader</option> : null}
-              {canInviteElevatedRoles ? <option value="admin">Admin</option> : null}
-            </select>
-          </label>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button
-            type="button"
-            className="ghost-button"
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Personnel"
+      title={getEditableEmployeeDisplayName(employee)}
+      // Matches the previous backdrop guard: no dismissal while an invite runs.
+      dismissible={!isBusy}
+      footer={
+        <>
+          <Button
+            variant="secondary"
             onClick={onSendInvite}
             disabled={isBusy || !employee.email.trim() || Boolean(emailIssue)}
           >
             {isBusy ? "Working..." : inviteLink ? "Resend sign-up link" : "Send sign-up link"}
-          </button>
+          </Button>
           {inviteLink ? (
-            <button type="button" className="ghost-button" onClick={onCopyLink} disabled={isBusy}>
+            <Button variant="secondary" onClick={onCopyLink} disabled={isBusy}>
               Copy link
-            </button>
+            </Button>
           ) : null}
+        </>
+      }
+    >
+      <>
+        <div className="personnel-modal-fields">
+          <TextInput
+            label="Email"
+            type="email"
+            value={employee.email}
+            placeholder="email@company.com"
+            disabled={isBusy}
+            error={emailIssue}
+            onChange={(event) => onEmailChange(event.target.value)}
+          />
+
+          <Select
+            label="Invite as"
+            value={inviteRole}
+            disabled={isBusy || !canInviteElevatedRoles}
+            onChange={(event) => onInviteRoleChange(event.target.value as AppRole)}
+          >
+            <option value="worker">Worker</option>
+            {canInviteElevatedRoles ? <option value="leader">Leader</option> : null}
+            {canInviteElevatedRoles ? <option value="admin">Admin</option> : null}
+          </Select>
         </div>
 
         {inviteLink ? (
-          <label className="field invite-builder__link">
-            <span>Sign-up link</span>
-            <input readOnly value={inviteLink} onFocus={(event) => event.currentTarget.select()} />
-          </label>
+          <TextInput
+            label="Sign-up link"
+            readOnly
+            value={inviteLink}
+            onFocus={(event) => event.currentTarget.select()}
+          />
         ) : null}
 
-        {statusMessage ? <p className="toolbar-status">{statusMessage}</p> : null}
+        {statusMessage ? <p className="personnel-modal-status">{statusMessage}</p> : null}
 
-        <div className="assignment-modal__danger-zone">
+        <div className="personnel-danger-zone">
           <div>
             <strong>Remove employee</strong>
             <span>Removes {getEditableEmployeeDisplayName(employee)} from Personnel.</span>
           </div>
-          <button
-            type="button"
-            className="table-action table-action--danger"
-            onClick={onRemove}
-            disabled={isBusy}
-          >
+          <Button variant="destructive" size="sm" onClick={onRemove} disabled={isBusy}>
             Remove
-          </button>
+          </Button>
         </div>
-      </section>
-    </div>,
-    document.body,
+      </>
+    </Modal>
   );
 }
 
@@ -673,113 +637,107 @@ function AddEmployeeModal({
    * edited. Swap to a plain confirmation view instead of leaving it live.
    */
   if (inviteLink) {
-    return createPortal(
-      <div className="assignment-modal-backdrop" onClick={onClose}>
-        <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-          <div className="assignment-modal__header">
-            <div>
-              <span className="assignment-modal__eyebrow">Personnel</span>
-              <h2 className="assignment-modal__title">{getEditableEmployeeDisplayName(employee)} added</h2>
-            </div>
-            <button type="button" className="ghost-button" onClick={onClose}>
-              Close
-            </button>
-          </div>
-
-          <p className="toolbar-status">
-            An account invite was sent to {employee.email}. You can also send this sign-up link manually.
-          </p>
-
-          <label className="field invite-builder__link">
-            <span>Sign-up link</span>
-            <input readOnly value={inviteLink} onFocus={(event) => event.currentTarget.select()} />
-          </label>
-
-          <div className="assignment-modal__footer">
-            <button type="button" className="ghost-button" onClick={onCopyLink}>
+    return (
+      <Modal
+        open
+        onClose={onClose}
+        eyebrow="Personnel"
+        title={`${getEditableEmployeeDisplayName(employee)} added`}
+        description={`An account invite was sent to ${employee.email}. You can also send this sign-up link manually.`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={onCopyLink}>
               Copy link
-            </button>
-            <button type="button" className="primary-button" onClick={onClose}>
+            </Button>
+            <Button variant="primary" onClick={onClose}>
               Done
-            </button>
-          </div>
-        </section>
-      </div>,
-      document.body,
+            </Button>
+          </>
+        }
+      >
+        <TextInput
+          label="Sign-up link"
+          readOnly
+          value={inviteLink}
+          onFocus={(event) => event.currentTarget.select()}
+        />
+      </Modal>
     );
   }
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Personnel</span>
-            <h2 className="assignment-modal__title">Add an employee</h2>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
-            Close
-          </button>
-        </div>
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Personnel"
+      title="Add an employee"
+      size="lg"
+      dismissible={!isSaving}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={onSubmit}
+            loading={isSaving}
+            disabled={issues.length > 0}
+          >
+            {isSaving ? "Saving..." : sendInvite ? "Add and invite" : "Add employee"}
+          </Button>
+        </>
+      }
+    >
+      <>
+        <div className="personnel-modal-fields">
+          <TextInput
+            label="First name"
+            value={employee.firstName}
+            disabled={isSaving}
+            error={fieldIssues.firstName}
+            onChange={(event) => onChange((current) => ({ ...current, firstName: event.target.value }))}
+          />
 
-        <div className="modal-form-grid">
-          <label className="field">
-            <span>First name</span>
-            <input
-              value={employee.firstName}
-              disabled={isSaving}
-              onChange={(event) => onChange((current) => ({ ...current, firstName: event.target.value }))}
-            />
-            {fieldIssues.firstName ? <p className="row-issue">{fieldIssues.firstName}</p> : null}
-          </label>
+          <TextInput
+            label="Last name"
+            value={employee.lastName}
+            disabled={isSaving}
+            error={fieldIssues.lastName}
+            onChange={(event) => onChange((current) => ({ ...current, lastName: event.target.value }))}
+          />
 
-          <label className="field">
-            <span>Last name</span>
-            <input
-              value={employee.lastName}
-              disabled={isSaving}
-              onChange={(event) => onChange((current) => ({ ...current, lastName: event.target.value }))}
-            />
-            {fieldIssues.lastName ? <p className="row-issue">{fieldIssues.lastName}</p> : null}
-          </label>
+          <TextInput
+            label="Email"
+            type="email"
+            value={employee.email}
+            disabled={isSaving}
+            error={fieldIssues.email}
+            onChange={(event) => onChange((current) => ({ ...current, email: event.target.value }))}
+          />
 
-          <label className="field">
-            <span>Email</span>
-            <input
-              type="email"
-              value={employee.email}
-              disabled={isSaving}
-              onChange={(event) => onChange((current) => ({ ...current, email: event.target.value }))}
-            />
-            {fieldIssues.email ? <p className="row-issue">{fieldIssues.email}</p> : null}
-          </label>
+          <TextInput
+            label="Role title"
+            value={employee.role}
+            placeholder="Operator"
+            disabled={isSaving}
+            onChange={(event) => onChange((current) => ({ ...current, role: event.target.value }))}
+          />
 
-          <label className="field">
-            <span>Role title</span>
-            <input
-              value={employee.role}
-              placeholder="Operator"
-              disabled={isSaving}
-              onChange={(event) => onChange((current) => ({ ...current, role: event.target.value }))}
-            />
-          </label>
-
-          <label className="field">
-            <span>Shift</span>
-            <select
-              value={employee.scheduleId}
-              disabled={isSaving}
-              onChange={(event) => onChange((current) => ({ ...current, scheduleId: event.target.value }))}
-            >
-              <option value="">Unassigned</option>
-              {schedules.map((schedule) => (
-                <option key={schedule.id} value={schedule.id}>
-                  {schedule.name}
-                </option>
-              ))}
-            </select>
-            {fieldIssues.scheduleId ? <p className="row-issue">{fieldIssues.scheduleId}</p> : null}
-          </label>
+          <Select
+            label="Shift"
+            value={employee.scheduleId}
+            disabled={isSaving}
+            error={fieldIssues.scheduleId}
+            onChange={(event) => onChange((current) => ({ ...current, scheduleId: event.target.value }))}
+          >
+            <option value="">Unassigned</option>
+            {schedules.map((schedule) => (
+              <option key={schedule.id} value={schedule.id}>
+                {schedule.name}
+              </option>
+            ))}
+          </Select>
 
           <label className="subschedule-status-toggle">
             <input
@@ -792,39 +750,22 @@ function AddEmployeeModal({
           </label>
 
           {sendInvite ? (
-            <label className="field">
-              <span>Invite as</span>
-              <select
-                value={inviteRole}
-                disabled={isSaving || !canInviteElevatedRoles}
-                onChange={(event) => onInviteRoleChange(event.target.value as AppRole)}
-              >
-                <option value="worker">Worker</option>
-                {canInviteElevatedRoles ? <option value="leader">Leader</option> : null}
-                {canInviteElevatedRoles ? <option value="admin">Admin</option> : null}
-              </select>
-            </label>
+            <Select
+              label="Invite as"
+              value={inviteRole}
+              disabled={isSaving || !canInviteElevatedRoles}
+              onChange={(event) => onInviteRoleChange(event.target.value as AppRole)}
+            >
+              <option value="worker">Worker</option>
+              {canInviteElevatedRoles ? <option value="leader">Leader</option> : null}
+              {canInviteElevatedRoles ? <option value="admin">Admin</option> : null}
+            </Select>
           ) : null}
         </div>
 
-        {issues.length > 0 ? <p className="toolbar-status">{issues[0]}</p> : null}
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={onSubmit}
-            disabled={isSaving || issues.length > 0}
-          >
-            {isSaving ? "Saving..." : sendInvite ? "Add and invite" : "Add employee"}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+        {issues.length > 0 ? <p className="personnel-modal-status">{issues[0]}</p> : null}
+      </>
+    </Modal>
   );
 }
 
@@ -1079,22 +1020,50 @@ export function PersonnelPanel({
   }, [employees, scheduleNameById, search, selectedCompetencyFilter, selectedScheduleFilter]);
 
   const groupedEmployees = useMemo(() => {
-    return visibleEmployees.reduce<Array<{ type: "group"; label: string } | { type: "employee"; value: EditableEmployee }>>(
-      (rows, employee, index) => {
-        const currentScheduleName = scheduleNameById[employee.scheduleId] ?? "Unassigned";
-        const previousScheduleName =
-          index > 0 ? scheduleNameById[visibleEmployees[index - 1].scheduleId] ?? "Unassigned" : null;
+    const counts = visibleEmployees.reduce<Record<string, number>>((totals, employee) => {
+      const label = scheduleNameById[employee.scheduleId] ?? "Unassigned";
+      totals[label] = (totals[label] ?? 0) + 1;
+      return totals;
+    }, {});
 
-        if (currentScheduleName !== previousScheduleName) {
-          rows.push({ type: "group", label: currentScheduleName });
-        }
+    return visibleEmployees.reduce<
+      | Array<
+          | { type: "group"; label: string; count: number }
+          | { type: "employee"; value: EditableEmployee; group: string }
+        >
+    >((rows, employee, index) => {
+      const currentScheduleName = scheduleNameById[employee.scheduleId] ?? "Unassigned";
+      const previousScheduleName =
+        index > 0 ? scheduleNameById[visibleEmployees[index - 1].scheduleId] ?? "Unassigned" : null;
 
-        rows.push({ type: "employee", value: employee });
-        return rows;
-      },
-      [],
-    );
+      if (currentScheduleName !== previousScheduleName) {
+        rows.push({ type: "group", label: currentScheduleName, count: counts[currentScheduleName] ?? 0 });
+      }
+
+      rows.push({ type: "employee", value: employee, group: currentScheduleName });
+      return rows;
+    }, []);
   }, [scheduleNameById, visibleEmployees]);
+
+  /**
+   * Collapsing only hides rows. Edited values live in `employees` state, so a
+   * collapsed row keeps its unsaved changes and still autosaves.
+   */
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  function toggleGroup(label: string) {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+
+      if (next.has(label)) {
+        next.delete(label);
+      } else {
+        next.add(label);
+      }
+
+      return next;
+    });
+  }
 
   function updateEmployee(employeeId: string, updater: (employee: EditableEmployee) => EditableEmployee) {
     setEmployees((current) =>
@@ -1655,20 +1624,18 @@ export function PersonnelPanel({
         <h1 className="panel-title">Personnel</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--personnel-page">
-        <label className="field">
-          <span>Search</span>
-          <input
+      <div className="personnel-toolbar">
+        <div className="personnel-toolbar__filters">
+          <TextInput
+            label="Search"
             type="search"
-            placeholder="Enter employee name"
+            placeholder="Search employees"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-        </label>
 
-        <label className="field">
-          <span>Shift</span>
-          <select
+          <Select
+            label="Shift"
             value={selectedScheduleFilter}
             onChange={(event) => setSelectedScheduleFilter(event.target.value)}
           >
@@ -1679,12 +1646,10 @@ export function PersonnelPanel({
                 {schedule.name}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
 
-        <label className="field">
-          <span>Competency</span>
-          <select
+          <Select
+            label="Competency"
             value={selectedCompetencyFilter}
             onChange={(event) => setSelectedCompetencyFilter(event.target.value)}
           >
@@ -1694,32 +1659,26 @@ export function PersonnelPanel({
                 {competency.code}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </div>
 
-        <div className="planner-actions personnel-toolbar-actions">
+        <div className="personnel-toolbar__actions">
           <div className="personnel-actions-menu" ref={actionsMenuRef}>
-            <button
-              type="button"
-              className="ghost-button"
+            <Button
+              variant="secondary"
               aria-haspopup="menu"
               aria-expanded={showActionsMenu}
               onClick={() => setShowActionsMenu((current) => !current)}
             >
               Actions
-            </button>
+              <ChevronDownIcon />
+            </Button>
             {showActionsMenu ? (
               <div className="personnel-actions-menu__panel" role="menu" aria-label="Personnel actions">
                 <button
                   type="button"
-                  className="ghost-button personnel-actions-menu__item"
-                  onClick={handleAddEmployee}
-                >
-                  Add employee
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button personnel-actions-menu__item"
+                  role="menuitem"
+                  className="personnel-actions-menu__item"
                   onClick={() => {
                     setShowActionsMenu(false);
                     csvInputRef.current?.click();
@@ -1730,6 +1689,11 @@ export function PersonnelPanel({
               </div>
             ) : null}
           </div>
+
+          <Button variant="primary" onClick={handleAddEmployee}>
+            <PlusIcon />
+            Add employee
+          </Button>
         </div>
 
         <input
@@ -1739,17 +1703,27 @@ export function PersonnelPanel({
           accept=".csv,text/csv"
           onChange={handleCsvImport}
         />
-
-        <div className="toolbar-status-wrap">
-          {hasValidationErrors ? (
-            <p className="toolbar-status">Fix highlighted rows before autosave can continue.</p>
-          ) : isSaving ? (
-            <p className="toolbar-status">Saving personnel changes automatically...</p>
-          ) : statusMessage ? (
-            <p className="toolbar-status">{statusMessage}</p>
-          ) : null}
-        </div>
       </div>
+
+      <div className="personnel-directory-heading">
+        <div>
+          <h2 className="personnel-directory-heading__title">Personnel directory</h2>
+          <p className="personnel-directory-heading__subtitle">
+            Manage employee assignments and qualifications
+          </p>
+        </div>
+        <span className="personnel-directory-heading__count">
+          {visibleEmployees.length} {visibleEmployees.length === 1 ? "employee" : "employees"}
+        </span>
+      </div>
+
+      <p className="personnel-status" role="status" aria-live="polite">
+        {hasValidationErrors
+          ? "Fix highlighted rows before autosave can continue."
+          : isSaving
+          ? "Saving personnel changes automatically..."
+          : statusMessage}
+      </p>
 
 
       {pendingCsvImport ? (
@@ -1759,13 +1733,13 @@ export function PersonnelPanel({
               <strong>CSV Preview</strong>
               <p>{pendingCsvImport.summary}</p>
             </div>
-            <div className="planner-actions">
-              <button type="button" className="ghost-button" onClick={() => setPendingCsvImport(null)}>
+            <div className="personnel-import-actions">
+              <Button variant="secondary" onClick={() => setPendingCsvImport(null)}>
                 Cancel import
-              </button>
-              <button type="button" className="primary-button" onClick={applyPendingImport}>
+              </Button>
+              <Button variant="primary" onClick={applyPendingImport}>
                 Apply import
-              </button>
+              </Button>
             </div>
           </div>
           <div className="import-preview__rows">
@@ -1788,20 +1762,42 @@ export function PersonnelPanel({
         <table className="personnel-table">
           <thead>
             <tr>
-              <th className="column-name">First Name</th>
-              <th className="column-name">Last Name</th>
+              <th className="column-avatar">
+                <span className="sr-only">Employee</span>
+              </th>
+              <th className="column-name">First name</th>
+              <th className="column-name">Last name</th>
               <th className="column-shift">Shift</th>
               <th className="column-competencies">Competencies</th>
-              <th className="column-actions" />
+              <th className="column-actions">
+                <span className="sr-only">Settings</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {groupedEmployees.map((entry) =>
               entry.type === "group" ? (
                 <tr key={`group-${entry.label}`} className="table-group-row">
-                  <td colSpan={5}>{entry.label}</td>
+                  <td colSpan={6}>
+                    <button
+                      type="button"
+                      className="personnel-group-toggle"
+                      aria-expanded={!collapsedGroups.has(entry.label)}
+                      onClick={() => toggleGroup(entry.label)}
+                    >
+                      <ChevronDownIcon
+                        className={`personnel-group-toggle__chevron ${
+                          collapsedGroups.has(entry.label) ? "personnel-group-toggle__chevron--collapsed" : ""
+                        }`}
+                      />
+                      <span className="personnel-group-toggle__label">
+                        {entry.label === "Unassigned" ? entry.label : `Shift ${entry.label}`}
+                      </span>
+                      <span className="personnel-group-toggle__count">{entry.count}</span>
+                    </button>
+                  </td>
                 </tr>
-              ) : (
+              ) : collapsedGroups.has(entry.group) ? null : (
                 <tr
                   key={entry.value.id}
                   className={`${dirtyEmployeeIds.has(entry.value.id) ? "table-row--dirty" : ""} ${
@@ -1810,9 +1806,21 @@ export function PersonnelPanel({
                 >
                   {(() => {
                     const fieldIssues = getEmployeeFieldIssues(entry.value);
+                    // Built from the name fields, not the display name: that is
+                    // "Last, First", which would produce reversed initials.
+                    const initials = deriveInitials(
+                      `${entry.value.firstName} ${entry.value.lastName}`.trim(),
+                    );
 
                     return (
                       <>
+                  <td className="column-avatar">
+                    {initials ? (
+                      <span className="personnel-avatar" aria-hidden="true">
+                        {initials}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="column-name">
                     <div className="table-input-stack">
                       <input
@@ -1889,15 +1897,13 @@ export function PersonnelPanel({
                   <td className="column-actions">
                     <div className="table-actions-cell">
                       {canInviteAdmin ? (
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`Settings for ${getEditableEmployeeDisplayName(entry.value)}`}
-                          title="Employee settings"
+                        <IconButton
+                          variant="subtle"
+                          size="sm"
+                          label={`Settings for ${getEditableEmployeeDisplayName(entry.value)}`}
+                          icon={<SettingsIcon />}
                           onClick={() => setSettingsEmployeeId(entry.value.id)}
-                        >
-                          <SettingsIcon />
-                        </button>
+                        />
                       ) : null}
                     </div>
                   </td>

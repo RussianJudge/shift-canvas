@@ -6,6 +6,7 @@ import "./primitives.css";
 import "./shell.css";
 import "./overtime.css";
 import "./mutuals.css";
+import "./personnel.css";
 
 export const metadata: Metadata = {
   title: "Schwifty",

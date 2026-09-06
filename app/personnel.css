@@ -1,0 +1,446 @@
+/* ============================================================
+   Personnel page — Phase 7A
+   ------------------------------------------------------------
+   Scoped to the Personnel route. Loaded after shell.css so source
+   order settles conflicts with the legacy .personnel-* and
+   .table-* rules in globals.css. No !important.
+
+   The table keeps its own surface: it is a meaningful internal
+   section, not the page frame (see docs/design-system.md).
+   ============================================================ */
+
+/* ---- Toolbar ------------------------------------------------ */
+
+.personnel-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.personnel-toolbar__filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(140px, 200px) minmax(140px, 200px);
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.personnel-toolbar__filters .ui-field__label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.personnel-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.personnel-status {
+  min-height: 1rem;
+  margin: 0;
+  padding-bottom: var(--space-2);
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Actions menu ------------------------------------------- */
+
+.personnel-actions-menu {
+  position: relative;
+}
+
+.personnel-actions-menu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  min-width: 11rem;
+  padding: var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-overlay);
+}
+
+.personnel-actions-menu__item {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-field);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--control-font-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.personnel-actions-menu__item:hover {
+  background: var(--color-surface-muted);
+}
+
+.personnel-actions-menu__item:focus-visible {
+  outline: var(--focus-outline-width) solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* ---- Directory heading -------------------------------------- */
+
+.personnel-directory-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-top: var(--space-4);
+}
+
+.personnel-directory-heading__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.personnel-directory-heading__subtitle {
+  margin: 2px 0 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* A count of the rows actually shown, so it tracks the filters. */
+.personnel-directory-heading__count {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Table --------------------------------------------------
+   The wrapper is the only horizontal scroller, so the competency
+   column can run wide without the document ever scrolling. */
+
+.personnel-table-wrap {
+  margin-top: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.personnel-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.personnel-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-3);
+  background: var(--color-surface-muted);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.personnel-table tbody td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.personnel-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.personnel-table .column-avatar {
+  width: 3.5rem;
+  padding-right: 0;
+}
+
+.personnel-table .column-name {
+  min-width: 9rem;
+}
+
+.personnel-table .column-shift {
+  min-width: 8rem;
+}
+
+.personnel-table .column-competencies {
+  min-width: 22rem;
+}
+
+.personnel-table .column-actions {
+  width: 3.5rem;
+  text-align: right;
+}
+
+/* ---- Group rows --------------------------------------------- */
+
+.personnel-table .table-group-row td {
+  padding: 0;
+  background: var(--color-surface-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.personnel-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.personnel-group-toggle:hover {
+  color: var(--color-text);
+}
+
+.personnel-group-toggle:focus-visible {
+  outline: var(--focus-outline-width) solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.personnel-group-toggle__chevron {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 140ms ease;
+}
+
+/* Rotation is decoration; aria-expanded on the button carries the state. */
+.personnel-group-toggle__chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.personnel-group-toggle__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.personnel-group-toggle__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-field);
+  background: var(--color-neutral-bg);
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+}
+
+/* ---- Row content -------------------------------------------- */
+
+/* Initials come from the employee's own name; nothing renders when
+   none can be derived. */
+.personnel-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-round);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.personnel-table .table-input,
+.personnel-table .table-select {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-field);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--control-font-md);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.personnel-table .table-input:hover:not(:disabled),
+.personnel-table .table-select:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.personnel-table .table-input:focus-visible:not(:disabled),
+.personnel-table .table-select:focus-visible:not(:disabled) {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.personnel-table .table-input-stack {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.personnel-table .row-issue {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-danger);
+}
+
+/* Row state is also carried by the inline issue text, so the tint is
+   reinforcement rather than the only signal. */
+.personnel-table .table-row--invalid td {
+  background: var(--color-danger-bg);
+}
+
+.personnel-table .table-row--dirty td {
+  background: var(--color-warning-bg);
+}
+
+.personnel-table .table-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.personnel-table .table-actions-cell {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ---- CSV import preview ------------------------------------- */
+
+.personnel-import-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ---- Modal bodies ------------------------------------------- */
+
+.personnel-modal-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.personnel-modal-status {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.personnel-cleanup-list {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.personnel-cleanup-list__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.personnel-cleanup-list__row div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.personnel-cleanup-list__row strong {
+  font-size: var(--control-font-md);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.personnel-cleanup-list__row span {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.personnel-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-control);
+}
+
+.personnel-danger-zone div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.personnel-danger-zone strong {
+  font-size: var(--control-font-md);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.personnel-danger-zone span {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Responsive --------------------------------------------- */
+
+@media (max-width: 1180px) {
+  .personnel-toolbar__filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .personnel-toolbar,
+  .personnel-toolbar__filters {
+    grid-template-columns: minmax(0, 1fr);
+    display: grid;
+  }
+
+  .personnel-toolbar__actions > .ui-button {
+    flex: 1 1 auto;
+  }
+}
