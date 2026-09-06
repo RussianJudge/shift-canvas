@@ -8,6 +8,7 @@ import "./data-table.css";
 import "./overtime.css";
 import "./mutuals.css";
 import "./personnel.css";
+import "./competencies.css";
 
 export const metadata: Metadata = {
   title: "Schwifty",

@@ -1,0 +1,179 @@
+/* ============================================================
+   Competencies page — Phase 7B
+   ------------------------------------------------------------
+   Scoped to the Competencies route. The table chrome itself comes
+   from data-table.css, which four pages share; only this page's
+   column widths and controls live here.
+
+   There is no Competencies mockup, so presentation follows the
+   design system and the existing content rather than a reference
+   image. No field, colour, or action was added or removed.
+   ============================================================ */
+
+/* ---- Toolbar ------------------------------------------------ */
+
+.competencies-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Two adjoining buttons reading as one control. aria-pressed on each
+   carries the selected state, so it is not signalled by fill alone. */
+.competencies-viewswitch {
+  display: flex;
+  gap: var(--space-1);
+  padding: 3px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.competencies-viewswitch .ui-button {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.competencies-viewswitch .ui-button[aria-pressed="false"] {
+  background: transparent;
+}
+
+.competencies-viewswitch .ui-button[aria-pressed="false"]:hover:not(:disabled) {
+  background: var(--color-surface);
+}
+
+.competencies-toolbar__actions {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.competencies-schedule-field {
+  min-width: 14rem;
+}
+
+.competencies-schedule-field .ui-field__label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.competencies-status {
+  min-height: 1rem;
+  margin: 0;
+  padding: var(--space-3) 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Columns ------------------------------------------------
+   The library row carries a code, a label, two counts, a colour
+   select, a live preview pill, and a destructive action. Widths are
+   set so the label gets the slack and the numeric columns stay
+   narrow enough to scan down. */
+
+.competencies-table .competency-col-code {
+  width: 7rem;
+}
+
+.competencies-table .competency-col-label {
+  min-width: 12rem;
+}
+
+.competencies-table .competency-col-num {
+  width: 9rem;
+}
+
+.competencies-table .competency-col-color {
+  width: 8rem;
+}
+
+.competencies-table .competency-col-preview {
+  width: 7rem;
+}
+
+.competencies-table .competency-col-actions {
+  width: 6rem;
+  text-align: right;
+}
+
+.competencies-table .competency-col-enabled {
+  width: 9rem;
+}
+
+/* Read-only counts sit as text, not inputs, so they need the same
+   vertical rhythm as the fields beside them. */
+.competencies-table tbody td.competency-col-num,
+.competencies-table tbody td.competency-col-code,
+.competencies-table tbody td.competency-col-label {
+  font-size: var(--control-font-md);
+  color: var(--color-text);
+}
+
+.competencies-table .table-actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Subordinate to Save; destructive but not competing for weight. */
+.competencies-remove.ui-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+
+.competencies-remove.ui-button:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* ---- Availability toggle ------------------------------------ */
+
+.competencies-table .subschedule-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--control-font-md);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.competencies-table .subschedule-status-toggle input {
+  accent-color: var(--color-primary);
+}
+
+.competencies-table .subschedule-status-toggle input:disabled {
+  cursor: not-allowed;
+}
+
+.competencies-table .subschedule-status-toggle input:disabled + span {
+  color: var(--color-text-muted);
+}
+
+/* ---- Responsive ---------------------------------------------
+   Below the desktop targets the toolbar stacks; the table keeps its
+   own horizontal scroller from data-table.css. */
+
+@media (max-width: 900px) {
+  .competencies-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .competencies-viewswitch .ui-button {
+    flex: 1 1 auto;
+  }
+
+  .competencies-toolbar__actions > .ui-button {
+    flex: 1 1 auto;
+  }
+}

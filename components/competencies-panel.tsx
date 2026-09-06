@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
 
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/field";
+import { Modal } from "@/components/ui/modal";
 import {
   saveCompetencies,
   saveScheduleCompetencies,
@@ -38,41 +40,25 @@ function RemoveCompetencyModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onCancel}>
-      <section
-        className="assignment-modal mutual-modal"
-        aria-label="Remove competency confirmation"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Competencies</span>
-            <h2 className="assignment-modal__title">Remove competency?</h2>
-            <p className="assignment-modal__context">
-              Remove {competency.code || "this competency"}? This change will not save until you click Save.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onCancel}>
-            Close
-          </button>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Competencies"
+      title="Remove competency?"
+      description={`Remove ${competency.code || "this competency"}? This change will not save until you click Save.`}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             Cancel
-          </button>
-          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
             Remove competency
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    />
   );
 }
 
@@ -380,64 +366,71 @@ export function CompetenciesPanel({
         <h1 className="panel-title">Competencies</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--actions">
-        <div className="planner-actions">
-          <button
-            type="button"
-            className={viewMode === "library" ? "primary-button" : "ghost-button"}
+      <div className="competencies-toolbar">
+        {/* Two real views, so this is a genuine view switch. Built from Button
+            with aria-pressed rather than a new shared SegmentedControl, which
+            the audit schedules for Phase 4 alongside the Week view. */}
+        <div className="competencies-viewswitch" role="group" aria-label="Competencies view">
+          <Button
+            variant={viewMode === "library" ? "primary" : "secondary"}
+            aria-pressed={viewMode === "library"}
             onClick={() => setViewMode("library")}
           >
             Competency library
-          </button>
-          <button
-            type="button"
-            className={viewMode === "availability" ? "primary-button" : "ghost-button"}
+          </Button>
+          <Button
+            variant={viewMode === "availability" ? "primary" : "secondary"}
+            aria-pressed={viewMode === "availability"}
             onClick={() => setViewMode("availability")}
           >
             Schedule availability
-          </button>
+          </Button>
+        </div>
 
+        <div className="competencies-toolbar__actions">
           {viewMode === "library" ? (
             <>
-              <button type="button" className="ghost-button" onClick={handleAddCompetency}>
+              <Button variant="secondary" onClick={handleAddCompetency}>
                 Add competency
-              </button>
-              <button type="button" className="ghost-button" onClick={handleRevertLibrary} disabled={isSaving || !hasLibraryChanges}>
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={handleRevertLibrary}
+                disabled={isSaving || !hasLibraryChanges}
+              >
                 Revert
-              </button>
-              <button
-                type="button"
-                className="primary-button"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleSaveLibrary}
-                disabled={isSaving || !hasLibraryChanges || hasValidationErrors}
+                loading={isSaving}
+                disabled={!hasLibraryChanges || hasValidationErrors}
               >
                 {isSaving ? "Saving..." : "Save"}
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <label className="field">
-                <span>Schedule</span>
-                <select
-                  value={selectedTargetKey}
-                  onChange={(event) => {
-                    setSelectedTargetKey(event.target.value as ScheduleTargetKey);
-                    setStatusMessage("");
-                  }}
-                >
-                  {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}
-                  <optgroup label="Sub-schedules">
-                    {snapshot.subSchedules.map((subSchedule) => (
-                      <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
-                        {subSchedule.name}{subSchedule.isArchived ? " (Archived)" : ""}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-              </label>
-              <button
-                type="button"
-                className="ghost-button"
+              <Select
+                label="Schedule"
+                fieldClassName="competencies-schedule-field"
+                value={selectedTargetKey}
+                onChange={(event) => {
+                  setSelectedTargetKey(event.target.value as ScheduleTargetKey);
+                  setStatusMessage("");
+                }}
+              >
+                {snapshot.schedules.length > 0 ? <option value="main">Main schedule</option> : null}
+                <optgroup label="Sub-schedules">
+                  {snapshot.subSchedules.map((subSchedule) => (
+                    <option key={`sub:${subSchedule.id}`} value={`sub:${subSchedule.id}`}>
+                      {subSchedule.name}{subSchedule.isArchived ? " (Archived)" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              </Select>
+              <Button
+                variant="secondary"
                 onClick={handleRevertAvailability}
                 disabled={
                   isSavingScheduleCompetencies ||
@@ -446,54 +439,52 @@ export function CompetenciesPanel({
                 }
               >
                 Revert
-              </button>
-              <button
-                type="button"
-                className="primary-button"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleSaveAvailability}
+                loading={isSavingScheduleCompetencies || isSavingSubScheduleCompetencies}
                 disabled={
-                  isSavingScheduleCompetencies ||
-                  isSavingSubScheduleCompetencies ||
                   !selectedTargetLabel ||
                   selectedTargetIsArchived ||
                   !hasAvailabilityChanges
                 }
               >
                 {isSavingScheduleCompetencies || isSavingSubScheduleCompetencies ? "Saving..." : "Save"}
-              </button>
+              </Button>
             </>
           )}
         </div>
-
-        <div className="toolbar-status-wrap">
-          {viewMode === "library" && hasValidationErrors ? (
-            <p className="toolbar-status">Fix the highlighted competencies before saving.</p>
-          ) : statusMessage ? (
-            <p className="toolbar-status">{statusMessage}</p>
-          ) : viewMode === "availability" && selectedTargetLabel ? (
-            <p className="toolbar-status">
-              {selectedTargetIsArchived
-                ? "Archived sub-schedules stay visible for history but their competency set is read-only."
-                : selectedTargetKey === "main"
-                  ? "Choose which competencies the main schedule can use across its builder and overtime board."
-                  : `Choose which competencies ${selectedTargetLabel} can use in its builder and overtime board.`}
-            </p>
-          ) : null}
-        </div>
       </div>
 
+      <p className="competencies-status" role="status" aria-live="polite">
+        {viewMode === "library" && hasValidationErrors
+          ? "Fix the highlighted competencies before saving."
+          : statusMessage
+          ? statusMessage
+          : viewMode === "availability" && selectedTargetLabel
+          ? selectedTargetIsArchived
+            ? "Archived sub-schedules stay visible for history but their competency set is read-only."
+            : selectedTargetKey === "main"
+              ? "Choose which competencies the main schedule can use across its builder and overtime board."
+              : `Choose which competencies ${selectedTargetLabel} can use in its builder and overtime board.`
+          : ""}
+      </p>
+
       {viewMode === "library" ? (
-        <div className="personnel-table-wrap">
-          <table className="personnel-table">
+        <div className="personnel-table-wrap competencies-table-wrap">
+          <table className="personnel-table competencies-table">
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Label</th>
-                <th>Staff required</th>
-                <th>Qualified staff</th>
-                <th>Color</th>
-                <th>Preview</th>
-                <th />
+                <th className="competency-col-code">Code</th>
+                <th className="competency-col-label">Label</th>
+                <th className="competency-col-num">Staff required</th>
+                <th className="competency-col-num">Qualified staff</th>
+                <th className="competency-col-color">Color</th>
+                <th className="competency-col-preview">Preview</th>
+                <th className="competency-col-actions">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -572,13 +563,14 @@ export function CompetenciesPanel({
                       {invalidCompetencyIds.has(competency.id) ? (
                         <p className="row-issue">{getCompetencyIssues(competency).join(" · ")}</p>
                       ) : null}
-                      <button
-                        type="button"
-                        className="table-action table-action--danger"
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        className="competencies-remove"
                         onClick={() => handleRemoveCompetency(competency.id)}
                       >
                         Remove
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -597,16 +589,16 @@ export function CompetenciesPanel({
           </table>
         </div>
       ) : (
-        <div className="personnel-table-wrap">
-          <table className="personnel-table">
+        <div className="personnel-table-wrap competencies-table-wrap">
+          <table className="personnel-table competencies-table">
             <thead>
               <tr>
-                <th>Enabled</th>
-                <th>Code</th>
-                <th>Label</th>
-                <th>Staff required</th>
-                <th>Qualified staff</th>
-                <th>Preview</th>
+                <th className="competency-col-enabled">Enabled</th>
+                <th className="competency-col-code">Code</th>
+                <th className="competency-col-label">Label</th>
+                <th className="competency-col-num">Staff required</th>
+                <th className="competency-col-num">Qualified staff</th>
+                <th className="competency-col-preview">Preview</th>
               </tr>
             </thead>
             <tbody>
