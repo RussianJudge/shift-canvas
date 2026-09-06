@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
 
 import { saveTimeCodes } from "@/app/actions";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import type {
   SaveTimeCodesInput,
   SchedulerSnapshot,
@@ -32,45 +33,37 @@ function RemoveTimeCodeModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onCancel}>
-      <section
-        className="assignment-modal mutual-modal"
-        aria-label="Remove time code confirmation"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Time Codes</span>
-            <h2 className="assignment-modal__title">Remove time code?</h2>
-            <p className="assignment-modal__context">
-              Remove {timeCode.code || "this time code"}? This change will not save until you click Save.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onCancel}>
-            Close
-          </button>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Time Codes"
+      title="Remove time code?"
+      description={`Remove ${timeCode.code || "this time code"}? This change will not save until you click Save.`}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             Cancel
-          </button>
-          <button type="button" className="table-action table-action--danger" onClick={onConfirm}>
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
             Remove time code
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    />
   );
 }
 
 /** Clones editable rows so revert/save baselines are never mutated in place. */
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
 function cloneTimeCodes(timeCodes: EditableTimeCode[]) {
   return timeCodes.map((timeCode) => ({ ...timeCode }));
 }
@@ -351,13 +344,14 @@ export function TimeCodesPanel({
             {invalidTimeCodeIds.has(timeCode.id) ? (
               <p className="row-issue">{getTimeCodeIssues(timeCode).join(" · ")}</p>
             ) : null}
-            <button
-              type="button"
-              className="table-action table-action--danger"
+            <Button
+              variant="subtle"
+              size="sm"
+              className="time-codes-remove"
               onClick={() => handleRemoveTimeCode(timeCode.id)}
             >
               Remove
-            </button>
+            </Button>
           </div>
         </td>
       </tr>
@@ -366,25 +360,26 @@ export function TimeCodesPanel({
 
   function renderTimeCodeTable(title: string, description: string, groupedTimeCodes: EditableTimeCode[], emptyMessage: string) {
     return (
-      <section className="time-code-section">
-        <div className="metrics-section__header">
-          <div className="metrics-section__title-group">
-            <h2 className="metrics-section__title">{title}</h2>
-            {description ? <p>{description}</p> : null}
-          </div>
+      <section className="time-codes-section">
+        <div className="time-codes-section__header">
+          <h2 className="time-codes-section__title">{title}</h2>
+          <span className="time-codes-section__count">{groupedTimeCodes.length}</span>
+          {description ? <p className="time-codes-section__description">{description}</p> : null}
         </div>
 
-        <div className="personnel-table-wrap">
-          <table className="personnel-table">
+        <div className="personnel-table-wrap time-codes-table-wrap">
+          <table className="personnel-table time-codes-table">
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Label</th>
-                <th>Color</th>
-                <th>Usage</th>
-                <th>Counts as</th>
-                <th>Preview</th>
-                <th />
+                <th className="time-code-col-code">Code</th>
+                <th className="time-code-col-label">Label</th>
+                <th className="time-code-col-select">Color</th>
+                <th className="time-code-col-select">Usage</th>
+                <th className="time-code-col-select">Counts as</th>
+                <th className="time-code-col-preview">Preview</th>
+                <th className="time-code-col-actions">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>{renderTimeCodeRows(groupedTimeCodes, emptyMessage)}</tbody>
@@ -400,33 +395,37 @@ export function TimeCodesPanel({
         <h1 className="panel-title">Time Codes</h1>
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--actions">
-        <div className="planner-actions">
-          <button type="button" className="ghost-button" onClick={handleAddTimeCode}>
+      <div className="time-codes-toolbar">
+        <div className="time-codes-toolbar__actions">
+          <Button variant="secondary" onClick={handleAddTimeCode}>
+            <PlusIcon />
             Add time code
-          </button>
-          <button type="button" className="ghost-button" onClick={handleRevert} disabled={isSaving || !hasChanges}>
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleRevert}
+            disabled={isSaving || !hasChanges}
+          >
             Revert
-          </button>
-          <button
-            type="button"
-            className="primary-button"
+          </Button>
+          <Button
+            variant="primary"
             onClick={handleSave}
-            disabled={isSaving || !hasChanges || hasValidationErrors}
+            loading={isSaving}
+            disabled={!hasChanges || hasValidationErrors}
           >
             {isSaving ? "Saving..." : "Save"}
-          </button>
-        </div>
-        <div className="toolbar-status-wrap">
-          {hasValidationErrors ? (
-            <p className="toolbar-status">Fix the highlighted time codes before saving.</p>
-          ) : statusMessage ? (
-            <p className="toolbar-status">{statusMessage}</p>
-          ) : null}
+          </Button>
         </div>
       </div>
 
-      <div className="time-code-sections">
+      <p className="time-codes-status" role="status" aria-live="polite">
+        {hasValidationErrors
+          ? "Fix the highlighted time codes before saving."
+          : statusMessage}
+      </p>
+
+      <div className="time-codes-sections">
         {renderTimeCodeTable(
           "Working Time Codes",
           "",

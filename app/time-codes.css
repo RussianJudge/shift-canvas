@@ -1,0 +1,155 @@
+/* ============================================================
+   Time Codes page — Phase 7C
+   ------------------------------------------------------------
+   Scoped to the Time Codes route. Table chrome comes from the
+   shared app/data-table.css; only this page's toolbar, section
+   headers and column widths live here. No shared rule is changed
+   or duplicated.
+
+   There is no Time Codes mockup, so presentation follows the
+   design system and the page's own content, matching what
+   Personnel and Competencies established.
+   ============================================================ */
+
+/* ---- Toolbar ------------------------------------------------ */
+
+.time-codes-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.time-codes-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.time-codes-status {
+  min-height: 1rem;
+  margin: 0;
+  padding: var(--space-3) 0 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Sections -----------------------------------------------
+   Working and Off are the page's own split, driven by each row's
+   workStatus. Changing that select moves the row between tables,
+   which is existing behaviour. */
+
+.time-codes-sections {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.time-codes-section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.time-codes-section__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding-top: var(--space-4);
+}
+
+.time-codes-section__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+/* A real count of the rows in this group. */
+.time-codes-section__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.375rem;
+  height: 1.375rem;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-field);
+  background: var(--color-neutral-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+}
+
+.time-codes-section__description {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Columns ------------------------------------------------
+   Code is capped at five characters, so it stays narrow; the label
+   takes the slack and the three selects share an even width. */
+
+.time-codes-table .time-code-col-code {
+  width: 7rem;
+}
+
+.time-codes-table .time-code-col-label {
+  min-width: 12rem;
+}
+
+.time-codes-table .time-code-col-select {
+  width: 10rem;
+}
+
+.time-codes-table .time-code-col-preview {
+  width: 7rem;
+}
+
+.time-codes-table .time-code-col-actions {
+  width: 6rem;
+  text-align: right;
+}
+
+.time-codes-table .table-actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Removal is staged, not immediate — it takes effect on Save — so
+   this stays subordinate to the primary action. */
+.time-codes-remove.ui-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+
+.time-codes-remove.ui-button:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* ---- Responsive ---------------------------------------------
+   The table keeps its own horizontal scroller from data-table.css. */
+
+@media (max-width: 720px) {
+  .time-codes-toolbar {
+    justify-content: stretch;
+  }
+
+  .time-codes-toolbar__actions {
+    width: 100%;
+  }
+
+  .time-codes-toolbar__actions > .ui-button {
+    flex: 1 1 auto;
+  }
+}

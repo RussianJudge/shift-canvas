@@ -9,6 +9,7 @@ import "./overtime.css";
 import "./mutuals.css";
 import "./personnel.css";
 import "./competencies.css";
+import "./time-codes.css";
 
 export const metadata: Metadata = {
   title: "Schwifty",
