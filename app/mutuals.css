@@ -1,0 +1,473 @@
+/* ============================================================
+   Mutuals page — Phase 6B
+   ------------------------------------------------------------
+   Scoped to the Mutuals route. Loaded after shell.css so source order
+   settles conflicts with the legacy .mutual-* rules in globals.css;
+   no !important and no escalated selectors.
+
+   .mutual-picker and .mutual-date-pill are deliberately NOT restyled
+   here — Overtime's create-posting modal renders them too, so any
+   change to those would need an Overtime regression pass.
+   ============================================================ */
+
+/* ---- Toolbar ------------------------------------------------ */
+
+.mutuals-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mutuals-toolbar__search {
+  flex: 1 1 240px;
+  max-width: 360px;
+  min-width: 0;
+}
+
+.mutuals-toolbar__search .ui-field__label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.mutuals-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.mutuals-status {
+  min-height: 1rem;
+  margin: 0;
+  padding-top: var(--space-2);
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Sections ----------------------------------------------- */
+
+.mutuals-section {
+  padding-top: var(--space-5);
+}
+
+.mutuals-section__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+.mutuals-section__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+/* A real count of the rows below it, not a derived figure. */
+.mutuals-section__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.375rem;
+  height: 1.375rem;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-field);
+  background: var(--color-neutral-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+}
+
+.mutuals-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.mutuals-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: var(--space-3);
+}
+
+.mutuals-grid--closed {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+/* ---- Shared party / avatar ---------------------------------- */
+
+.mutual-party {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.mutual-party__id {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mutual-party__name {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+/* Initials are derived from the employee's own name; the element is not
+   rendered at all when none can be derived. */
+.mutual-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-round);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+}
+
+.mutual-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* ---- Open mutual row ---------------------------------------- */
+
+.mutual-open-card {
+  display: grid;
+  grid-template-columns: minmax(200px, 0.9fr) minmax(0, 2fr) minmax(180px, auto);
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+}
+
+.mutual-open-card__detail {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-inline: var(--space-4);
+  border-inline: 1px solid var(--color-border);
+}
+
+.mutual-detail-block {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.mutual-detail-block--applications {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.mutual-detail-block__label {
+  font-size: var(--control-font-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.mutual-detail-block__empty {
+  font-size: var(--control-font-md);
+  color: var(--color-text-muted);
+}
+
+.mutual-open-card__actions {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: stretch;
+  align-content: start;
+  min-width: 0;
+}
+
+.mutual-open-card__actions > .ui-badge {
+  justify-self: start;
+}
+
+/* ---- Exchange card ------------------------------------------ */
+
+.mutual-exchange-card {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+}
+
+.mutual-exchange-card--closed {
+  background: var(--color-surface-muted);
+}
+
+.mutual-exchange-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.mutual-exchange-card__id {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mutual-exchange-card__title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+/* Two sides of the swap, with the direction glyph between them. */
+.mutual-exchange {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.mutual-exchange__side {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.mutual-exchange__swap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-round);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.mutual-exchange__swap svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mutual-approval-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ---- Date chips ---------------------------------------------
+   Tinted by the shift the date belongs to, reusing the grid's own
+   day/night hues. This maps existing data; it does not add a state. */
+
+.mutual-date-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.mutual-date-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-field);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: var(--control-font-sm);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.mutual-date-chip--day {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+  color: var(--color-success-text);
+}
+
+.mutual-date-chip--night {
+  background: var(--color-info-bg);
+  border-color: var(--color-info-border);
+  color: var(--color-info-text);
+}
+
+/* ---- Applications ------------------------------------------- */
+
+.mutual-application-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.mutual-application-row > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mutual-application-row strong {
+  font-size: var(--control-font-md);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.mutual-application-row span:not(.ui-badge) {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.mutual-application-row__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  flex: none;
+}
+
+/* ---- Modals -------------------------------------------------- */
+
+.mutual-modal-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+/* Read-only "Post as" / "Apply as" for workers, matched to the field
+   rhythm so the modal grid stays aligned whichever role is viewing. */
+.mutual-static-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mutual-static-field__label {
+  font-size: var(--control-font-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.mutual-static-field__value {
+  display: flex;
+  align-items: center;
+  height: var(--control-height-md);
+  font-size: var(--control-font-md);
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Actions -------------------------------------------------- */
+
+.mutual-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* Reject sits beside two Approve buttons, so it reads as destructive
+   without competing with them for weight. */
+.mutual-reject-button.ui-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+
+.mutual-reject-button.ui-button:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* ---- Responsive ---------------------------------------------
+   Desktop targets are 1280-1920; these keep the page usable below
+   that without pre-empting the Phase 9 mobile design. */
+
+@media (max-width: 1180px) {
+  .mutuals-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mutual-open-card {
+    grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.6fr);
+  }
+
+  .mutual-open-card__actions {
+    grid-column: span 2;
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .mutual-open-card__actions > .ui-button {
+    flex: 1 1 160px;
+  }
+}
+
+@media (max-width: 720px) {
+  .mutual-open-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mutual-open-card__detail {
+    padding-inline: 0;
+    border-inline: 0;
+    padding-block: var(--space-3);
+    border-block: 1px solid var(--color-border);
+  }
+
+  .mutual-open-card__actions {
+    grid-column: 1 / -1;
+  }
+
+  .mutual-exchange {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mutual-exchange__swap {
+    justify-self: start;
+    transform: rotate(90deg);
+  }
+
+  .mutuals-grid--closed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

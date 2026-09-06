@@ -5,7 +5,7 @@ import { LoadingCardList, LoadingMonthNav, LoadingPanelFrame, LoadingToolbarFiel
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
 import { getMutualsSnapshot } from "@/lib/data";
-import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
+import { getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
 
@@ -41,30 +41,18 @@ function MutualsBoardFallback({
           { label: "Status", value: "Loading mutual year..." },
         ]}
       />
-      <section className="metrics-section mutuals-section">
-        <div className="metrics-section__header">
-          <div className="metrics-section__title-group">
-            <h2 className="metrics-section__title">Post Mutual Shifts</h2>
-          </div>
-        </div>
-        <div className="metrics-card">
-          <LoadingToolbarFields
-            className="workspace-toolbar workspace-toolbar--personnel-page"
-            fields={[
-              { label: "Post As", value: viewer.displayName },
-              { label: "Post Month", value: formatMonthLabel(month) },
-            ]}
-          />
-        </div>
-      </section>
-      <section className="metrics-section mutuals-section">
-        <div className="metrics-section__header">
-          <div className="metrics-section__title-group">
-            <h2 className="metrics-section__title">Open Mutuals</h2>
-          </div>
+      <section className="mutuals-section">
+        <div className="mutuals-section__header">
+          <h2 className="mutuals-section__title">Open mutuals</h2>
           <LoadingMonthNav monthLabel={formatYearLabel(month)} />
         </div>
-        <LoadingCardList cards={3} />
+        <LoadingCardList cards={1} />
+      </section>
+      <section className="mutuals-section">
+        <div className="mutuals-section__header">
+          <h2 className="mutuals-section__title">Pending leader approval</h2>
+        </div>
+        <LoadingCardList cards={2} />
       </section>
     </LoadingPanelFrame>
   );

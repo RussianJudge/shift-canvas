@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
 
 import {
   acceptMutualApplication,
@@ -15,6 +14,11 @@ import {
   withdrawMutualPosting,
 } from "@/app/actions";
 import { AppDateSelector } from "@/components/app-date-selector";
+import { deriveInitials } from "@/lib/initials";
+import { Badge } from "@/components/ui/badge";
+import { Button, IconButton } from "@/components/ui/button";
+import { Select, TextInput } from "@/components/ui/field";
+import { Modal } from "@/components/ui/modal";
 import {
   formatMonthLabel,
   getEmployeeMap,
@@ -92,6 +96,80 @@ function getLeaderApprovalLabel({
     : `Shift ${scheduleName} pending`;
 }
 
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+/** Swap glyph shown between the two sides of an exchange. */
+function ExchangeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 8h13l-3-3M20 16H7l3 3" />
+    </svg>
+  );
+}
+
+/** Initials avatar; omitted entirely when no letters can be derived. */
+function MutualAvatar({ name }: { name: string }) {
+  const initials = deriveInitials(name);
+
+  if (!initials) {
+    return null;
+  }
+
+  return (
+    <span className="mutual-avatar" aria-hidden="true">
+      {initials}
+    </span>
+  );
+}
+
+/**
+ * Date chips tinted by the shift they belong to. The tint maps existing
+ * shift-kind data onto the grid's own day/night hues — it does not introduce
+ * a new status or redefine a code.
+ */
+function MutualDateChips({ dates, shiftKinds }: { dates: string[]; shiftKinds: ShiftKind[] }) {
+  return (
+    <div className="mutual-date-summary">
+      {dates.map((date, index) => {
+        const shiftKind = shiftKinds[index] ?? "OFF";
+
+        return (
+          <span key={date} className={`mutual-date-chip mutual-date-chip--${shiftKind.toLowerCase()}`}>
+            {formatShortDate(date)} · {getShiftBadgeLabel(shiftKind)}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** One side of an exchange: who they are and which shifts they bring. */
+function MutualExchangeSide({
+  name,
+  dates,
+  shiftKinds,
+}: {
+  name: string;
+  dates: string[];
+  shiftKinds: ShiftKind[];
+}) {
+  return (
+    <div className="mutual-exchange__side">
+      <div className="mutual-party">
+        <MutualAvatar name={name} />
+        <strong className="mutual-party__name">{name}</strong>
+      </div>
+      <MutualDateChips dates={dates} shiftKinds={shiftKinds} />
+    </div>
+  );
+}
+
 /** Reusable date grid used for both posting and applying to mutual swaps. */
 function SettingsIcon() {
   return (
@@ -115,80 +193,70 @@ function MutualSettingsModal({
   onClose: () => void;
   onSave: () => void;
 }) {
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <span className="assignment-modal__eyebrow">Mutual settings</span>
-            <h2 className="assignment-modal__title">Rules for this business area</h2>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
-            Close
-          </button>
-        </div>
-
-        <div className="modal-form-grid">
-          <label className="field">
-            <span>Max shifts per posting</span>
-            <input
-              type="number"
-              min={1}
-              placeholder="No limit"
-              value={settings.maxShiftsPerPosting ?? ""}
-              disabled={isSaving}
-              onChange={(event) =>
-                onChange((current) => ({
-                  ...current,
-                  maxShiftsPerPosting: event.target.value === "" ? null : Number(event.target.value),
-                }))
-              }
-            />
-          </label>
-
-          <label className="field">
-            <span>Post up to this many months ahead</span>
-            <input
-              type="number"
-              min={1}
-              value={settings.postingHorizonMonths}
-              disabled={isSaving}
-              onChange={(event) =>
-                onChange((current) => ({
-                  ...current,
-                  postingHorizonMonths: Number(event.target.value),
-                }))
-              }
-            />
-          </label>
-
-          <label className="subschedule-status-toggle">
-            <input
-              type="checkbox"
-              checked={settings.requireLeaderApproval}
-              disabled={isSaving}
-              onChange={(event) =>
-                onChange((current) => ({
-                  ...current,
-                  requireLeaderApproval: event.target.checked,
-                }))
-              }
-            />
-            <span>Require leader approval before a mutual takes effect</span>
-          </label>
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onClose} disabled={isSaving}>
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Mutual settings"
+      title="Rules for this business area"
+      dismissible={!isSaving}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={isSaving}>
             Cancel
-          </button>
-          <button type="button" className="primary-button" onClick={onSave} disabled={isSaving}>
+          </Button>
+          <Button variant="primary" onClick={onSave} loading={isSaving}>
             {isSaving ? "Saving..." : "Save settings"}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    >
+      <div className="mutual-modal-fields">
+        <TextInput
+          label="Max shifts per posting"
+          type="number"
+          min={1}
+          placeholder="No limit"
+          value={settings.maxShiftsPerPosting ?? ""}
+          disabled={isSaving}
+          onChange={(event) =>
+            onChange((current) => ({
+              ...current,
+              maxShiftsPerPosting: event.target.value === "" ? null : Number(event.target.value),
+            }))
+          }
+        />
+
+        <TextInput
+          label="Post up to this many months ahead"
+          type="number"
+          min={1}
+          value={settings.postingHorizonMonths}
+          disabled={isSaving}
+          onChange={(event) =>
+            onChange((current) => ({
+              ...current,
+              postingHorizonMonths: Number(event.target.value),
+            }))
+          }
+        />
+
+        <label className="subschedule-status-toggle">
+          <input
+            type="checkbox"
+            checked={settings.requireLeaderApproval}
+            disabled={isSaving}
+            onChange={(event) =>
+              onChange((current) => ({
+                ...current,
+                requireLeaderApproval: event.target.checked,
+              }))
+            }
+          />
+          <span>Require leader approval before a mutual takes effect</span>
+        </label>
+      </div>
+    </Modal>
   );
 }
 
@@ -284,30 +352,39 @@ function MutualApplyModal({
     setOfferMonth((current) => (monthOptions.includes(current) ? current : monthOptions[0] ?? getCurrentUtcMonthKey()));
   }, [monthOptions]);
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Apply To Mutual</h2>
-            <p className="assignment-modal__context">
-              Match {posting.ownerEmployeeName}'s {posting.dates.length} posted shift{posting.dates.length === 1 ? "" : "s"} with your own dates.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-
-        {viewer.role === "worker" ? (
-          <div className="field field--static">
-            <span>Apply As</span>
-            <strong>{employee?.name ?? viewer.displayName}</strong>
-          </div>
-        ) : (
-          <label className="field">
-            <span>Apply As</span>
-            <select value={selectedEmployeeId} onChange={(event) => onEmployeeChange(event.target.value)}>
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Mutuals"
+      title="Apply to mutual"
+      description={`Match ${posting.ownerEmployeeName}'s ${posting.dates.length} posted shift${posting.dates.length === 1 ? "" : "s"} with your own dates.`}
+      size="lg"
+      dismissible={!isSubmitting}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onSubmit} loading={isSubmitting}>
+            {isSubmitting ? "Submitting..." : "Submit application"}
+          </Button>
+        </>
+      }
+    >
+      <>
+        <div className="mutual-modal-fields">
+          {viewer.role === "worker" ? (
+            <div className="mutual-static-field">
+              <span className="mutual-static-field__label">Apply as</span>
+              <strong className="mutual-static-field__value">{employee?.name ?? viewer.displayName}</strong>
+            </div>
+          ) : (
+            <Select
+              label="Apply as"
+              value={selectedEmployeeId}
+              onChange={(event) => onEmployeeChange(event.target.value)}
+            >
               {snapshot.schedules
                 .flatMap((schedule) => schedule.employees)
                 .filter((entry) => entry.id !== posting.ownerEmployeeId && entry.scheduleId !== posting.ownerScheduleId)
@@ -317,20 +394,21 @@ function MutualApplyModal({
                     {entry.name}
                   </option>
                 ))}
-            </select>
-          </label>
-        )}
+            </Select>
+          )}
 
-        <label className="field">
-          <span>Offer Month</span>
-          <select value={offerMonth} onChange={(event) => setOfferMonth(event.target.value)}>
+          <Select
+            label="Offer month"
+            value={offerMonth}
+            onChange={(event) => setOfferMonth(event.target.value)}
+          >
             {monthOptions.map((month) => (
               <option key={month} value={month}>
                 {formatMonthLabel(month)}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </div>
 
         <MutualDatePicker
           title="Offered shifts"
@@ -339,15 +417,8 @@ function MutualApplyModal({
           onToggle={onToggleDate}
           helper={`${selectedDates.length}/${posting.dates.length} selected`}
         />
-
-        <div className="metrics-transfer-actions">
-          <button type="button" className="primary-button" onClick={onSubmit} disabled={isSubmitting}>
-            {isSubmitting ? "Submitting..." : "Submit application"}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+      </>
+    </Modal>
   );
 }
 
@@ -388,30 +459,31 @@ function MutualPostModal({
     return null;
   }
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onClose}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Create Post Mutual</h2>
-            <p className="assignment-modal__context">
-              Choose the worker and shifts you want to place on the mutual board.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-
-        {viewer.role === "worker" ? (
-          <div className="field field--static">
-            <span>Post As</span>
-            <strong>{selectedPostingEmployee?.name ?? viewer.displayName}</strong>
-          </div>
-        ) : canPostForOthers ? (
-          <label className="field">
-            <span>Post As</span>
-            <select
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Mutuals"
+      title="Create mutual posting"
+      description="Choose the worker and shifts you want to place on the mutual board."
+      size="lg"
+      dismissible={!isSubmitting}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onSubmit} loading={isSubmitting}>
+            {isSubmitting ? "Posting..." : "Post mutual"}
+          </Button>
+        </>
+      }
+    >
+      <>
+        <div className="mutual-modal-fields">
+          {viewer.role !== "worker" && canPostForOthers ? (
+            <Select
+              label="Post as"
               value={selectedPostingEmployeeId}
               onChange={(event) => onEmployeeChange(event.target.value)}
             >
@@ -420,25 +492,28 @@ function MutualPostModal({
                   {employee.name}
                 </option>
               ))}
-            </select>
-          </label>
-        ) : (
-          <div className="field field--static">
-            <span>Post As</span>
-            <strong>{selectedPostingEmployee?.name ?? viewer.displayName}</strong>
-          </div>
-        )}
+            </Select>
+          ) : (
+            <div className="mutual-static-field">
+              <span className="mutual-static-field__label">Post as</span>
+              <strong className="mutual-static-field__value">
+                {selectedPostingEmployee?.name ?? viewer.displayName}
+              </strong>
+            </div>
+          )}
 
-        <label className="field">
-          <span>Post Month</span>
-          <select value={postingMonth} onChange={(event) => onMonthChange(event.target.value)}>
+          <Select
+            label="Post month"
+            value={postingMonth}
+            onChange={(event) => onMonthChange(event.target.value)}
+          >
             {postingMonthOptions.map((month) => (
               <option key={month} value={month}>
                 {formatMonthLabel(month)}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </div>
 
         <MutualDatePicker
           title="Shifts to swap"
@@ -447,15 +522,8 @@ function MutualPostModal({
           onToggle={onToggleDate}
           helper={selectedPostingEmployee ? `${postingDates.length} selected` : undefined}
         />
-
-        <div className="metrics-transfer-actions">
-          <button type="button" className="primary-button" onClick={onSubmit} disabled={isSubmitting}>
-            {isSubmitting ? "Posting..." : "Post mutual"}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+      </>
+    </Modal>
   );
 }
 
@@ -474,40 +542,34 @@ function CancelAcceptedMutualModal({
     return null;
   }
 
-  return createPortal(
-    <div className="assignment-modal-backdrop" onClick={onCancel}>
-      <section className="assignment-modal mutual-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="assignment-modal__header">
-          <div>
-            <h2 className="assignment-modal__title">Cancel accepted mutual?</h2>
-            <p className="assignment-modal__context">
-              Cancel this accepted mutual for {posting.ownerEmployeeName}? This will restore the original schedule cells.
-            </p>
-          </div>
-          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
-            Close
-          </button>
-        </div>
-
-        <div className="mutual-date-summary">
-          {posting.dates.map((date, index) => (
-            <span key={date} className="mutual-date-chip">
-              {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
-            </span>
-          ))}
-        </div>
-
-        <div className="assignment-modal__footer">
-          <button type="button" className="ghost-button" onClick={onCancel} disabled={isSubmitting}>
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Mutuals"
+      title="Cancel accepted mutual?"
+      description={`Cancel this accepted mutual for ${posting.ownerEmployeeName}? This will restore the original schedule cells.`}
+      // The cancellation rewrites schedule cells; hold the dialog while it runs.
+      dismissible={!isSubmitting}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel} disabled={isSubmitting}>
             Keep mutual
-          </button>
-          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} loading={isSubmitting}>
             {isSubmitting ? "Cancelling..." : "Cancel mutual"}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    >
+      <div className="mutual-date-summary">
+        {posting.dates.map((date, index) => (
+          <span key={date} className="mutual-date-chip">
+            {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
+          </span>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
@@ -757,70 +819,60 @@ export function MutualsPanel({
 
   return (
     <section className="panel-frame mutuals-page">
-      <div className="panel-heading panel-heading--simple mutuals-topbar">
+      <div className="panel-heading panel-heading--simple">
         <h1 className="panel-title">Mutuals</h1>
-        <AppDateSelector
-          mode="year"
-          value={viewMonth}
-          label="Mutuals year"
-          triggerLabel={formatYearLabel(viewMonth)}
-          disabled={isMonthLoading}
-          className="mutuals-year-pager"
-          onChange={handleYearChange}
-        />
-        {viewer.role === "admin" ? (
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => {
-              setDraftSettings(snapshot.settings);
-              setIsSettingsModalOpen(true);
-            }}
-            aria-label="Mutual settings"
-            title="Mutual settings"
-          >
-            <SettingsIcon />
-          </button>
-        ) : null}
       </div>
 
-      <div className="workspace-toolbar workspace-toolbar--personnel-page mutuals-search-bar">
-        <label className="field">
-          <span>Search</span>
-          <input
+      <div className="mutuals-toolbar">
+        <div className="mutuals-toolbar__search">
+          <TextInput
+            label="Search"
             type="search"
             placeholder="Search by worker name"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-        </label>
+        </div>
+
+        <div className="mutuals-toolbar__actions">
+          <AppDateSelector
+            mode="year"
+            value={viewMonth}
+            label="Mutuals year"
+            triggerLabel={formatYearLabel(viewMonth)}
+            disabled={isMonthLoading}
+            className="mutuals-year-pager"
+            onChange={handleYearChange}
+          />
+          {viewer.role === "admin" ? (
+            <IconButton
+              variant="secondary"
+              onClick={() => {
+                setDraftSettings(snapshot.settings);
+                setIsSettingsModalOpen(true);
+              }}
+              label="Mutual settings"
+              icon={<SettingsIcon />}
+            />
+          ) : null}
+          <Button variant="primary" onClick={() => setIsPostModalOpen(true)} disabled={isSubmitting}>
+            <PlusIcon />
+            Create mutual posting
+          </Button>
+        </div>
       </div>
 
-      {statusMessage ? (
-        <div className="workspace-toolbar workspace-toolbar--personnel-page">
-          <div className="toolbar-status-wrap">
-            <p className="toolbar-status">{statusMessage}</p>
-          </div>
-        </div>
-      ) : null}
+      <p className="mutuals-status" role="status" aria-live="polite">
+        {statusMessage}
+      </p>
 
-      <section className="metrics-section mutuals-section">
-        <div className="metrics-section__header">
-          <h2 className="metrics-section__title">Open Mutuals</h2>
+      <section className="mutuals-section">
+        <div className="mutuals-section__header">
+          <h2 className="mutuals-section__title">Open mutuals</h2>
+          <span className="mutuals-section__count">{openPostings.length}</span>
         </div>
 
-        <div className="mutuals-create-action">
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => setIsPostModalOpen(true)}
-            disabled={isSubmitting}
-          >
-            Create Mutual Posting
-          </button>
-        </div>
-
-        <div className="metrics-team-list">
+        <div className="mutuals-list">
           {openPostings.length > 0 ? (
             openPostings.map((posting) => {
               const canCancelPosting =
@@ -830,54 +882,23 @@ export function MutualsPanel({
                 (viewer.role !== "worker" || viewerEmployee?.scheduleId !== posting.ownerScheduleId);
 
               return (
-                <article key={posting.id} className="metrics-card mutual-card">
-                  <div className="metrics-card__header">
-                    <div>
-                      <p className="metrics-card__eyebrow">Shift {posting.ownerScheduleName}</p>
-                      <h3 className="metrics-card__title">{posting.ownerEmployeeName}</h3>
+                <article key={posting.id} className="mutual-open-card">
+                  <div className="mutual-party">
+                    <MutualAvatar name={posting.ownerEmployeeName} />
+                    <div className="mutual-party__id">
+                      <span className="mutual-eyebrow">Shift {posting.ownerScheduleName}</span>
+                      <h3 className="mutual-party__name">{posting.ownerEmployeeName}</h3>
                     </div>
-                    <span className="legend-pill legend-pill--slate">{getStatusLabel(posting.status)}</span>
                   </div>
 
-                  <div className="mutual-date-summary">
-                    {posting.dates.map((date, index) => (
-                      <span key={date} className="mutual-date-chip">
-                        {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
-                      </span>
-                    ))}
-                  </div>
+                  <div className="mutual-open-card__detail">
+                    <div className="mutual-detail-block">
+                      <span className="mutual-detail-block__label">Offering</span>
+                      <MutualDateChips dates={posting.dates} shiftKinds={posting.shiftKinds} />
+                    </div>
 
-                  <div className="mutual-card__actions">
-                    {canCancelPosting ? (
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        onClick={() =>
-                          confirmAction(
-                            `Cancel this open mutual for ${posting.ownerEmployeeName}?`,
-                            () => withdrawMutualPosting({ postingId: posting.id }),
-                          )
-                        }
-                        disabled={isSubmitting}
-                      >
-                        Cancel mutual
-                      </button>
-                    ) : null}
-
-                    {canApplyToPosting ? (
-                      <button
-                        type="button"
-                        className="primary-button"
-                        onClick={() => resetApplication(posting.id)}
-                        disabled={isSubmitting}
-                      >
-                        Apply
-                      </button>
-                    ) : null}
-                  </div>
-
-                  <div className="mutual-applications">
-                    <strong className="metrics-top-list__title">Applications</strong>
+                    <div className="mutual-detail-block mutual-detail-block--applications">
+                      <span className="mutual-detail-block__label">Applications</span>
                     {posting.applications.length > 0 ? (
                       posting.applications.map((application) => {
                         const canAccept =
@@ -895,11 +916,11 @@ export function MutualsPanel({
                               </span>
                             </div>
                             <div className="mutual-application-row__actions">
-                              <span className="legend-pill legend-pill--slate">{getStatusLabel(application.status)}</span>
+                              <Badge tone="neutral">{getStatusLabel(application.status)}</Badge>
                               {canAccept ? (
-                                <button
-                                  type="button"
-                                  className="primary-button"
+                                <Button
+                                  variant="primary"
+                                  size="sm"
                                   onClick={() =>
                                     runAction(() =>
                                       acceptMutualApplication({
@@ -911,12 +932,12 @@ export function MutualsPanel({
                                   disabled={isSubmitting}
                                 >
                                   Accept
-                                </button>
+                                </Button>
                               ) : null}
                               {canWithdraw ? (
-                                <button
-                                  type="button"
-                                  className="ghost-button"
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
                                   onClick={() =>
                                     runAction(() =>
                                       withdrawMutualApplication({
@@ -928,15 +949,49 @@ export function MutualsPanel({
                                   disabled={isSubmitting}
                                 >
                                   Delete offer
-                                </button>
+                                </Button>
                               ) : null}
                             </div>
                           </div>
                         );
                       })
                     ) : (
-                      <span className="metrics-top-list__empty">No applications yet.</span>
+                      <span className="mutual-detail-block__empty">No applications yet.</span>
                     )}
+                    </div>
+                  </div>
+
+                  <div className="mutual-open-card__actions">
+                    <Badge tone={posting.status === "open" ? "info" : "neutral"}>
+                      {getStatusLabel(posting.status)}
+                    </Badge>
+
+                    {canApplyToPosting ? (
+                      <Button
+                        variant="primary"
+                        fullWidth
+                        onClick={() => resetApplication(posting.id)}
+                        disabled={isSubmitting}
+                      >
+                        Apply
+                      </Button>
+                    ) : null}
+
+                    {canCancelPosting ? (
+                      <Button
+                        variant="secondary"
+                        fullWidth
+                        onClick={() =>
+                          confirmAction(
+                            `Cancel this open mutual for ${posting.ownerEmployeeName}?`,
+                            () => withdrawMutualPosting({ postingId: posting.id }),
+                          )
+                        }
+                        disabled={isSubmitting}
+                      >
+                        Cancel mutual
+                      </Button>
+                    ) : null}
                   </div>
                 </article>
               );
@@ -950,12 +1005,13 @@ export function MutualsPanel({
         </div>
       </section>
 
-      <section className="metrics-section mutuals-section">
-        <div className="metrics-section__header">
-          <h2 className="metrics-section__title">Pending Leader Approval</h2>
+      <section className="mutuals-section">
+        <div className="mutuals-section__header">
+          <h2 className="mutuals-section__title">Pending leader approval</h2>
+          <span className="mutuals-section__count">{pendingApprovalPostings.length}</span>
         </div>
 
-        <div className="metrics-team-list">
+        <div className="mutuals-grid">
           {pendingApprovalPostings.length > 0 ? (
             pendingApprovalPostings.map((posting) => {
               const acceptedApplication = posting.applications.find((application) => application.id === posting.acceptedApplicationId);
@@ -971,68 +1027,62 @@ export function MutualsPanel({
                   (viewer.role === "leader" && effectiveViewerScheduleId === acceptedApplication?.applicantScheduleId));
 
               return (
-                <article key={posting.id} className="metrics-card mutual-card">
-                  <div className="metrics-card__header">
-                    <div>
-                      <p className="metrics-card__eyebrow">Shift {posting.ownerScheduleName}</p>
-                      <h3 className="metrics-card__title">
+                <article key={posting.id} className="mutual-exchange-card">
+                  <div className="mutual-exchange-card__header">
+                    <div className="mutual-exchange-card__id">
+                      <span className="mutual-eyebrow">Shift {posting.ownerScheduleName}</span>
+                      <h3 className="mutual-exchange-card__title">
                         {posting.ownerEmployeeName}
                         {acceptedApplication ? ` ↔ ${acceptedApplication.applicantEmployeeName}` : ""}
                       </h3>
                     </div>
-                    <span className="legend-pill legend-pill--amber">Pending approval</span>
+                    <Badge tone="warning">Pending approval</Badge>
                   </div>
 
-                  <div className="mutual-accepted-grid">
-                    <div>
-                      <strong>{posting.ownerEmployeeName}</strong>
-                      <div className="mutual-date-summary">
-                        {posting.dates.map((date, index) => (
-                          <span key={date} className="mutual-date-chip">
-                            {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                  <div className="mutual-exchange">
+                    <MutualExchangeSide
+                      name={posting.ownerEmployeeName}
+                      dates={posting.dates}
+                      shiftKinds={posting.shiftKinds}
+                    />
                     {acceptedApplication ? (
-                      <div>
-                        <strong>{acceptedApplication.applicantEmployeeName}</strong>
-                        <div className="mutual-date-summary">
-                          {acceptedApplication.dates.map((date, index) => (
-                            <span key={date} className="mutual-date-chip">
-                              {formatShortDate(date)} · {getShiftBadgeLabel(acceptedApplication.shiftKinds[index] ?? "OFF")}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+                      <>
+                        <span className="mutual-exchange__swap" aria-hidden="true">
+                          <ExchangeIcon />
+                        </span>
+                        <MutualExchangeSide
+                          name={acceptedApplication.applicantEmployeeName}
+                          dates={acceptedApplication.dates}
+                          shiftKinds={acceptedApplication.shiftKinds}
+                        />
+                      </>
                     ) : null}
                   </div>
 
-                  <div className="mutual-date-summary">
-                    <span className="legend-pill legend-pill--slate">
+                  <div className="mutual-approval-row">
+                    <Badge tone="neutral">
                       {getLeaderApprovalLabel({
                         scheduleName: posting.ownerScheduleName,
                         approvedAt: posting.ownerLeaderApprovedAt,
                         approvedByName: posting.ownerLeaderApprovedByName,
                       })}
-                    </span>
+                    </Badge>
                     {acceptedApplication ? (
-                      <span className="legend-pill legend-pill--slate">
+                      <Badge tone="neutral">
                         {getLeaderApprovalLabel({
                           scheduleName: acceptedApplication.applicantScheduleName,
                           approvedAt: posting.applicantLeaderApprovedAt,
                           approvedByName: posting.applicantLeaderApprovedByName,
                         })}
-                      </span>
+                      </Badge>
                     ) : null}
                   </div>
 
                   {canApproveOwner || canApproveApplicant ? (
                     <div className="mutual-card__actions">
                       {canApproveOwner ? (
-                        <button
-                          type="button"
-                          className="primary-button"
+                        <Button
+                          variant="primary"
                           onClick={() =>
                             runAction(() =>
                               approveMutualPosting({
@@ -1044,12 +1094,11 @@ export function MutualsPanel({
                           disabled={isSubmitting}
                         >
                           Approve {posting.ownerScheduleName}
-                        </button>
+                        </Button>
                       ) : null}
                       {canApproveApplicant && acceptedApplication ? (
-                        <button
-                          type="button"
-                          className="primary-button"
+                        <Button
+                          variant="primary"
                           onClick={() =>
                             runAction(() =>
                               approveMutualPosting({
@@ -1061,11 +1110,11 @@ export function MutualsPanel({
                           disabled={isSubmitting}
                         >
                           Approve {acceptedApplication.applicantScheduleName}
-                        </button>
+                        </Button>
                       ) : null}
-                      <button
-                        type="button"
-                        className="ghost-button mutual-reject-button"
+                      <Button
+                        variant="subtle"
+                        className="mutual-reject-button"
                         onClick={() =>
                           confirmAction(
                             "Reject this mutual and cancel the swap? This cannot be undone.",
@@ -1075,7 +1124,7 @@ export function MutualsPanel({
                         disabled={isSubmitting}
                       >
                         Reject
-                      </button>
+                      </Button>
                     </div>
                   ) : null}
                 </article>
@@ -1090,64 +1139,59 @@ export function MutualsPanel({
         </div>
       </section>
 
-      <section className="metrics-section mutuals-section">
-        <div className="metrics-section__header">
-          <h2 className="metrics-section__title">Accepted Mutuals</h2>
+      <section className="mutuals-section">
+        <div className="mutuals-section__header">
+          <h2 className="mutuals-section__title">Accepted mutuals</h2>
+          <span className="mutuals-section__count">{acceptedPostings.length}</span>
         </div>
 
-        <div className="metrics-team-list">
+        <div className="mutuals-grid">
           {acceptedPostings.length > 0 ? (
             acceptedPostings.map((posting) => {
               const acceptedApplication = posting.applications.find((application) => application.id === posting.acceptedApplicationId);
 
               return (
-                <article key={posting.id} className="metrics-card mutual-card">
-                  <div className="metrics-card__header">
-                    <div>
-                      <p className="metrics-card__eyebrow">Shift {posting.ownerScheduleName}</p>
-                      <h3 className="metrics-card__title">
+                <article key={posting.id} className="mutual-exchange-card">
+                  <div className="mutual-exchange-card__header">
+                    <div className="mutual-exchange-card__id">
+                      <span className="mutual-eyebrow">Shift {posting.ownerScheduleName}</span>
+                      <h3 className="mutual-exchange-card__title">
                         {posting.ownerEmployeeName}
                         {acceptedApplication ? ` ↔ ${acceptedApplication.applicantEmployeeName}` : ""}
                       </h3>
                     </div>
-                    <span className="legend-pill legend-pill--teal">Live</span>
+                    <Badge tone="success">Live</Badge>
                   </div>
 
-                  <div className="mutual-accepted-grid">
-                    <div>
-                      <strong>{posting.ownerEmployeeName}</strong>
-                      <div className="mutual-date-summary">
-                        {posting.dates.map((date, index) => (
-                          <span key={date} className="mutual-date-chip">
-                            {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                  <div className="mutual-exchange">
+                    <MutualExchangeSide
+                      name={posting.ownerEmployeeName}
+                      dates={posting.dates}
+                      shiftKinds={posting.shiftKinds}
+                    />
                     {acceptedApplication ? (
-                      <div>
-                        <strong>{acceptedApplication.applicantEmployeeName}</strong>
-                        <div className="mutual-date-summary">
-                          {acceptedApplication.dates.map((date, index) => (
-                            <span key={date} className="mutual-date-chip">
-                              {formatShortDate(date)} · {getShiftBadgeLabel(acceptedApplication.shiftKinds[index] ?? "OFF")}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+                      <>
+                        <span className="mutual-exchange__swap" aria-hidden="true">
+                          <ExchangeIcon />
+                        </span>
+                        <MutualExchangeSide
+                          name={acceptedApplication.applicantEmployeeName}
+                          dates={acceptedApplication.dates}
+                          shiftKinds={acceptedApplication.shiftKinds}
+                        />
+                      </>
                     ) : null}
                   </div>
 
                   {viewer.role === "leader" || viewer.role === "admin" ? (
                     <div className="mutual-card__actions">
-                      <button
-                        type="button"
-                        className="ghost-button"
+                      <Button
+                        variant="secondary"
                         onClick={() => setCancelAcceptedPostingId(posting.id)}
                         disabled={isSubmitting}
                       >
                         Cancel mutual
-                      </button>
+                      </Button>
                     </div>
                   ) : null}
                 </article>
@@ -1162,30 +1206,28 @@ export function MutualsPanel({
         </div>
       </section>
 
-      <section className="metrics-section mutuals-section">
-        <div className="metrics-section__header">
-          <h2 className="metrics-section__title">Closed Mutuals</h2>
+      <section className="mutuals-section">
+        <div className="mutuals-section__header">
+          <h2 className="mutuals-section__title">Closed mutuals</h2>
+          <span className="mutuals-section__count">{closedPostings.length}</span>
         </div>
 
-        <div className="metrics-team-list">
+        <div className="mutuals-grid mutuals-grid--closed">
           {closedPostings.length > 0 ? (
             closedPostings.map((posting) => (
-              <article key={posting.id} className="metrics-card mutual-card mutual-card--closed">
-                <div className="metrics-card__header">
-                  <div>
-                    <p className="metrics-card__eyebrow">Shift {posting.ownerScheduleName}</p>
-                    <h3 className="metrics-card__title">{posting.ownerEmployeeName}</h3>
+              <article key={posting.id} className="mutual-exchange-card mutual-exchange-card--closed">
+                <div className="mutual-exchange-card__header">
+                  <div className="mutual-party">
+                    <MutualAvatar name={posting.ownerEmployeeName} />
+                    <div className="mutual-exchange-card__id">
+                      <span className="mutual-eyebrow">Shift {posting.ownerScheduleName}</span>
+                      <h3 className="mutual-exchange-card__title">{posting.ownerEmployeeName}</h3>
+                    </div>
                   </div>
-                  <span className="legend-pill legend-pill--slate">{getStatusLabel(posting.status)}</span>
+                  <Badge tone="neutral">{getStatusLabel(posting.status)}</Badge>
                 </div>
 
-                <div className="mutual-date-summary">
-                  {posting.dates.map((date, index) => (
-                    <span key={date} className="mutual-date-chip">
-                      {formatShortDate(date)} · {getShiftBadgeLabel(posting.shiftKinds[index] ?? "OFF")}
-                    </span>
-                  ))}
-                </div>
+                <MutualDateChips dates={posting.dates} shiftKinds={posting.shiftKinds} />
               </article>
             ))
           ) : (

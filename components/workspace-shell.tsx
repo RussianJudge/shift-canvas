@@ -18,6 +18,7 @@ import { setAdminViewingScope, signOut } from "@/app/auth-actions";
 import { BrandLockup } from "@/components/brand-lockup";
 import { Button, IconButton } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
+import { deriveInitials } from "@/lib/initials";
 import {
   SIDEBAR_COLLAPSE_STORAGE_KEY,
   resolveSidebarCollapseForViewport,
@@ -42,25 +43,6 @@ export function useWorkspaceNavigationGuard(guard: WorkspaceNavigationGuard | nu
       setNavigationGuard(null);
     };
   }, [guard, setNavigationGuard]);
-}
-
-/**
- * Initials come from whatever display name the session actually carries, which
- * may be a single word or an email local part. Anything we cannot derive a
- * letter from returns null and the avatar is omitted rather than faked.
- */
-function deriveInitials(displayName: string) {
-  const words = displayName.trim().split(/[\s@._-]+/).filter(Boolean);
-
-  if (words.length === 0) {
-    return null;
-  }
-
-  const first = words[0]?.[0] ?? "";
-  const last = words.length > 1 ? words[words.length - 1]?.[0] ?? "" : "";
-  const initials = `${first}${last}`.toUpperCase();
-
-  return /^[A-Z]{1,2}$/.test(initials) ? initials : null;
 }
 
 function getCurrentMonthKey(now = new Date()) {
