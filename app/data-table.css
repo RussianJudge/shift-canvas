@@ -79,12 +79,20 @@
     box-shadow 140ms ease;
 }
 
-.personnel-table .table-input:hover:not(:disabled),
+/* The `input` in these two selectors is doing real work. globals.css pins
+   `border-color` on `input:not([type="checkbox"]):not([type="radio"])
+   :not([type="range"]):not(.ui-input)`, which is (0,4,1) — the element
+   component outranks a (0,4,0) class-and-pseudo selector however late it
+   loads, so without `input` here the hover and focus borders never paint.
+   Naming the element ties the count at (0,4,1) and source order decides.
+   `.table-select` needs no such help: globals only reaches it through
+   `select:not(.ui-select)`, which is (0,1,1). */
+.personnel-table input.table-input:hover:not(:disabled),
 .personnel-table .table-select:hover:not(:disabled) {
   border-color: var(--color-border-strong);
 }
 
-.personnel-table .table-input:focus-visible:not(:disabled),
+.personnel-table input.table-input:focus-visible:not(:disabled),
 .personnel-table .table-select:focus-visible:not(:disabled) {
   outline: none;
   border-color: var(--color-primary);
@@ -104,13 +112,20 @@
 }
 
 /* Row state is also carried by the inline issue text, so the tint is
-   reinforcement rather than the only signal. */
-.personnel-table .table-row--invalid td {
-  background: var(--color-danger-bg);
-}
+   reinforcement rather than the only signal.
 
+   Order is load-bearing: every panel applies both classes, so an edited
+   row that fails validation carries --dirty and --invalid at once. The two
+   rules have equal specificity, so whichever is declared last wins, and
+   the error has to be the one that shows — otherwise the row that needs
+   fixing looks like every other edited row. globals.css sets the same
+   precedence; keep --invalid below --dirty here. */
 .personnel-table .table-row--dirty td {
   background: var(--color-warning-bg);
+}
+
+.personnel-table .table-row--invalid td {
+  background: var(--color-danger-bg);
 }
 
 .personnel-table .table-pills {

@@ -33,6 +33,30 @@ reduces usability.
 - Never fabricate data or metrics to match a mockup.
 - Use restrained semantic colour and never rely on colour alone.
 
+## Base styles must not outrank state styles
+
+The redesign stylesheets load after `globals.css`, so a rule on a bare class
+wins any equal-specificity rule that came before it — including the
+`--completed` / `--invalid` / `--collapsed` / `:hover` / `:focus-visible`
+variants that carry meaning. Restyling a base class therefore switches states
+off silently, and nothing fails until someone exercises the state.
+
+- Put only geometry and type scale on a bare class. Leave `background`,
+  `color`, `display`, `outline` and `box-shadow` to whichever rule owns that
+  state, or the state stops rendering.
+- Shorthands reset their longhands: `background` clears a modifier's
+  `background-image`, `border` clears its `border-color`.
+- Where two states can apply at once, the more severe one must be declared
+  last — an edited row that fails validation has to read as an error.
+- An element name beats any number of classes on the `c` component of
+  specificity, so a bare `input` rule in `globals.css` can outrank a scoped
+  state rule. Name the element in the state selector rather than escalating.
+- A media query adds no specificity. A later unconditional rule replaces a
+  responsive one, so restate it inside the breakpoint.
+
+Check each state, and the combinations, in both themes before calling a
+restyle done.
+
 ## Tokens
 
 Map these targets to existing project tokens instead of duplicating them:

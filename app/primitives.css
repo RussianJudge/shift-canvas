@@ -233,8 +233,14 @@
   color: var(--color-text-muted);
 }
 
-.ui-input:hover:not(:disabled),
-.ui-select:hover:not(:disabled) {
+/* The invalid guard matters as much as the disabled one: without it this
+   rule (two classes-or-pseudos plus a :not) outranks the single-attribute
+   [aria-invalid="true"] rule below, and pointing at a field in error turns
+   its red border grey — the error signal disappears exactly when the user
+   reaches for the control. Focus is already safe, because the invalid
+   focus rule is more specific than the plain focus one. */
+.ui-input:hover:not(:disabled):not([aria-invalid="true"]),
+.ui-select:hover:not(:disabled):not([aria-invalid="true"]) {
   border-color: var(--color-border-strong);
 }
 
