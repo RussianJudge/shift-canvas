@@ -15,6 +15,8 @@ import {
   setScheduleSetCompletion,
 } from "@/app/actions";
 import { AppDateSelector } from "@/components/app-date-selector";
+import { IconButton } from "@/components/ui/button";
+import { deriveInitials } from "@/lib/initials";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import { parseTemporaryLoanAssignmentNote } from "@/lib/temporary-loans";
@@ -1095,6 +1097,28 @@ function formatStaffCount(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+/**
+ * Today in the business timezone, resolved after mount. The server renders the
+ * grid too, and a date computed during render would differ from the client's
+ * across a midnight boundary, so the marker is applied on the client only.
+ */
+function useBusinessToday() {
+  const [today, setToday] = useState<string | null>(null);
+
+  useEffect(() => {
+    setToday(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Edmonton",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date()),
+    );
+  }, []);
+
+  return today;
+}
+
 function getDefaultSelection(_shiftKind: ShiftKind, _timeCodes: TimeCode[]): AssignmentSelection {
   return {
     competencyId: null,
@@ -1457,6 +1481,7 @@ export function MonthlyScheduler({
   );
   const [search, setSearch] = useState("");
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
+  const businessToday = useBusinessToday();
   const [baselineAssignments, setBaselineAssignments] = useState(() =>
     cloneAssignments(initialSnapshot.assignmentIndex),
   );
@@ -3210,38 +3235,38 @@ export function MonthlyScheduler({
         <div className="planner-actions planner-actions--schedule scheduler-toolbar__actions">
           <div className="planner-actions__row planner-actions__row--save">
             {canEdit && canManageSetBuilder ? (
-              <button
-                type="button"
-                className="ghost-button icon-button schedule-temporary-loan-button"
+              <IconButton
+                className="schedule-temporary-loan-button"
+                icon={<TemporaryLoanIcon />}
+                label="Temporary loan"
                 onClick={() => setIsTemporaryLoanModalOpen(true)}
                 disabled={isScheduleLocked}
-                aria-label="Temporary loan"
                 title="Temporary loan"
-              >
-                <TemporaryLoanIcon />
-              </button>
+              />
             ) : null}
             {canManageSetBuilder ? (
-              <button
-                type="button"
-                className="ghost-button icon-button schedule-order-button"
+              <IconButton
+                className="schedule-order-button"
+                icon={<ShiftOrderIcon />}
+                label="Shift order"
                 onClick={() => setIsShiftOrderModalOpen(true)}
                 disabled={isScheduleLocked}
-                aria-label="Shift order"
                 title="Shift order"
-              >
-                <ShiftOrderIcon />
-              </button>
+              />
             ) : null}
+            {/* Anchor, not a button: it opens the print route in a new tab.
+                It carries the primitive classes so it matches its neighbours. */}
             <a
               href={`/schedule/print?month=${currentMonth}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="ghost-button icon-button schedule-print-button"
+              className="ui-button ui-button--subtle ui-button--icon schedule-print-button"
               aria-label="Print schedules"
               title="Print schedules"
             >
-              <PrinterIcon />
+              <span className="ui-button__label" aria-hidden="true">
+                <PrinterIcon />
+              </span>
             </a>
           </div>
         </div>
@@ -3400,17 +3425,21 @@ export function MonthlyScheduler({
                 const isSetDay = selectedSetDays.some((setDay) => setDay.date === day.date);
                 const isMissingDay = highlightedMissingDates.has(day.date);
                 const isCompletedDay = completedSetDates.has(day.date);
+                const isToday = day.date === businessToday;
 
                 return (
                   <div
                     key={day.date}
                     data-date={day.date}
+                    aria-current={isToday ? "date" : undefined}
                     className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
                       isCompletedDay ? "day-header--completed" : ""
                     } ${
                       selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
-                    } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""}`}
-                    title={`${day.dayName} ${day.date}`}
+                    } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""} ${
+                      isToday ? "day-header--today" : ""
+                    }`}
+                    title={isToday ? `${day.dayName} ${day.date} (today)` : `${day.dayName} ${day.date}`}
                     onClick={
                       canManageSetBuilder && !isScheduleLocked
                         ? () => {
@@ -3693,15 +3722,29 @@ function EmployeeRow({
   );
   const hasLimitedBorrowedDates = Boolean(overtimeDateSet || mutualDateSet || loanDateSet);
   const isSelectedEmployee = selectedCell?.employeeId === employee.sourceEmployeeId;
+  // Built from the name fields rather than the display name, which is
+  // "Last, First" and would produce reversed initials.
+  const sourceEmployee = employeeMap[employee.sourceEmployeeId];
+  const initials = sourceEmployee
+    ? deriveInitials(`${sourceEmployee.firstName} ${sourceEmployee.lastName}`.trim())
+    : null;
 
   return (
     <div className="schedule-grid-row" style={rowStyle}>
       <div className={`employee-cell sticky-column ${isSelectedEmployee ? "employee-cell--selected" : ""}`}>
+        {initials ? (
+          <span className="employee-cell__avatar" aria-hidden="true">
+            {initials}
+          </span>
+        ) : null}
         <div className="employee-cell__main">
           <strong title={employee.name}>
             <span className="employee-name-full">{employee.name}</span>
             <span className="employee-name-compact">{getCompactEmployeeName(employee.name)}</span>
           </strong>
+          <span className="employee-cell__role" title={employee.role}>
+            {employee.role}
+          </span>
         </div>
       </div>
 

@@ -1,0 +1,284 @@
+/* ============================================================
+   Schedule — Month view (/schedule) — Phase 4A
+   ------------------------------------------------------------
+   Scoped to the month roster. Loaded after globals.css so source
+   order settles conflicts with the legacy .scheduler-toolbar,
+   .day-header, .employee-cell and .shift-cell rules. No
+   !important, no cascade layers.
+
+   Deliberately absent, because the grid depends on them:
+   - no change to .shift-cell-button's absolute/inset-0 positioning
+     (drag-select bubbles pointer events through it)
+   - no transform, filter or will-change on any ancestor of the
+     sticky header or name column
+   - no new element in the .panel-frame -> .schedule-scroll-shell
+     flex chain
+   - nothing here may push a row past SCHEDULE_ROW_HEIGHT_PX (51px);
+     see the height budget on .employee-cell below
+   ============================================================ */
+
+/* ---- Toolbar ------------------------------------------------ */
+
+.scheduler-toolbar {
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Only the gap. `.field` is already display:grid, and setting display here
+   would outrank the `display: none` globals.css puts on .field when the
+   toolbar is collapsed — both are two-class selectors and this file loads
+   later, so the Filters toggle would stop hiding anything. */
+.scheduler-toolbar .field {
+  gap: 3px;
+}
+
+.scheduler-toolbar .field > span {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.scheduler-toolbar .field input,
+.scheduler-toolbar .field select {
+  width: 100%;
+  min-height: 0;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-field);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--control-font-md);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.scheduler-toolbar .field input:hover:not(:disabled),
+.scheduler-toolbar .field select:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+/* :not(:disabled) matches the specificity of the :hover rule above so a
+   focused control keeps its focus border while the pointer is over it. */
+.scheduler-toolbar .field input:focus-visible:not(:disabled),
+.scheduler-toolbar .field select:focus-visible:not(:disabled) {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.scheduler-toolbar .field--static strong {
+  font-size: var(--control-font-md);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.scheduler-toolbar__toggle {
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scheduler-toolbar__actions {
+  gap: var(--space-2);
+}
+
+.scheduler-toolbar .toolbar-status {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Grid columns -------------------------------------------
+   The name column carries an avatar, a name and a role, so it needs
+   more room than the name alone did.
+
+   The day column is sized from the widest code the data actually
+   contains. At 12px/600 "NIGHT" measures 38.85px, or 37.65px with the
+   tracking set on .shift-cell-button below; the next widest code,
+   "Lead", is 28.43px. A 2.5rem (40px) column leaves 39px of content
+   after the 1px separator, so the widest code clears by 1.35px and is
+   never clipped. Raising the floor is what matters — the middle term
+   only governs above ~1490px — and the ceiling rises with it so wide
+   viewports keep filling the row.
+
+   Cost: the grid is 1416px at 1440px viewport, so it scrolls inside
+   .schedule-wrap as before, and still fits without scrolling at 1920. */
+
+.schedule-grid {
+  --schedule-name-column-width: 11rem;
+  --schedule-day-column-width: clamp(2.5rem, calc((100vw - 18rem) / 31), 2.6rem);
+}
+
+/* ---- Column headers ----------------------------------------- */
+
+/* Backgrounds and state colours are deliberately absent from the header
+   rules below. globals.css gives .day-header four state variants —
+   --weekend, --set, --completed, --missing — and most are a single class,
+   the same specificity as a bare .day-header here. Because this file loads
+   later, any `background` or `color` set on the bare class silently wins
+   over them: a completed set stops going green. Only geometry and type
+   scale belong here; --grid-header and the state colours stay with the
+   rules that own them. */
+
+.employee-header {
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+}
+
+.employee-header span {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.employee-header strong {
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.day-header {
+  gap: 2px;
+  padding: var(--space-2) 2px;
+}
+
+.day-header span {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.day-header strong {
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+}
+
+/* Today. The circle is reinforcement — aria-current="date" and the
+   cell's title carry the same fact for anyone not seeing the colour. */
+.day-header--today strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 3px;
+  border-radius: var(--radius-round);
+  background: var(--color-primary);
+  color: var(--color-text-on-fill);
+}
+
+/* ---- Employee cell ------------------------------------------
+   Height budget, against SCHEDULE_ROW_HEIGHT_PX = 51:
+     51 - 1px bottom border - 8px vertical padding = 42px of content.
+     Avatar 26px; name 13px * 1.2 = 15.6px plus role 11px * 1.2 =
+     13.2px = 28.8px. Both sit inside 42px.
+   Changing any of these five numbers means re-measuring a rendered
+   row against that constant. */
+
+.employee-cell {
+  justify-content: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+}
+
+.employee-cell__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.625rem;
+  height: 1.625rem;
+  border-radius: var(--radius-round);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.employee-cell__main {
+  gap: 0;
+}
+
+.employee-cell strong {
+  display: block;
+  overflow: hidden;
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Real data: role_title, with the borrowed-row suffix the grid already
+   builds ("Operator · OT from Shift 2"). */
+.employee-cell__role {
+  display: block;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* .employee-cell--selected is deliberately not restyled here. globals.css
+   ends with `outline: none` on it, on .shift-cell--selected and on the date
+   header, under a comment stating the click-selection outlines were removed
+   on purpose and only the keyboard focus ring is kept. */
+
+/* ---- Cells --------------------------------------------------- */
+
+/* Codes are read at a glance, so they hold 12px — including on mobile,
+   where this supersedes the 0.68rem globals.css sets. The inline padding
+   is dropped and the tracking tightened to buy back horizontal room; the
+   day-column floor above supplies the rest. Codes are centred, so
+   shorter ones are unaffected. */
+.shift-cell-button {
+  padding-inline: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* ---- Responsive ---------------------------------------------
+   Below 600px the avatar is dropped and the name column narrows;
+   the name and role still identify the row. Row height is unchanged. */
+
+@media (max-width: 600px) {
+  /* This supersedes the 1.92rem day column globals.css sets for mobile.
+     That width clips five-character codes, and a clipped code is missing
+     data rather than a density trade — the grid already scrolls
+     horizontally here, so it absorbs the extra width. */
+  .schedule-grid {
+    --schedule-name-column-width: 7.5rem;
+    --schedule-day-column-width: 2.5rem;
+  }
+
+  .employee-cell {
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  }
+
+  .employee-cell__avatar {
+    display: none;
+  }
+
+  .employee-cell strong {
+    font-size: 0.8125rem;
+  }
+}
