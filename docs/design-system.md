@@ -312,8 +312,8 @@ sections only.
 The page root is `.panel-frame` (and `.panel`, which Profile still uses). It
 fills the workspace width, takes its height from `min-height` against the
 scrolling `.workspace-content` — never a viewport unit — and lets the canvas
-show through. Readable gutters come from the shell's `.workspace-content`
-padding, not from the page.
+show through. `.workspace-content` carries no padding, so content runs flush to
+the sidebar and the window edge; a page that needs a gutter sets its own.
 
 Tables, forms, posting rows, metric cards, dialogs, and other focused sections
 keep their own surface, border, and radius where that aids scanning.

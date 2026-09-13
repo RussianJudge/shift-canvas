@@ -348,10 +348,15 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
   outline-color: var(--color-sidebar-text);
 }
 
-/* ---- Page canvas -------------------------------------------- */
+/* ---- Page canvas --------------------------------------------
+   No padding: pages run flush to the sidebar and the window edge, and any
+   gutter a page wants is its own. globals.css already sets `padding: 0`
+   here, along with smaller values inside its 720px, 600px and print
+   blocks; declaring a padding at this specificity from a later file would
+   silently defeat all four, so this rule stays out of that property
+   entirely. */
 
 .workspace-content {
-  padding: var(--space-4);
   background: var(--color-canvas);
 }
 
@@ -370,21 +375,61 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
    only caller. Height comes from min-height against the scrolling
    .workspace-content, never a viewport unit. */
 
+/* The gutter lives here, on the page root, now that .workspace-content
+   carries no padding. One inset for the whole page means the heading, the
+   toolbars and the tables all line up on the same edge — page stylesheets
+   set vertical padding only and inherit this horizontally. */
 .panel-frame,
 .panel {
   min-height: 100%;
   min-width: 0;
   max-width: none;
   margin-inline: 0;
+  padding-inline: var(--space-4);
   background: transparent;
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
 
+/* The schedule grid is deliberately full-bleed: it manages its own
+   horizontal scrolling and should reach both edges. */
+.panel-frame:has(.schedule-scroll-shell) {
+  padding-inline: 0;
+}
+
+/* globals.css zeroes padding for print with a `padding` shorthand, which the
+   padding-inline longhand above would quietly outrank. Print keeps no gutter. */
+@media print {
+  .panel-frame,
+  .panel {
+    padding-inline: 0;
+  }
+}
+
+/* globals.css gives the heading its own 1.5rem side padding, which would sit
+   it 24px further in than everything beneath it. The frame supplies the
+   inset now. Neither --simple nor --split touches padding, so this cannot
+   defeat a modifier. */
 .panel-heading {
+  padding-inline: 0;
   padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--color-border);
+}
+
+/* ---- Page date toolbar --------------------------------------
+   A toolbar row led by the date selector, matching Schedule, where the
+   selector is the first control in .scheduler-toolbar. Pages whose date
+   control used to sit opposite the title (Metrics, Sub-Schedules) render
+   this row instead; pages that already have a toolbar put the selector
+   first in it. Routes with no date concept get no selector at all. */
+
+.page-date-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) 0;
 }
 
 .panel-title {
@@ -434,7 +479,44 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
     background: var(--color-sidebar);
   }
 
+  /* The toolbar is a transparent, out-of-flow strip over the page, so it
+     stays click-through — anything else would block the content beneath it
+     across the full width. Only the pill itself takes pointer events.
+
+     globals.css restores them on `.workspace-mobile-toggle.ghost-button`,
+     but this control is the Button primitive now and carries no
+     `ghost-button` class, so that rule stopped matching and the pill
+     inherited `pointer-events: none` — visible, but dead to clicks. The
+     same miss dropped its offset margin, which the toolbar padding below
+     now provides. */
+  .workspace-mobile-toolbar {
+    padding: 0.5rem;
+  }
+
   .workspace-mobile-toggle.ui-button {
     gap: var(--space-2);
+    pointer-events: auto;
+  }
+
+  /* The pill floats out of flow, so something has to reserve the band it
+     sits in. globals.css does that per page, on .scheduler-toolbar and
+     .panel-heading — which only covers pages that happen to start with one
+     of those, and breaks the moment a page sets `padding` as a shorthand
+     (schedule.css does, which is how the pill ended up on top of the
+     scheduler toolbar).
+
+     Reserving it once on the shared container covers every page instead,
+     including any added later. 0.5rem toolbar padding + a 36px pill +
+     0.5rem breathing room = 3.25rem. */
+  .workspace-content {
+    padding-top: 3.25rem;
+  }
+
+  /* With the container reserving the band, the per-page compensation would
+     double it. Restored to the value the 720px block gives the heading.
+     Neither .panel-heading--simple nor --split touches padding, so this
+     cannot defeat a modifier. */
+  .panel-heading {
+    padding-top: 1rem;
   }
 }
