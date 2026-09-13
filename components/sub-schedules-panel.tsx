@@ -1115,8 +1115,12 @@ export function SubSchedulesPanel({
 
   return (
     <section className="panel-frame">
-      <div className="panel-heading panel-heading--split">
+      <div className="panel-heading panel-heading--simple">
         <h1 className="panel-title">Sub-Schedules</h1>
+      </div>
+
+      {/* Leads its own toolbar row, as on Schedule. */}
+      <div className="page-date-toolbar">
         <AppDateSelector
           mode="month"
           value={snapshot.month}

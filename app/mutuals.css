@@ -22,6 +22,12 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+/* Leads the row, matching Schedule. */
+.mutuals-toolbar > .app-date-selector {
+  flex: 0 0 auto;
+  order: -1;
+}
+
 .mutuals-toolbar__search {
   flex: 1 1 240px;
   max-width: 360px;

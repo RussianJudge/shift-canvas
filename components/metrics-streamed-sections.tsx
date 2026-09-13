@@ -228,7 +228,7 @@ export function MetricsPageFrame({
   return (
     <MetricsSettingsContext.Provider value={metricsSettings}>
       <section className="panel-frame">
-        <div className="panel-heading panel-heading--split">
+        <div className="panel-heading panel-heading--simple">
           <div className="metrics-page-title">
             <h1 className="panel-title">Metrics</h1>
             <button
@@ -241,6 +241,11 @@ export function MetricsPageFrame({
               <SettingsIcon />
             </button>
           </div>
+        </div>
+
+        {/* The month selector leads its own toolbar row, as on Schedule,
+            rather than sitting opposite the title. */}
+        <div className="page-date-toolbar">
           <AppDateSelector
             mode="month"
             value={month}
