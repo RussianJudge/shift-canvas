@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Select, TextInput } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
-import { parseOvertimeAssignmentNote } from "@/lib/overtime";
+import { parseOvertimeAssignmentNote, resolveDefaultClaimingEmployeeId } from "@/lib/overtime";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -1148,10 +1148,13 @@ export function OvertimePanel({
   // The board is built from snapshot state only; claiming/releasing triggers a
   // server refresh instead of trying to locally simulate every OT side effect.
   const router = useRouter();
-  const [claimingEmployeeId, setClaimingEmployeeId] = useState(
-    viewer.role === "worker"
-      ? viewer.employeeId ?? ""
-      : snapshot.schedules.flatMap((schedule) => schedule.employees).sort((left, right) => left.name.localeCompare(right.name))[0]?.id ?? "",
+  const [claimingEmployeeId, setClaimingEmployeeId] = useState(() =>
+    resolveDefaultClaimingEmployeeId(
+      viewer,
+      snapshot.schedules
+        .flatMap((schedule) => schedule.employees)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    ),
   );
   const [selectedTargetKey, setSelectedTargetKey] = useState<OvertimeTargetKey | "">(buildInitialTargetKey(snapshot));
   const [selectedAssignmentFilter, setSelectedAssignmentFilter] = useState("all");
@@ -1317,7 +1320,11 @@ export function OvertimePanel({
         return viewer.employeeId ?? "";
       }
 
-      return allEmployees.some((employee) => employee.id === current) ? current : allEmployees[0]?.id ?? "";
+      // A choice the viewer actually made is kept; anything else falls back to
+      // the viewer, never to whoever happens to sort first.
+      return allEmployees.some((employee) => employee.id === current)
+        ? current
+        : resolveDefaultClaimingEmployeeId(viewer, allEmployees);
     });
     setSelectedTargetKey((current) =>
       current &&
@@ -2195,6 +2202,18 @@ export function OvertimePanel({
       </div>
 
       <div className="overtime-toolbar">
+        {availableMonths.length > 0 ? (
+          <div className="overtime-toolbar__month">
+            <AppDateSelector
+              mode="month"
+              value={snapshot.month}
+              label="Overtime month"
+              availableMonths={availableMonths}
+              onChange={(nextMonth) => router.push(`/overtime?month=${nextMonth}`)}
+            />
+          </div>
+        ) : null}
+
         <div className="overtime-toolbar__filters">
         {viewer.role === "worker" ? (
           <div className="overtime-static-field">
@@ -2281,17 +2300,6 @@ export function OvertimePanel({
           </Select>
         </div>
 
-        {availableMonths.length > 0 ? (
-          <div className="overtime-toolbar__month">
-            <AppDateSelector
-              mode="month"
-              value={snapshot.month}
-              label="Overtime month"
-              availableMonths={availableMonths}
-              onChange={(nextMonth) => router.push(`/overtime?month=${nextMonth}`)}
-            />
-          </div>
-        ) : null}
       </div>
 
       <div className="overtime-actions-row">

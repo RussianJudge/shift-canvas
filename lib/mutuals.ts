@@ -192,3 +192,46 @@ export function buildAcceptedMutualAssignmentRows({
     ]),
   ];
 }
+
+/**
+ * An accepted swap whose shifts have all been worked.
+ *
+ * There is no `completed` value in `MutualStatus`, and inventing one would be
+ * a schema change — so completion is derived from the dates the two sides
+ * already carry. Both halves count: the owner's shifts and those of the
+ * application that was accepted. A swap is complete only once every one of
+ * those dates is in the past, which keeps a half-finished exchange visible
+ * under Accepted where it still needs attention.
+ *
+ * `today` is a YYYY-MM-DD key in the business timezone, and dates are compared
+ * as strings so no timezone is reintroduced here.
+ */
+export function isMutualExchangeComplete(
+  posting: {
+    status: string;
+    dates: string[];
+    acceptedApplicationId: string | null;
+    applications: Array<{ id: string; dates: string[] }>;
+  },
+  today: string,
+): boolean {
+  if (posting.status !== "accepted" || !posting.acceptedApplicationId) {
+    return false;
+  }
+
+  const accepted = posting.applications.find(
+    (application) => application.id === posting.acceptedApplicationId,
+  );
+
+  if (!accepted) {
+    return false;
+  }
+
+  const bothSides = [...posting.dates, ...accepted.dates];
+
+  if (bothSides.length === 0) {
+    return false;
+  }
+
+  return bothSides.every((date) => date < today);
+}

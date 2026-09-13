@@ -132,3 +132,27 @@ export function buildSwapOvertimeAssignmentRows({
     shift_kind: shiftKindForDate(date),
   }));
 }
+
+/**
+ * Who the viewer is acting as on the overtime board.
+ *
+ * Admins and leaders act as themselves. They can still claim on someone else's
+ * behalf, but only by choosing that person, so the board never opens pointed at
+ * an unrelated worker who happens to sort first alphabetically. A viewer with
+ * no employee record of their own keeps that fallback, since there is nobody
+ * else to default to.
+ */
+export function resolveDefaultClaimingEmployeeId(
+  viewer: { role: string; employeeId: string | null },
+  employees: Array<{ id: string }>,
+): string {
+  if (viewer.role === "worker") {
+    return viewer.employeeId ?? "";
+  }
+
+  if (viewer.employeeId && employees.some((employee) => employee.id === viewer.employeeId)) {
+    return viewer.employeeId;
+  }
+
+  return employees[0]?.id ?? "";
+}

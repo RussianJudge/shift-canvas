@@ -25,6 +25,8 @@ import {
   getMonthDays,
   shiftForDate,
 } from "@/lib/scheduling";
+import { isMutualExchangeComplete } from "@/lib/mutuals";
+import { useBusinessToday } from "@/lib/use-business-today";
 import type { AppSession, MutualSettings, MutualShiftPosting, MutualsSnapshot, ShiftKind } from "@/lib/types";
 
 function getCurrentUtcMonthKey() {
@@ -597,6 +599,7 @@ export function MutualsPanel({
    */
   const [viewSnapshot, setViewSnapshot] = useState(snapshot);
   const [viewMonth, setViewMonth] = useState(snapshot.month);
+  const businessToday = useBusinessToday();
   const employeeMap = useMemo(() => getEmployeeMap(snapshot.schedules), [snapshot.schedules]);
   const viewerEmployee = useMemo(
     () => (viewer.employeeId ? employeeMap[viewer.employeeId] ?? null : null),
@@ -661,7 +664,17 @@ export function MutualsPanel({
 
   const openPostings = searchedPostings.filter((posting) => posting.status === "open");
   const pendingApprovalPostings = searchedPostings.filter((posting) => posting.status === "pending_leader_approval");
-  const acceptedPostings = searchedPostings.filter((posting) => posting.status === "accepted");
+  // An accepted swap whose shifts have all been worked moves out of Accepted,
+  // which is for exchanges that are still live. Completed is kept separate from
+  // Closed: closed swaps never happened (withdrawn, cancelled, rejected).
+  // Until the client resolves today's date nothing is treated as complete, so
+  // the server and first client render agree.
+  const isComplete = (posting: MutualShiftPosting) =>
+    businessToday !== null && isMutualExchangeComplete(posting, businessToday);
+  const acceptedPostings = searchedPostings.filter(
+    (posting) => posting.status === "accepted" && !isComplete(posting),
+  );
+  const completedPostings = searchedPostings.filter(isComplete);
   const closedPostings = searchedPostings.filter(
     (posting) => !["open", "pending_leader_approval", "accepted"].includes(posting.status),
   );
@@ -824,6 +837,18 @@ export function MutualsPanel({
       </div>
 
       <div className="mutuals-toolbar">
+        {/* Mutuals is organised by year, not month, so this stays mode="year".
+            Only its position changes. */}
+        <AppDateSelector
+          mode="year"
+          value={viewMonth}
+          label="Mutuals year"
+          triggerLabel={formatYearLabel(viewMonth)}
+          disabled={isMonthLoading}
+          className="mutuals-year-pager"
+          onChange={handleYearChange}
+        />
+
         <div className="mutuals-toolbar__search">
           <TextInput
             label="Search"
@@ -835,15 +860,6 @@ export function MutualsPanel({
         </div>
 
         <div className="mutuals-toolbar__actions">
-          <AppDateSelector
-            mode="year"
-            value={viewMonth}
-            label="Mutuals year"
-            triggerLabel={formatYearLabel(viewMonth)}
-            disabled={isMonthLoading}
-            className="mutuals-year-pager"
-            onChange={handleYearChange}
-          />
           {viewer.role === "admin" ? (
             <IconButton
               variant="secondary"
@@ -1201,6 +1217,39 @@ export function MutualsPanel({
             <div className="empty-state">
               <strong>No accepted mutuals.</strong>
               <span>Live swaps will appear here after both shift leaders approve them.</span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="mutuals-section">
+        <div className="mutuals-section__header">
+          <h2 className="mutuals-section__title">Completed mutuals</h2>
+          <span className="mutuals-section__count">{completedPostings.length}</span>
+        </div>
+
+        <div className="mutuals-grid mutuals-grid--closed">
+          {completedPostings.length > 0 ? (
+            completedPostings.map((posting) => (
+              <article key={posting.id} className="mutual-exchange-card mutual-exchange-card--closed">
+                <div className="mutual-exchange-card__header">
+                  <div className="mutual-party">
+                    <MutualAvatar name={posting.ownerEmployeeName} />
+                    <div className="mutual-exchange-card__id">
+                      <span className="mutual-eyebrow">Shift {posting.ownerScheduleName}</span>
+                      <h3 className="mutual-exchange-card__title">{posting.ownerEmployeeName}</h3>
+                    </div>
+                  </div>
+                  <Badge tone="neutral">Completed</Badge>
+                </div>
+
+                <MutualDateChips dates={posting.dates} shiftKinds={posting.shiftKinds} />
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">
+              <strong>No completed mutuals.</strong>
+              <span>Accepted swaps move here once both sides&apos; shifts have been worked.</span>
             </div>
           )}
         </div>
