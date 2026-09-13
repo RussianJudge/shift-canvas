@@ -25,6 +25,17 @@ export interface MonthDay {
   isWeekend: boolean;
 }
 
+export interface WeekDay extends MonthDay {
+  isOutsideMonth: boolean;
+}
+
+export interface ScheduleWeek {
+  key: string;
+  start: string;
+  end: string;
+  days: WeekDay[];
+}
+
 /** Converts a calendar day into a UTC day number so date math stays timezone-safe. */
 function toUtcDayNumber(isoDate: string) {
   const [year, month, day] = isoDate.split("-").map(Number);
@@ -167,6 +178,63 @@ export function getMonthDays(monthKey: string): MonthDay[] {
       isWeekend: weekday === 0 || weekday === 6,
     };
   });
+}
+
+/**
+ * Monday-to-Sunday weeks covering the visible month.
+ *
+ * Week view reads the month snapshot the page already loaded rather than
+ * fetching its own range, so a week that straddles a month boundary carries
+ * days the snapshot does not cover. Those are flagged `isOutsideMonth` and the
+ * grid renders them read-only — an empty editable cell there would claim the
+ * employee has no shift when the data simply was not loaded.
+ */
+export function getWeeksForMonth(monthKey: string): ScheduleWeek[] {
+  const monthDays = getMonthDays(monthKey);
+  const first = monthDays[0];
+
+  if (!first) {
+    return [];
+  }
+
+  const firstDate = new Date(`${first.date}T00:00:00Z`);
+  // getUTCDay is 0 for Sunday; shift so Monday is the first column.
+  const mondayOffset = (firstDate.getUTCDay() + 6) % 7;
+  const firstMonday = new Date(firstDate);
+  firstMonday.setUTCDate(firstDate.getUTCDate() - mondayOffset);
+
+  const lastDate = new Date(`${monthDays[monthDays.length - 1].date}T00:00:00Z`);
+  const weeks: ScheduleWeek[] = [];
+
+  for (let cursor = firstMonday; cursor <= lastDate; cursor.setUTCDate(cursor.getUTCDate() + 7)) {
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(cursor);
+      date.setUTCDate(cursor.getUTCDate() + index);
+      const isoDate = date.toISOString().slice(0, 10);
+      const weekday = date.getUTCDay();
+
+      return {
+        date: isoDate,
+        dayNumber: date.getUTCDate(),
+        dayName: new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(date),
+        isWeekend: weekday === 0 || weekday === 6,
+        isOutsideMonth: isoDate.slice(0, 7) !== monthKey,
+      };
+    });
+
+    weeks.push({ key: days[0].date, start: days[0].date, end: days[6].date, days });
+  }
+
+  return weeks;
+}
+
+/** Index of the week containing `isoDate`, or -1 when it falls outside. */
+export function findWeekIndexForDate(weeks: ScheduleWeek[], isoDate: string | null) {
+  if (!isoDate) {
+    return -1;
+  }
+
+  return weeks.findIndex((week) => isoDate >= week.start && isoDate <= week.end);
 }
 
 /** Expands the visible month into a small window used for cross-month sets. */

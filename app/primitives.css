@@ -294,6 +294,81 @@
   background-repeat: no-repeat;
 }
 
+/* ---- Segmented control ---------------------------------------
+   Adjoining options reading as one control. Selection is a background
+   fill, focus is an outline, so the two never contend for the same
+   property and a focused option keeps its selected fill. The hover rule
+   is guarded against the selected state rather than relying on being
+   declared first. */
+
+.ui-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.ui-segmented__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: calc(var(--control-height-sm) - 2px);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--control-font-sm);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.ui-segmented__option:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.ui-segmented__option[aria-pressed="true"] {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-weight: 600;
+  box-shadow: var(--shadow-raised);
+}
+
+.ui-segmented__option:focus-visible {
+  outline: var(--focus-outline-width) solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.ui-segmented__option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-segmented__icon {
+  display: inline-flex;
+}
+
+.ui-segmented__icon svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* ---- Badge --------------------------------------------------- */
 
 .ui-badge {

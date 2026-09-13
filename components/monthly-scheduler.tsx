@@ -16,6 +16,7 @@ import {
 } from "@/app/actions";
 import { AppDateSelector } from "@/components/app-date-selector";
 import { IconButton } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { deriveInitials } from "@/lib/initials";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/sub-schedules";
 import {
   createAssignmentKey,
+  findWeekIndexForDate,
   formatMonthLabel,
   getCompetencyMap,
   getCompletedSetDatesForMonth,
@@ -34,12 +36,14 @@ import {
   getMonthDays,
   getScheduleById,
   getTimeCodeMap,
+  getWeeksForMonth,
   getWorkedSetDays,
   isCompletedSetRange,
   parseAssignmentKey,
   shiftForDate,
   toggleCompletedSetEntries,
 } from "@/lib/scheduling";
+import type { ScheduleWeek } from "@/lib/scheduling";
 import type {
   Competency,
   Employee,
@@ -161,6 +165,21 @@ function TemporaryLoanIcon() {
     </svg>
   );
 }
+
+type ScheduleViewMode = "month" | "week";
+
+/**
+ * A rendered grid column. Month view supplies the calendar month; week view
+ * supplies seven Monday-to-Sunday days, where `isOutsideMonth` marks the days
+ * the loaded month snapshot does not cover.
+ */
+type GridDay = {
+  date: string;
+  dayNumber: number;
+  dayName: string;
+  isWeekend: boolean;
+  isOutsideMonth?: boolean;
+};
 
 type DisplayEmployee = {
   rowId: string;
@@ -1097,6 +1116,17 @@ function formatStaffCount(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+/** "Mon 7 – Sun 13 Sep", collapsing the month when both ends share it. */
+function formatWeekRange(week: ScheduleWeek) {
+  const start = new Date(`${week.start}T00:00:00Z`);
+  const end = new Date(`${week.end}T00:00:00Z`);
+  const sameMonth = week.start.slice(0, 7) === week.end.slice(0, 7);
+  const dayOnly = new Intl.DateTimeFormat("en-US", { day: "numeric", timeZone: "UTC" });
+  const dayAndMonth = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+  return `${(sameMonth ? dayOnly : dayAndMonth).format(start)} – ${dayAndMonth.format(end)}`;
+}
+
 /**
  * Today in the business timezone, resolved after mount. The server renders the
  * grid too, and a date computed during render would differ from the client's
@@ -1482,6 +1512,8 @@ export function MonthlyScheduler({
   const [search, setSearch] = useState("");
   const [selectedCompetencyFilter, setSelectedCompetencyFilter] = useState("all");
   const businessToday = useBusinessToday();
+  const [viewMode, setViewMode] = useState<ScheduleViewMode>("month");
+  const [selectedWeekKey, setSelectedWeekKey] = useState<string | null>(null);
   const [baselineAssignments, setBaselineAssignments] = useState(() =>
     cloneAssignments(initialSnapshot.assignmentIndex),
   );
@@ -1613,6 +1645,32 @@ export function MonthlyScheduler({
   );
   const monthDays = useMemo(() => getMonthDays(currentMonth), [currentMonth]);
   const extendedMonthDays = useMemo(() => getExtendedMonthDays(currentMonth), [currentMonth]);
+  const weeks = useMemo(() => getWeeksForMonth(currentMonth), [currentMonth]);
+  const activeWeekIndex = useMemo(() => {
+    if (weeks.length === 0) {
+      return -1;
+    }
+
+    const chosen = selectedWeekKey ? weeks.findIndex((week) => week.key === selectedWeekKey) : -1;
+
+    if (chosen >= 0) {
+      return chosen;
+    }
+
+    const todayWeek = findWeekIndexForDate(weeks, businessToday);
+    return todayWeek >= 0 ? todayWeek : 0;
+  }, [businessToday, selectedWeekKey, weeks]);
+  const activeWeek = activeWeekIndex >= 0 ? weeks[activeWeekIndex] : null;
+  /**
+   * The array the grid actually renders. Everything that resolves a column
+   * index back to a date — the header, the rows, and the drag-release handler
+   * — has to read this same array, or a drag in week view would write to the
+   * dates sitting at those indexes in the month.
+   */
+  const gridDays = useMemo<GridDay[]>(
+    () => (viewMode === "week" && activeWeek ? activeWeek.days : monthDays),
+    [activeWeek, monthDays, viewMode],
+  );
   const activeSchedule = getScheduleById(snapshot, selectedScheduleId);
   const activeScheduleId = activeSchedule?.id ?? "";
   const activeScheduleCompetencies = useMemo(
@@ -2156,7 +2214,10 @@ export function MonthlyScheduler({
     return projectedAssignmentIndex[createAssignmentKey(activeSchedule.id, employeeId, date)] ?? null;
   }
 
-  const gridColumns = `var(--schedule-name-column-width, 7.75rem) repeat(${monthDays.length}, minmax(var(--schedule-day-column-width, 1.72rem), 1fr))`;
+  const gridColumns =
+    viewMode === "week"
+      ? `var(--schedule-name-column-width, 7.75rem) repeat(${gridDays.length}, minmax(var(--schedule-week-day-column-width, 7rem), 1fr))`
+      : `var(--schedule-name-column-width, 7.75rem) repeat(${gridDays.length}, minmax(var(--schedule-day-column-width, 1.72rem), 1fr))`;
   const rowVirtualizer = useVirtualizer({
     count: visibleEmployees.length,
     getScrollElement: () => scheduleBodyScrollRef.current,
@@ -2286,12 +2347,24 @@ export function MonthlyScheduler({
     const employeeStillVisible = displayEmployees.some(
       (employee) => employee.sourceEmployeeId === selectedCell.employeeId,
     );
-    const dateStillVisible = monthDays.some((day) => day.date === selectedCell.date);
+    // gridDays so switching to a week that excludes the cell drops the
+    // selection rather than leaving it highlighted off-screen. In month view
+    // gridDays is monthDays, so this is the same check it always was.
+    const dateStillVisible = gridDays.some((day) => day.date === selectedCell.date);
 
     if (!employeeStillVisible || !dateStillVisible) {
       setSelectedCell(null);
     }
-  }, [displayEmployees, monthDays, selectedCell]);
+  }, [displayEmployees, gridDays, selectedCell]);
+
+  /**
+   * Drag indexes are columns in the rendered grid, so a grid that changes
+   * shape underneath an in-flight drag would resolve them against the wrong
+   * dates. Switching view or week drops the drag instead.
+   */
+  useEffect(() => {
+    setDragRange(null);
+  }, [viewMode, activeWeek?.key]);
 
   useEffect(() => {
     if (!editorCell) {
@@ -2301,12 +2374,12 @@ export function MonthlyScheduler({
     const employeeStillVisible = displayEmployees.some(
       (employee) => employee.sourceEmployeeId === editorCell.employeeId,
     );
-    const dateStillVisible = monthDays.some((day) => day.date === editorCell.date);
+    const dateStillVisible = gridDays.some((day) => day.date === editorCell.date);
 
     if (!employeeStillVisible || !dateStillVisible) {
       setEditorCell(null);
     }
-  }, [displayEmployees, editorCell, monthDays]);
+  }, [displayEmployees, editorCell, gridDays]);
 
 
   useEffect(() => {
@@ -2417,8 +2490,11 @@ export function MonthlyScheduler({
       const endIndex = Math.max(dragRange.startIndex, dragRange.currentIndex);
 
       if (endIndex > startIndex) {
-        const rangeDates = monthDays
+        // gridDays, not monthDays: the drag indexes are columns in the grid
+        // that is currently rendered, which in week view is seven days.
+        const rangeDates = gridDays
           .slice(startIndex, endIndex + 1)
+          .filter((day) => !day.isOutsideMonth)
           .map((day) => day.date)
           .filter((date) => !completedSetDates.has(date));
 
@@ -2468,7 +2544,7 @@ export function MonthlyScheduler({
     window.addEventListener("pointerup", handlePointerUp);
 
     return () => window.removeEventListener("pointerup", handlePointerUp);
-  }, [completedSetDates, dragRange, employeeMap, monthDays, snapshot, snapshot.timeCodes]);
+  }, [completedSetDates, dragRange, employeeMap, gridDays, snapshot, snapshot.timeCodes]);
 
   // Crosshair: tint the hovered cell's column header (date) and row header
   // (worker name) with the same tone as the hovered cell. Done imperatively so
@@ -3153,6 +3229,58 @@ export function MonthlyScheduler({
           triggerLabel={formatMonthDateRange(monthDays)}
           onChange={navigateToScheduleMonth}
         />
+
+        {/* Only the views that exist. There is no Day view, so no Day tab. */}
+        <SegmentedControl
+          className="schedule-view-switch"
+          label="Schedule view"
+          value={viewMode}
+          options={[
+            { value: "month", label: "Month" },
+            { value: "week", label: "Week" },
+          ]}
+          onChange={(next) => {
+            setViewMode(next);
+
+            // Entering week view lands on today's week when the visible month
+            // contains today, otherwise on the month's first week.
+            if (next === "week" && !selectedWeekKey) {
+              const todayWeek = findWeekIndexForDate(weeks, businessToday);
+              setSelectedWeekKey(weeks[todayWeek >= 0 ? todayWeek : 0]?.key ?? null);
+            }
+          }}
+        />
+
+        {viewMode === "week" && activeWeek ? (
+          <div className="schedule-week-pager">
+            <IconButton
+              label="Previous week"
+              title="Previous week"
+              size="sm"
+              icon={
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15 6l-6 6l6 6" />
+                </svg>
+              }
+              disabled={activeWeekIndex <= 0}
+              onClick={() => setSelectedWeekKey(weeks[activeWeekIndex - 1]?.key ?? null)}
+            />
+            <span className="schedule-week-pager__label">{formatWeekRange(activeWeek)}</span>
+            <IconButton
+              label="Next week"
+              title="Next week"
+              size="sm"
+              icon={
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 6l6 6l-6 6" />
+                </svg>
+              }
+              disabled={activeWeekIndex >= weeks.length - 1}
+              onClick={() => setSelectedWeekKey(weeks[activeWeekIndex + 1]?.key ?? null)}
+            />
+          </div>
+        ) : null}
+
         <button
           type="button"
           className="scheduler-toolbar__toggle"
@@ -3421,7 +3549,7 @@ export function MonthlyScheduler({
                 <strong>Employees</strong>
               </div>
 
-              {monthDays.map((day) => {
+              {gridDays.map((day) => {
                 const isSetDay = selectedSetDays.some((setDay) => setDay.date === day.date);
                 const isMissingDay = highlightedMissingDates.has(day.date);
                 const isCompletedDay = completedSetDates.has(day.date);
@@ -3438,10 +3566,16 @@ export function MonthlyScheduler({
                       selectedSetAnchorDate === day.date ? "day-header--set-anchor" : ""
                     } ${isSetDay ? "day-header--set" : ""} ${isMissingDay ? "day-header--missing" : ""} ${
                       isToday ? "day-header--today" : ""
-                    }`}
-                    title={isToday ? `${day.dayName} ${day.date} (today)` : `${day.dayName} ${day.date}`}
+                    } ${day.isOutsideMonth ? "day-header--outside" : ""}`}
+                    title={
+                      day.isOutsideMonth
+                        ? `${day.dayName} ${day.date} — outside ${formatMonthLabel(currentMonth)}`
+                        : isToday
+                          ? `${day.dayName} ${day.date} (today)`
+                          : `${day.dayName} ${day.date}`
+                    }
                     onClick={
-                      canManageSetBuilder && !isScheduleLocked
+                      canManageSetBuilder && !isScheduleLocked && !day.isOutsideMonth
                         ? () => {
                             setSelectedSetAnchorDate(day.date);
                             setSelectedCoverageCompetencyId(null);
@@ -3451,7 +3585,9 @@ export function MonthlyScheduler({
                         : undefined
                     }
                   >
-                    <span>{day.dayName.slice(0, 1)}</span>
+                    {/* Month packs 28-31 columns, so the weekday shrinks to one
+                        letter; week has the room for the real abbreviation. */}
+                    <span>{viewMode === "week" ? day.dayName : day.dayName.slice(0, 1)}</span>
                     <strong>{day.dayNumber}</strong>
                   </div>
                 );
@@ -3477,7 +3613,8 @@ export function MonthlyScheduler({
                       key={employee.rowId}
                       employee={employee}
                       schedule={activeSchedule}
-                      monthDays={monthDays}
+                      gridDays={gridDays}
+                      viewMode={viewMode}
                       assignments={effectiveAssignments}
                       projectedAssignmentIndex={projectedAssignmentIndex}
                       competencyMap={competencyMap}
@@ -3566,7 +3703,7 @@ export function MonthlyScheduler({
             ) : (
               <div
                 className="empty-state sticky-column"
-                style={{ gridColumn: `1 / span ${monthDays.length + 1}` }}
+                style={{ gridColumn: `1 / span ${gridDays.length + 1}` }}
               >
                 <strong>No employees matched that search.</strong>
                 <span>Try a different name, role, or clear the filter.</span>
@@ -3660,7 +3797,8 @@ export function MonthlyScheduler({
 function EmployeeRow({
   employee,
   schedule,
-  monthDays,
+  gridDays,
+  viewMode,
   assignments,
   projectedAssignmentIndex,
   competencyMap,
@@ -3682,7 +3820,8 @@ function EmployeeRow({
 }: {
   employee: DisplayEmployee;
   schedule: Schedule;
-  monthDays: Array<{ date: string; dayNumber: number; dayName: string; isWeekend: boolean }>;
+  gridDays: GridDay[];
+  viewMode: ScheduleViewMode;
   assignments: Record<string, AssignmentSelection>;
   projectedAssignmentIndex: Record<string, StoredAssignment>;
   competencyMap: Record<string, Competency>;
@@ -3748,10 +3887,15 @@ function EmployeeRow({
         </div>
       </div>
 
-      {monthDays.map((day, dayIndex) => {
+      {gridDays.map((day, dayIndex) => {
+        // A week can reach into a month the snapshot never loaded. Those cells
+        // are inert rather than empty-and-editable, which would read as "no
+        // shift" when the truth is "not loaded".
+        const isOutsideMonth = Boolean(day.isOutsideMonth);
         const isBorrowedCellVisible =
-          !hasLimitedBorrowedDates ||
-          Boolean(overtimeDateSet?.has(day.date) || mutualDateSet?.has(day.date) || loanDateSet?.has(day.date));
+          !isOutsideMonth &&
+          (!hasLimitedBorrowedDates ||
+            Boolean(overtimeDateSet?.has(day.date) || mutualDateSet?.has(day.date) || loanDateSet?.has(day.date)));
         const isLockedCell = completedSetDates.has(day.date);
         const showLockedCell = isBorrowedCellVisible && isLockedCell;
         const projectedAssignment =
@@ -3826,7 +3970,9 @@ function EmployeeRow({
               isInDragRange ? "shift-cell--range" : ""
             } ${highlightedMissingDates.has(day.date) && setDates.has(day.date) ? "shift-cell--missing-column" : ""} ${
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
-            } ${hasCellNote ? "shift-cell--has-note" : ""} ${isProjectedCell ? "shift-cell--projected" : ""}`}
+            } ${hasCellNote ? "shift-cell--has-note" : ""} ${isProjectedCell ? "shift-cell--projected" : ""} ${
+              isOutsideMonth ? "shift-cell--outside" : ""
+            }`}
             onPointerDown={(event) => {
               if (
                 event.button !== 0 ||
@@ -3872,7 +4018,25 @@ function EmployeeRow({
               aria-label={`${employee.name} ${day.date} assignment`}
               title={cellTitle}
             >
-              {isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""}
+              {viewMode === "week" ? (
+                /* The wider week column has room for a second line. It carries
+                   the code's own label, or the rotation's shift kind when the
+                   cell is empty — both real values. Clock times and durations
+                   are deliberately absent: no time code or schedule record in
+                   this data model has them. */
+                <span className="shift-cell__stack">
+                  <span className="shift-cell__code">
+                    {isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""}
+                  </span>
+                  {isBorrowedCellVisible ? (
+                    <span className="shift-cell__detail">
+                      {activeTimeCode?.label ?? activeCompetency?.label ?? shiftKind}
+                    </span>
+                  ) : null}
+                </span>
+              ) : (
+                isBorrowedCellVisible ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap) : ""
+              )}
               {hasCellNote ? <span className="shift-cell__note-indicator" aria-hidden="true" /> : null}
             </button>
           </div>

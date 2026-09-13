@@ -119,6 +119,12 @@
 .schedule-grid {
   --schedule-name-column-width: 11rem;
   --schedule-day-column-width: clamp(2.5rem, calc((100vw - 18rem) / 31), 2.6rem);
+  /* Week shows seven columns instead of ~30, so each one can hold the code
+     and its label on two lines. 7rem floors it; the grid template uses
+     minmax(floor, 1fr) so wider viewports share the slack out. At 1280 the
+     whole week fits the content area and below that .schedule-wrap scrolls,
+     exactly as month does. */
+  --schedule-week-day-column-width: 7rem;
 }
 
 /* ---- Column headers ----------------------------------------- */
@@ -254,6 +260,91 @@
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+
+/* ---- Week view ----------------------------------------------
+   Week reuses the month grid, cells and rows wholesale; only the column
+   width and the two-line cell content differ.
+
+   Height budget against SCHEDULE_ROW_HEIGHT_PX = 51: the button keeps its
+   0.22rem block padding, leaving 43px. Code 13px * 1.2 = 15.6px, gap 1px,
+   detail 11px * 1.2 = 13.2px — 29.8px in 43px. */
+
+.shift-cell__stack {
+  display: grid;
+  gap: 1px;
+  justify-items: center;
+  min-width: 0;
+  max-width: 100%;
+  padding-inline: var(--space-1);
+}
+
+.shift-cell__code {
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+/* No `color` here on purpose: a coded cell takes its text colour from
+   .shift-cell-button.legend-pill--*, and setting one would override the
+   hue the time code or competency owns. Opacity recedes within it. */
+.shift-cell__detail {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.72;
+}
+
+/* Days belonging to the neighbouring month. The snapshot does not cover
+   them, so they read as unavailable rather than empty.
+
+   `opacity` is the only property used, and it is applied to the content
+   rather than the box: no existing .day-header or .shift-cell modifier
+   sets opacity, so this cannot defeat --completed, --weekend, --set,
+   --missing or --today, and keeping it off the sticky header element
+   avoids creating a stacking context in the sticky layer. */
+.day-header--outside span,
+.day-header--outside strong {
+  opacity: 0.45;
+}
+
+.shift-cell--outside .shift-cell-button {
+  opacity: 0.45;
+}
+
+/* The shift tone would otherwise imply a real DAY/NIGHT/OFF rotation for a
+   day that was never loaded. Equal specificity to .shift-cell--day and
+   later in the cascade, so it wins; coded cells (0,2,0) are unaffected and
+   cannot occur here anyway. */
+.shift-cell--outside {
+  background: var(--color-surface-muted);
+}
+
+/* ---- View switcher and week pager --------------------------- */
+
+.schedule-view-switch {
+  flex: 0 0 auto;
+}
+
+.schedule-week-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+.schedule-week-pager__label {
+  min-width: 7.5rem;
+  text-align: center;
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- Responsive ---------------------------------------------
