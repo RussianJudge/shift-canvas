@@ -28,6 +28,15 @@
   order: -1;
 }
 
+/* globals.css anchors this popover to the control's right edge, from when the
+   pager sat at the far right of the heading. Leading the toolbar on the left,
+   that opens it leftwards and off the side of the screen. Back to the base
+   left anchor. */
+.mutuals-year-pager .app-date-selector__popover {
+  left: 0;
+  right: auto;
+}
+
 .mutuals-toolbar__search {
   flex: 1 1 240px;
   max-width: 360px;
