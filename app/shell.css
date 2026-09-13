@@ -90,7 +90,7 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
 .workspace-brand span,
 .workspace-sidebar .panel-eyebrow {
   color: var(--color-sidebar-muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   letter-spacing: 0.14em;
 }
 
@@ -200,7 +200,7 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
   border-radius: var(--radius-round);
   background: var(--color-primary);
   color: var(--color-primary-ink);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -225,7 +225,7 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
 }
 
 .workspace-admin-scope__heading span {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   letter-spacing: 0.1em;
   color: var(--color-sidebar-muted);
 }
@@ -257,7 +257,7 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
 
 .workspace-admin-scope__field .ui-field__label {
   color: var(--color-sidebar-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -328,7 +328,7 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
 }
 
 .workspace-session__meta span {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   letter-spacing: 0.1em;
   color: var(--color-sidebar-muted);
 }

@@ -35,7 +35,7 @@
 }
 
 .scheduler-toolbar .field > span {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -84,7 +84,7 @@
   padding: 0 var(--space-2);
   border-radius: var(--radius-control);
   color: var(--color-text-secondary);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -144,7 +144,7 @@
 }
 
 .employee-header span {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
@@ -162,7 +162,7 @@
 }
 
 .day-header span {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -236,7 +236,7 @@
 .employee-cell__role {
   display: block;
   overflow: hidden;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   line-height: 1.2;
   color: var(--color-text-secondary);
   white-space: nowrap;
@@ -291,7 +291,7 @@
 .shift-cell__detail {
   max-width: 100%;
   overflow: hidden;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.2;
   letter-spacing: 0;

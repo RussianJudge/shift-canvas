@@ -46,7 +46,7 @@
 .mutuals-toolbar__search .ui-field__label {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   color: var(--color-text-muted);
 }
 
@@ -157,7 +157,7 @@
 }
 
 .mutual-eyebrow {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;

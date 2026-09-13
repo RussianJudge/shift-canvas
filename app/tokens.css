@@ -125,9 +125,20 @@
   --control-padding-sm: 0 var(--space-2);
   --control-padding-md: 0 var(--space-3);
   --control-padding-lg: 0 var(--space-4);
-  --control-font-sm: 0.8125rem;
-  --control-font-md: 0.875rem;
-  --control-font-lg: 0.9375rem;
+  /* One step up (13/14/15px -> 14/15/16px). Deliberately the type scale
+     rather than the root font size: almost every dimension in this codebase
+     is a rem, so raising the root would scale layout too — .shift-cell's
+     3.15rem min-height would pass the hardcoded 51px schedule row and the
+     cells would overlap. Sizes here only affect text.
+
+     Against the 51px row, with the supporting tier now at 12px: the
+     employee cell has 42px of content box and needs 31.2px (14px name and
+     12px role, both at 1.2); the week cell has 43px and needs 32.2px (code,
+     detail, and the 1px gap). The schedule cell code is a separate
+     hardcoded 0.75rem, so day-column widths are unaffected. */
+  --control-font-sm: 0.875rem;
+  --control-font-md: 0.9375rem;
+  --control-font-lg: 1rem;
 }
 
 @media screen and (prefers-color-scheme: dark) {
