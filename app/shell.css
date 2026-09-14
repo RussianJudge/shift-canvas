@@ -491,8 +491,14 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* The drawer is the full dynamic viewport height, so in standalone mode its
+     brand row sits under the status bar and the sign-out under the home
+     indicator. globals.css sets the padding as a shorthand; these longhands
+     load later and keep its 1rem sides. */
   .workspace-sidebar--mobile {
     background: var(--color-sidebar);
+    padding-top: calc(1.4rem + env(safe-area-inset-top));
+    padding-bottom: calc(1.4rem + env(safe-area-inset-bottom));
   }
 
   /* The toolbar is a transparent, out-of-flow strip over the page, so it
@@ -505,8 +511,12 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
      inherited `pointer-events: none` — visible, but dead to clicks. The
      same miss dropped its offset margin, which the toolbar padding below
      now provides. */
+  /* The app is installable and `viewport-fit: cover`, so in standalone mode
+     iOS draws it behind the status bar and the pill landed under the clock.
+     The inset is 0 in a normal browser tab, where the 0.5rem still applies. */
   .workspace-mobile-toolbar {
     padding: 0.5rem;
+    padding-top: calc(0.5rem + env(safe-area-inset-top));
   }
 
   .workspace-mobile-toggle.ui-button {
@@ -523,9 +533,10 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
 
      Reserving it once on the shared container covers every page instead,
      including any added later. 0.5rem toolbar padding + a 36px pill +
-     0.5rem breathing room = 3.25rem. */
+     0.5rem breathing room = 3.25rem, plus whatever the status bar took from
+     the toolbar above so the band still clears the pill. */
   .workspace-content {
-    padding-top: 3.25rem;
+    padding-top: calc(3.25rem + env(safe-area-inset-top));
   }
 
   /* With the container reserving the band, the per-page compensation would
