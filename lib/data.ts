@@ -1570,6 +1570,7 @@ export async function getScheduleReferenceSnapshot(
           scheduleNames: Object.fromEntries(
             scheduleReference.schedules.map((schedule) => [schedule.id, schedule.name]),
           ),
+          timeCodes: mapTimeCodes((timeCodesResult.data as TimeCodeRow[] | null) ?? []),
         })
       : [];
 

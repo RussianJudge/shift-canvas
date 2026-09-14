@@ -102,6 +102,57 @@ export function shiftForDate(schedule: Pick<Schedule, "startDate" | "dayShiftDay
   return pattern[index];
 }
 
+/**
+ * Resolves which crew an employee was rostered to on a given date.
+ *
+ * `employees.schedule_id` records only the current crew and nothing records
+ * when someone moved, so asking "was this a rostered day off?" against the
+ * current crew misreads every shift worked before a transfer: the crews run
+ * offset rotations, so the old crew's working days land on the new crew's off
+ * days and read as overtime.
+ *
+ * With no transfer history to consult, the employee's first assignment on their
+ * current crew stands in for the move. Dates from there on belong to the
+ * current crew; earlier ones belong to whichever crew the row itself was
+ * written against. An employee borrowed onto another crew keeps working their
+ * own, so their rows on it bracket the loan and the borrowed day still resolves
+ * to the current crew.
+ *
+ * The one case this reads wrong is a borrowed day on the crew someone is about
+ * to join, worked before the move: it pulls the move date earlier, and the
+ * remaining days on the old crew then look like overtime.
+ */
+export function buildRosteredScheduleLookup(
+  employees: Pick<Employee, "id" | "scheduleId">[],
+  assignments: Pick<StoredAssignment, "employeeId" | "scheduleId" | "date">[],
+) {
+  const currentScheduleByEmployee = new Map(employees.map((employee) => [employee.id, employee.scheduleId]));
+  const joinedCurrentOn = new Map<string, string>();
+
+  for (const assignment of assignments) {
+    if (!assignment.scheduleId || assignment.scheduleId !== currentScheduleByEmployee.get(assignment.employeeId)) {
+      continue;
+    }
+
+    const earliest = joinedCurrentOn.get(assignment.employeeId);
+
+    if (!earliest || assignment.date < earliest) {
+      joinedCurrentOn.set(assignment.employeeId, assignment.date);
+    }
+  }
+
+  return function rosteredScheduleId(employeeId: string, date: string, assignmentScheduleId?: string | null) {
+    const current = currentScheduleByEmployee.get(employeeId) ?? null;
+    const joined = joinedCurrentOn.get(employeeId);
+
+    if (joined && date >= joined) {
+      return current;
+    }
+
+    return assignmentScheduleId ?? current;
+  };
+}
+
 /** Returns the previous calendar date in `YYYY-MM-DD` format. */
 export function getPreviousDate(isoDate: string) {
   const [year, month, day] = isoDate.split("-").map(Number);

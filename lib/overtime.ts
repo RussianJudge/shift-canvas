@@ -1,5 +1,5 @@
 import { createAssignmentKey, shiftForDate } from "@/lib/scheduling";
-import type { Schedule, ShiftKind, StoredAssignment } from "@/lib/types";
+import type { Schedule, ShiftKind, StoredAssignment, TimeCode } from "@/lib/types";
 
 /**
  * Helpers for encoding overtime-specific schedule rows.
@@ -155,12 +155,17 @@ export function buildAwayOvertimeAssignments({
   awayAssignments,
   homeAssignments,
   scheduleNames,
+  timeCodes,
 }: {
   schedule: Schedule;
   awayAssignments: StoredAssignment[];
   homeAssignments: StoredAssignment[];
   scheduleNames: Record<string, string>;
+  timeCodes: Pick<TimeCode, "id" | "workStatus">[];
 }) {
+  const nonWorkingTimeCodeIds = new Set(
+    timeCodes.filter((timeCode) => timeCode.workStatus === "off").map((timeCode) => timeCode.id),
+  );
   const employeeIds = new Set(schedule.employees.map((employee) => employee.id));
   const occupiedHomeKeys = new Set(
     homeAssignments
@@ -175,6 +180,15 @@ export function buildAwayOvertimeAssignments({
     }
 
     if (assignment.notes?.startsWith("MUT|") || assignment.notes?.startsWith("LOAN|")) {
+      continue;
+    }
+
+    // Planners keep marking a mover's old grid with days off and leave for
+    // weeks after they land on the new crew, and those rows say the opposite of
+    // overtime. Work status is what separates them. Guessing the transfer date
+    // instead would drop a real overtime day that falls at the very start of
+    // the loaded window, before the worker's first row on this crew.
+    if (!assignment.competencyId && (!assignment.timeCodeId || nonWorkingTimeCodeIds.has(assignment.timeCodeId))) {
       continue;
     }
 

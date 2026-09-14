@@ -192,6 +192,14 @@ defect:
   schedule left empty, sub-schedule projections included.
 - Mutual and loan rows are skipped, because those workflows already write their
   own home-schedule row.
+- Only working rows project. A planner keeps marking a mover's previous grid
+  with days off and vacation for weeks after they land on the new crew, and a
+  row whose time code is `off` says the opposite of overtime.
+
+Work status, not an inferred transfer date, is what separates those two. The
+loaded window often opens partway through a set, so a worker can have a genuine
+overtime day before their first row on this crew — treating that as work from
+before a move would hide it.
 
 The cell is read-only, like any projected cell, and says it is overtime on the
 named schedule rather than pointing at Sub-Schedules. The All-schedules view is
@@ -220,6 +228,17 @@ logic uses it that way.
 Every metric needs a verified source, formula, scope, date range, timezone,
 missing-data behavior, refresh timing, and permission rule. Omit unsupported
 mockup metrics or record them as future work.
+
+**Overtime is measured against the crew a worker was on that day.** Work keyed
+straight into the schedule on a rostered day off counts as overtime, and
+`employees.schedule_id` holds only the crew they are on now — nothing records
+when they moved. Reading a past date against the current crew turns every shift
+worked before a transfer into overtime, because the crews run offset rotations
+and the old crew's working days land on the new crew's off days.
+`buildRosteredScheduleLookup` (`lib/scheduling.ts`) stands in for the missing
+history: the current crew from a worker's first assignment on it onward, and
+before that whichever crew the row itself was written against. Claimed overtime
+is unaffected — it has its own `overtime_claims` row.
 
 ## Authorization, state, and integrity
 

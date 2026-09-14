@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { AppDateSelector } from "@/components/app-date-selector";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
+  buildRosteredScheduleLookup,
   formatMonthLabel,
   getEmployeeMap,
   getMonthDays,
@@ -311,16 +312,25 @@ function getManualOffDayOvertimeEntries(
       (claim) => `${claim.scheduleId}:${claim.employeeId}:${claim.date}:${claim.competencyId ?? ""}`,
     ),
   );
+  const rosteredScheduleId = buildRosteredScheduleLookup(
+    Object.values(employeeMap),
+    assignmentHistory,
+  );
 
   return assignmentHistory.flatMap((assignment) => {
     const employee = employeeMap[assignment.employeeId];
-    const homeSchedule = employee ? scheduleMap[employee.scheduleId] : null;
+    // The crew they were on that day, not the one they are on now: a transfer
+    // would otherwise turn every shift worked on the old crew into overtime.
+    const rosterSchedule =
+      scheduleMap[
+        rosteredScheduleId(assignment.employeeId, assignment.date, assignment.scheduleId) ?? ""
+      ];
 
-    if (!employee || !homeSchedule) {
+    if (!employee || !rosterSchedule) {
       return [];
     }
 
-    if (shiftForDate(homeSchedule, assignment.date) !== "OFF") {
+    if (shiftForDate(rosterSchedule, assignment.date) !== "OFF") {
       return [];
     }
 
