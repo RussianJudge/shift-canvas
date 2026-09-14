@@ -1,5 +1,11 @@
 export type ShiftKind = "DAY" | "NIGHT" | "OFF";
 export type AppRole = "admin" | "leader" | "worker";
+
+export const ROLE_LABELS: Record<AppRole, string> = {
+  admin: "Admin",
+  leader: "Leader",
+  worker: "Worker",
+};
 export type MutualStatus =
   | "open"
   | "pending_leader_approval"
@@ -52,6 +58,14 @@ export interface TimeCode extends OrganizationScope {
   colorToken: string;
   usageMode: TimeCodeUsageMode;
   workStatus: TimeCodeWorkStatus;
+}
+
+/** An application account linked to an employee record. */
+export interface EmployeeAccount {
+  profileId: string;
+  employeeId: string;
+  email: string;
+  role: AppRole;
 }
 
 export interface Employee extends OrganizationScope {

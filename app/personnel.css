@@ -239,6 +239,16 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+/* Half-width like one field of .personnel-modal-fields, so the control does not
+   stretch across the dialog on its own row. */
+.personnel-account-role {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
 }
 
 .personnel-modal-status {
@@ -306,9 +316,12 @@
   color: var(--color-text);
 }
 
-.personnel-danger-zone span {
+/* Scoped to the description column: the Button primitive wraps its label in a
+   span, so a bare `.personnel-danger-zone span` outranks
+   `.ui-button--destructive` and repaints the Remove label. */
+.personnel-danger-zone > div > span {
   font-size: var(--control-font-sm);
-  color: var(--color-text-secondary);
+  color: var(--color-text);
 }
 
 /* ---- Responsive --------------------------------------------- */

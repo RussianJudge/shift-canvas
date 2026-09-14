@@ -12,6 +12,7 @@ import "./competencies.css";
 import "./time-codes.css";
 import "./shifts.css";
 import "./schedule.css";
+import "./personal-schedule.css";
 
 export const metadata: Metadata = {
   title: "Schwifty",

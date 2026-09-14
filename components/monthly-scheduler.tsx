@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
@@ -1504,6 +1504,7 @@ export function MonthlyScheduler({
   canSwitchSchedule,
   forcedScheduleId,
   initialSelectedScheduleId,
+  scopeToggle = null,
 }: {
   initialSnapshot: SchedulePageSnapshot;
   initialScheduleEmployeeOrderBySchedule: Record<string, string[]>;
@@ -1514,6 +1515,8 @@ export function MonthlyScheduler({
   canSwitchSchedule: boolean;
   forcedScheduleId: string | null;
   initialSelectedScheduleId?: string | null;
+  /** My schedule / Team, rendered by the page so the grid stays unaware of it. */
+  scopeToggle?: ReactNode;
 }) {
   // `baselineAssignments` tracks the last server-confirmed state. `draftAssignments`
   // layers in local edits and set actions until auto-save confirms them or the user reverts.
@@ -3236,6 +3239,8 @@ export function MonthlyScheduler({
       ) : null}
 
       <div className={`scheduler-toolbar ${isToolbarCollapsed ? "scheduler-toolbar--collapsed" : ""}`}>
+        {scopeToggle}
+
         <AppDateSelector
           mode="month"
           value={currentMonth}

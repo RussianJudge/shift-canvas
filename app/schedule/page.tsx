@@ -1,6 +1,9 @@
 import { Suspense } from "react";
+import { cookies } from "next/headers";
 
 import { AllShiftsGrid } from "@/components/all-shifts-grid";
+import { PersonalScheduleView } from "@/components/personal-schedule-view";
+import { ScheduleScopeToggle } from "@/components/schedule-scope-toggle";
 import { MonthlyScheduler } from "@/components/monthly-scheduler";
 import { ScheduleRouteLoading } from "@/components/route-loading";
 import { ScheduleContextSelector } from "@/components/schedule-context-selector";
@@ -10,7 +13,12 @@ import { canManageWorkspace, requireAppSession } from "@/lib/auth";
 import { getScheduleEmployeeOrder, getSchedulePageSnapshot, getSubSchedulesSnapshot } from "@/lib/data";
 import { scopeScheduleSnapshot } from "@/lib/role-scopes";
 import { resolveScheduleContext } from "@/lib/schedule-context";
-import { getCurrentMonthKey } from "@/lib/scheduling";
+import {
+  SCHEDULE_SCOPE_COOKIE,
+  resolveScheduleScope,
+  type ScheduleScope,
+} from "@/lib/schedule-scope";
+import { getCurrentDateKey, getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
 
@@ -24,14 +32,23 @@ async function ScheduleBoard({
   month,
   scheduleParam,
   autoCreate,
+  scope,
 }: {
   session: Awaited<ReturnType<typeof requireAppSession>>;
   month: string;
   scheduleParam: string | null;
   autoCreate: boolean;
+  scope: ScheduleScope;
 }) {
+  /**
+   * My schedule is always the viewer's own crew, never whichever one they were
+   * last browsing. Without this, switching to My schedule after looking at
+   * another crew would filter their own rows out of a snapshot that never
+   * contained them, and the view would read as an empty month.
+   */
+  const effectiveScheduleParam = scope === "mine" ? session.scheduleId : scheduleParam;
   const [snapshot, initialScheduleEmployeeOrderBySchedule] = await Promise.all([
-    getSchedulePageSnapshot(month, session, scheduleParam),
+    getSchedulePageSnapshot(month, session, effectiveScheduleParam),
     getScheduleEmployeeOrder(session),
   ]);
 
@@ -42,11 +59,43 @@ async function ScheduleBoard({
   const canManageSubSchedules = session.role !== "worker";
   const selectableSubSchedules = canManageSubSchedules ? snapshot.subSchedules : [];
   const context = resolveScheduleContext({
-    param: scheduleParam,
+    param: effectiveScheduleParam,
     viewer: session,
     accessibleSubScheduleIds: selectableSubSchedules.map((subSchedule) => subSchedule.id),
     fallbackScheduleId: session.scheduleId,
   });
+
+  // Keyed for the same reason as the context selector: an element created here
+  // and rendered beside static siblings is an unvalidated list child otherwise.
+  const scopeToggle = (
+    <ScheduleScopeToggle key="schedule-scope" scope={scope} month={month} schedule={scheduleParam} />
+  );
+
+  // My schedule reads the same rows the team grid renders, so sub-schedule and
+  // away-overtime projections carry over without a second data path.
+  if (scope === "mine") {
+    const scopedSnapshot = scopeScheduleSnapshot(
+      { ...snapshot, subSchedules: selectableSubSchedules },
+      session,
+    );
+
+    return (
+      <PersonalScheduleView
+        employeeId={session.employeeId}
+        scheduleId={scopedSnapshot.selectedScheduleId ?? session.scheduleId ?? ""}
+        month={month}
+        assignments={scopedSnapshot.assignments}
+        projectedAssignments={scopedSnapshot.projectedAssignments}
+        competencies={scopedSnapshot.competencies}
+        timeCodes={scopedSnapshot.timeCodes}
+        location={[session.siteName, session.businessAreaName].filter(Boolean).join(" · ") || null}
+        canViewTeam
+        scheduleParam={scheduleParam}
+        initialToday={getCurrentDateKey("America/Edmonton")}
+        scopeToggle={scopeToggle}
+      />
+    );
+  }
 
   if (context.kind === "sub") {
     const subScheduleSnapshot = await getSubSchedulesSnapshot(month, session);
@@ -92,6 +141,7 @@ async function ScheduleBoard({
       canSwitchSchedule={true}
       forcedScheduleId={null}
       initialSelectedScheduleId={snapshot.selectedScheduleId ?? context.scheduleId}
+      scopeToggle={scopeToggle}
     />
   );
 }
@@ -99,12 +149,18 @@ async function ScheduleBoard({
 export default async function SchedulePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ month?: string; schedule?: string; new?: string }>;
+  searchParams?: Promise<{ month?: string; schedule?: string; new?: string; scope?: string }>;
 }) {
   const session = await requireAppSession(["admin", "leader", "worker"]);
   const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
+  const cookieStore = await cookies();
+  const scope = resolveScheduleScope({
+    param: resolvedSearchParams?.scope,
+    stored: cookieStore.get(SCHEDULE_SCOPE_COOKIE)?.value,
+    role: session.role,
+  });
   // Kept raw: the context is resolved and authorised inside the board, where
   // the scoped sub-schedule list is available.
   const scheduleParam = resolvedSearchParams?.schedule?.trim() || session.scheduleId || null;
@@ -112,8 +168,17 @@ export default async function SchedulePage({
 
   return (
     <WorkspaceShellFrame viewer={session}>
-      <Suspense key={`${month}:${scheduleParam ?? ""}`} fallback={<ScheduleRouteLoading month={month} />}>
-        <ScheduleBoard session={session} month={month} scheduleParam={scheduleParam} autoCreate={autoCreate} />
+      <Suspense
+        key={`${month}:${scheduleParam ?? ""}:${scope}`}
+        fallback={<ScheduleRouteLoading month={month} />}
+      >
+        <ScheduleBoard
+          session={session}
+          month={month}
+          scheduleParam={scheduleParam}
+          autoCreate={autoCreate}
+          scope={scope}
+        />
       </Suspense>
     </WorkspaceShellFrame>
   );

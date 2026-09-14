@@ -4006,8 +4006,10 @@ button.workspace-nav-link {
   color: var(--muted);
 }
 
+/* `width: 1%` shrinks a table CELL to its content, but this class is only ever
+   on a div inside the cell, where 1% resolved to a single pixel. The buttons
+   then overflowed left out of the box and sat on top of the status column. */
 .table-actions-cell {
-  width: 1%;
   white-space: nowrap;
   display: grid;
   gap: 0.45rem;

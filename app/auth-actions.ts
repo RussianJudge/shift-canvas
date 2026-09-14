@@ -3,12 +3,21 @@
 import { createHash, randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 import { clearAppSession, getAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
 import { buildCreateAccountInviteUrl, sendAccountInviteEmail } from "@/lib/email";
 import { formatEmployeeDisplayName } from "@/lib/employee-names";
+import {
+  SCHEDULE_SCOPE_COOKIE,
+  parseScheduleScope,
+  type ScheduleScope,
+} from "@/lib/schedule-scope";
+import { ROLE_LABELS } from "@/lib/types";
 import type { AppRole, AppSession } from "@/lib/types";
+
+/** A year: the view someone picks should still be there next season. */
+const SCHEDULE_SCOPE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 import { getSupabaseAdminClient, getSupabaseServerClient } from "@/lib/supabase";
 
 /**
@@ -921,6 +930,145 @@ export async function linkExistingAccountToEmployee(input: {
       firstName: linkedEmployee.first_name ?? firstName,
       lastName: linkedEmployee.last_name ?? lastName,
     })}.`,
+  };
+}
+
+/**
+ * Remembers whether the Schedule page opens on My schedule or the crew.
+ *
+ * A cookie rather than a column: it is read while the page renders, so the
+ * first paint is already the right view, and there is no profile field for it.
+ * The trade is that it follows the browser rather than the account. The caller
+ * keeps the previous value on screen if this fails, so a rejected write leaves
+ * the toggle where it was instead of silently reverting on the next visit.
+ */
+export async function saveScheduleScope(scope: ScheduleScope) {
+  const session = await getAppSession();
+
+  if (!session) {
+    return { ok: false, message: "Sign in to save your schedule view." };
+  }
+
+  if (!parseScheduleScope(scope)) {
+    return { ok: false, message: "That is not a schedule view." };
+  }
+
+  const cookieStore = await cookies();
+
+  cookieStore.set(SCHEDULE_SCOPE_COOKIE, scope, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: SCHEDULE_SCOPE_MAX_AGE_SECONDS,
+  });
+
+  return { ok: true, message: "" };
+}
+
+/**
+ * Changes the app role on an account already linked to an employee.
+ *
+ * Admin only, and deliberately narrower than the surrounding actions: granting
+ * a role is how someone gains access to everything, so a leader cannot use this
+ * to promote anyone, themselves included. An admin cannot change their own role
+ * either — the only way to lose the last admin is to demote yourself, and the
+ * session that did it would be the one to discover the lockout.
+ */
+export async function updateAccountRole(input: { employeeId: string; role: AppRole }) {
+  const session = await getAppSession();
+
+  if (!session || session.role !== "admin") {
+    return {
+      ok: false,
+      message: "Only admins can change an account role.",
+    };
+  }
+
+  if (!["admin", "leader", "worker"].includes(input.role)) {
+    return {
+      ok: false,
+      message: "Choose a valid account role.",
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase is not configured yet, so account roles cannot be changed.",
+    };
+  }
+
+  const profileResult = await supabase
+    .from("profiles")
+    .select("id, email, role, company_id, site_id, business_area_id")
+    .eq("employee_id", input.employeeId.trim())
+    .maybeSingle();
+
+  if (profileResult.error) {
+    return {
+      ok: false,
+      message: `Could not load that account: ${profileResult.error.message}`,
+    };
+  }
+
+  const profile = profileResult.data as {
+    id: string;
+    email: string;
+    role: AppRole;
+    company_id: string | null;
+    site_id: string | null;
+    business_area_id: string | null;
+  } | null;
+
+  if (!profile) {
+    return {
+      ok: false,
+      message: "That employee does not have an account yet.",
+    };
+  }
+
+  if (profile.email.toLowerCase() === session.email.toLowerCase()) {
+    return {
+      ok: false,
+      message: "You cannot change your own account role. Ask another admin.",
+    };
+  }
+
+  if (
+    profile.company_id !== session.companyId ||
+    profile.site_id !== session.siteId ||
+    profile.business_area_id !== session.businessAreaId
+  ) {
+    return {
+      ok: false,
+      message: "You can only change accounts inside your current scope.",
+    };
+  }
+
+  if (profile.role === input.role) {
+    return {
+      ok: true,
+      message: "That account already has this role.",
+    };
+  }
+
+  const update = await supabase.from("profiles").update({ role: input.role }).eq("id", profile.id);
+
+  if (update.error) {
+    return {
+      ok: false,
+      message: `Could not change the account role: ${update.error.message}`,
+    };
+  }
+
+  revalidatePath("/personnel");
+
+  return {
+    ok: true,
+    message: `${profile.email} is now ${ROLE_LABELS[input.role]}.`,
   };
 }
 

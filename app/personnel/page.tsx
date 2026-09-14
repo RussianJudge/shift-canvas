@@ -4,7 +4,7 @@ import { PersonnelPanel } from "@/components/personnel-panel";
 import { LoadingPanelFrame, LoadingTable, LoadingToolbarFields } from "@/components/workspace-loading";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
-import { getPersonnelSnapshot } from "@/lib/data";
+import { getEmployeeAccounts, getPersonnelSnapshot } from "@/lib/data";
 import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +16,11 @@ async function PersonnelBoard({
   session: Awaited<ReturnType<typeof requireAppSession>>;
   month: string;
 }) {
-  const snapshot = await getPersonnelSnapshot(month, session);
-  return <PersonnelPanel snapshot={snapshot} viewer={session} />;
+  const [snapshot, accounts] = await Promise.all([
+    getPersonnelSnapshot(month, session),
+    getEmployeeAccounts(session),
+  ]);
+  return <PersonnelPanel snapshot={snapshot} viewer={session} accounts={accounts} />;
 }
 
 function PersonnelBoardFallback({ month }: { month: string }) {

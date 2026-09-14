@@ -22,11 +22,13 @@ import {
 } from "@/lib/sub-schedules";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 import type {
+  AppRole,
   AppSession,
   AppNotification,
   CompletedSet,
   Competency,
   Employee,
+  EmployeeAccount,
   ManualOvertimePosting,
   MutualShiftApplication,
   MutualShiftPosting,
@@ -1727,6 +1729,40 @@ export async function getFutureOvertimeClaimsForEmployee(
   }
 
   return mapOvertimeClaims(result.data ?? []);
+}
+
+/**
+ * The accounts linked to employees, for the Personnel roster.
+ *
+ * Kept beside the personnel snapshot rather than folded into `Employee`: an
+ * account is a property of the profile, and every scheduling surface that reads
+ * `Employee` has no use for it.
+ */
+export async function getEmployeeAccounts(session?: AppSession | null): Promise<EmployeeAccount[]> {
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    return [];
+  }
+
+  const result = await applySessionScope(
+    supabase.from("profiles").select("id, email, role, employee_id"),
+    session,
+  ).not("employee_id", "is", null);
+
+  if (result.error) {
+    logSnapshotQueryErrors("Employee accounts", [["profiles", result.error]]);
+    return [];
+  }
+
+  const rows = (result.data as Array<{ id: string; email: string; role: AppRole; employee_id: string }> | null) ?? [];
+
+  return rows.map((row) => ({
+    profileId: row.id,
+    employeeId: row.employee_id,
+    email: row.email,
+    role: row.role,
+  }));
 }
 
 export async function getPersonnelSnapshot(month: string, session?: AppSession | null) {

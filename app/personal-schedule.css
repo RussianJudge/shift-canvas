@@ -1,0 +1,503 @@
+/* ============================================================
+   My schedule
+   ============================================================
+   The signed-in employee's own view of the Schedule page. Scoped to
+   `.personal-schedule` so none of it can reach the team grid, whose modifier
+   classes (completed, weekend, set, missing, today, selected) are load-bearing.
+
+   Only geometry and type live on the bare classes here; colour comes from the
+   shared pill and surface tokens, so both themes follow automatically. */
+
+.personal-schedule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-block: var(--space-4);
+}
+
+.personal-schedule__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.personal-schedule__title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.personal-schedule__breadcrumb {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: 2px;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.personal-schedule__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.personal-schedule__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The calendar is the working surface and the panel is context, so the split
+   is weighted rather than even. The divider is a border, not a card edge. */
+.personal-schedule__body {
+  display: grid;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (min-width: 1100px) {
+  .personal-schedule__body {
+    grid-template-columns: minmax(0, 1fr) 21rem;
+  }
+
+  .personal-schedule__aside {
+    padding-left: var(--space-6);
+    border-left: 1px solid var(--color-border);
+  }
+}
+
+/* ---- Month calendar ----------------------------------------- */
+
+.personal-calendar__headings {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+/* The weeks stay in the markup for the grid's row semantics but hand their
+   cells to the month grid, so every row is measured together. Kept as
+   separate grids they sized independently, and one wrapped code left its own
+   week taller than the rest. */
+.personal-calendar__week {
+  display: contents;
+}
+
+.personal-calendar__heading {
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+/* One grid for the whole month: equal columns, and `grid-auto-rows` fixes
+   every row to the same height whatever any single day contains. */
+.personal-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: 6.25rem;
+  border-top: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-border);
+}
+
+/* The cell is the grid item; the button has to be told to fill it, or it sits
+   at its own content height and leaves a gap along the bottom border. */
+/* Descendant, not child: `display: contents` promotes these to grid items but
+   leaves them nested under the week in the DOM. */
+.personal-calendar__grid [role="gridcell"] {
+  min-width: 0;
+  min-height: 0;
+}
+
+.personal-calendar__day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  /* Fills the cell the grid sized, so every day is the same box and no gap
+     opens under a day with nothing on it. Content that would overflow a short
+     row is clipped rather than pushing the row taller than its neighbours. */
+  height: 100%;
+  overflow: hidden;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  background: var(--color-surface);
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.personal-calendar__day--weekend {
+  background: var(--color-surface-muted);
+}
+
+.personal-calendar__day--outside {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+
+.personal-calendar__day:hover {
+  background: var(--color-primary-soft);
+}
+
+.personal-calendar__day:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* Selection is an inset ring so the cell keeps its own background, and it is
+   paired with aria-selected on the gridcell rather than standing on colour. */
+.personal-calendar__day--selected {
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+}
+
+.personal-calendar__date {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.personal-calendar__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  font-size: var(--control-font-md);
+  font-weight: 600;
+}
+
+.personal-calendar__number--today {
+  background: var(--color-primary);
+  color: var(--color-primary-ink);
+  border-radius: var(--radius-pill);
+}
+
+.personal-calendar__month {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.personal-calendar__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+}
+
+/* One line that ends in an ellipsis rather than wrapping: a second line would
+   be cut off by the fixed row height, which reads as a rendering fault. The
+   code pill above carries the meaning, so this is the part that gives way. */
+.personal-calendar__shift {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.personal-calendar__entry {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* ---- Mobile day strip and day list -------------------------- */
+
+.personal-schedule__mobile {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.personal-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(2.75rem, 1fr);
+  gap: var(--space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: var(--space-1);
+}
+
+.personal-strip__day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  /* 44px minimum touch target. */
+  min-height: 4.5rem;
+  min-width: 2.75rem;
+  padding: var(--space-2) var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.personal-strip__day:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.personal-strip__day--selected {
+  background: var(--color-sidebar);
+  border-color: var(--color-sidebar);
+  color: var(--color-sidebar-text);
+}
+
+.personal-strip__weekday {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.personal-strip__number {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.personal-strip__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-pill);
+}
+
+.personal-strip__dot--empty {
+  background: var(--color-border-strong);
+}
+
+.personal-schedule__day-heading {
+  margin: 0;
+  font-size: var(--control-font-lg);
+  font-weight: 600;
+}
+
+/* ---- Assignment rows ---------------------------------------- */
+
+.personal-assignment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.personal-assignment__codes {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.personal-assignment__label {
+  font-size: var(--control-font-md);
+}
+
+.personal-assignment__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.personal-assignment__meta svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.personal-assignment--rest {
+  color: var(--color-text-secondary);
+}
+
+/* ---- Next assignment and Coming up -------------------------- */
+
+.personal-schedule__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.personal-next {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--color-primary);
+}
+
+.personal-next__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.personal-next__eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.personal-next__when {
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.personal-next__date {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.personal-next__none,
+.personal-upcoming__empty {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.personal-upcoming__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.personal-upcoming__title {
+  margin: 0;
+  font-size: var(--control-font-lg);
+  font-weight: 700;
+}
+
+.personal-upcoming__scope {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.personal-upcoming__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.personal-upcoming__row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.personal-upcoming__when {
+  display: flex;
+  flex-direction: column;
+}
+
+.personal-upcoming__weekday {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.personal-upcoming__number {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.personal-upcoming__what {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.personal-upcoming__rest-icon svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--color-text-secondary);
+}
+
+.personal-schedule__note {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.personal-empty {
+  margin-top: var(--space-4);
+}
+
+/* ---- Scope toggle ------------------------------------------- */
+
+.schedule-scope {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.schedule-scope__status {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Responsive --------------------------------------------- */
+
+/* Seven columns in this space leave no room for "Night shift" beside the
+   pill, and a column of ellipses reads worse than the code alone. The label
+   returns as soon as it fits; the day cell keeps its size either way. */
+@media (max-width: 1080px) {
+  .personal-calendar__shift {
+    display: none;
+  }
+
+  .personal-calendar__day {
+    padding-inline: var(--space-2);
+  }
+}
+
+/* Below the calendar's comfortable width the month grid gives way to the strip
+   and a single day, which is the shape the mobile mockup uses. */
+@media (max-width: 720px) {
+  .personal-calendar {
+    display: none;
+  }
+
+  .personal-schedule__mobile {
+    display: flex;
+  }
+
+  .personal-schedule__title {
+    font-size: 1.5rem;
+  }
+
+  .personal-schedule {
+    /* Clears the fixed mobile menu button, and the home indicator below. */
+    padding-top: var(--space-2);
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  }
+}

@@ -2,16 +2,25 @@
 
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { savePersonnel } from "@/app/actions";
-import { createAccountInvite, linkExistingAccountToEmployee } from "@/app/auth-actions";
+import { createAccountInvite, linkExistingAccountToEmployee, updateAccountRole } from "@/app/auth-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
 import { Select, TextInput } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
 import { formatEmployeeDisplayName, splitEmployeeDisplayName } from "@/lib/employee-names";
 import { deriveInitials } from "@/lib/initials";
-import type { AppRole, AppSession, PersonnelUpdate, SavePersonnelInput, SchedulerSnapshot } from "@/lib/types";
+import { ROLE_LABELS } from "@/lib/types";
+import type {
+  AppRole,
+  AppSession,
+  EmployeeAccount,
+  PersonnelUpdate,
+  SavePersonnelInput,
+  SchedulerSnapshot,
+} from "@/lib/types";
 
 /**
  * Personnel editor with inline row editing and CSV import.
@@ -500,11 +509,15 @@ function EmployeeSettingsModal({
   emailIssue,
   inviteRole,
   canInviteElevatedRoles,
+  account,
+  canChangeAccountRole,
+  isSelfAccount,
   inviteLink,
   statusMessage,
   isBusy,
   onEmailChange,
   onInviteRoleChange,
+  onAccountRoleChange,
   onSendInvite,
   onCopyLink,
   onRemove,
@@ -514,11 +527,15 @@ function EmployeeSettingsModal({
   emailIssue?: string;
   inviteRole: AppRole;
   canInviteElevatedRoles: boolean;
+  account: EmployeeAccount | null;
+  canChangeAccountRole: boolean;
+  isSelfAccount: boolean;
   inviteLink: string;
   statusMessage: string;
   isBusy: boolean;
   onEmailChange: (next: string) => void;
   onInviteRoleChange: (next: AppRole) => void;
+  onAccountRoleChange: (next: AppRole) => void;
   onSendInvite: () => void;
   onCopyLink: () => void;
   onRemove: () => void;
@@ -572,6 +589,30 @@ function EmployeeSettingsModal({
             {canInviteElevatedRoles ? <option value="admin">Admin</option> : null}
           </Select>
         </div>
+
+        {account ? (
+          <div className="personnel-account-role">
+            <Select
+              label="Account role"
+              value={account.role}
+              disabled={isBusy || !canChangeAccountRole || isSelfAccount}
+              onChange={(event) => onAccountRoleChange(event.target.value as AppRole)}
+            >
+              {(["worker", "leader", "admin"] as AppRole[]).map((role) => (
+                <option key={role} value={role}>
+                  {ROLE_LABELS[role]}
+                </option>
+              ))}
+            </Select>
+            <p className="personnel-modal-status">
+              {isSelfAccount
+                ? "You cannot change your own role. Ask another admin."
+                : canChangeAccountRole
+                ? `Applies to the account signed in as ${account.email}.`
+                : "Only admins can change an account role."}
+            </p>
+          </div>
+        ) : null}
 
         {inviteLink ? (
           <TextInput
@@ -772,10 +813,13 @@ function AddEmployeeModal({
 export function PersonnelPanel({
   snapshot,
   viewer,
+  accounts,
 }: {
   snapshot: SchedulerSnapshot;
   viewer: AppSession;
+  accounts: EmployeeAccount[];
 }) {
+  const router = useRouter();
   const csvInputRef = useRef<HTMLInputElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const lastPersonnelSaveSignatureRef = useRef("");
@@ -829,6 +873,10 @@ export function PersonnelPanel({
   const [isSaving, startSaveTransition] = useTransition();
   const [isLinkingExistingAccount, startLinkAccountTransition] = useTransition();
   const canInviteAdmin = viewer.role === "admin";
+  const accountByEmployeeId = useMemo(
+    () => new Map(accounts.map((account) => [account.employeeId, account])),
+    [accounts],
+  );
   const scheduleNameById = useMemo(
     () => Object.fromEntries(snapshot.schedules.map((schedule) => [schedule.id, schedule.name])),
     [snapshot.schedules],
@@ -1513,6 +1561,22 @@ export function PersonnelPanel({
    * The employee has to exist in the database before an invite can reference it,
    * so a freshly typed email is saved first rather than left to autosave.
    */
+  function handleAccountRoleChange(employeeId: string, role: AppRole) {
+    startSaveTransition(async () => {
+      setSettingsStatusMessage("");
+
+      const result = await updateAccountRole({ employeeId, role });
+
+      setSettingsStatusMessage(result.message);
+
+      if (result.ok) {
+        // The action revalidates /personnel, so the incoming accounts prop is
+        // what re-renders the control; nothing is mirrored in local state.
+        router.refresh();
+      }
+    });
+  }
+
   function handleSendSettingsInvite(employee: EditableEmployee) {
     startSaveTransition(async () => {
       setSettingsStatusMessage("");
@@ -1896,15 +1960,15 @@ export function PersonnelPanel({
                   </td>
                   <td className="column-actions">
                     <div className="table-actions-cell">
-                      {canInviteAdmin ? (
-                        <IconButton
-                          variant="subtle"
-                          size="sm"
-                          label={`Settings for ${getEditableEmployeeDisplayName(entry.value)}`}
-                          icon={<SettingsIcon />}
-                          onClick={() => setSettingsEmployeeId(entry.value.id)}
-                        />
-                      ) : null}
+                      {/* Everyone who can open this page can manage an employee.
+                          The dialog gates the elevated invite roles itself. */}
+                      <IconButton
+                        variant="subtle"
+                        size="sm"
+                        label={`Settings for ${getEditableEmployeeDisplayName(entry.value)}`}
+                        icon={<SettingsIcon />}
+                        onClick={() => setSettingsEmployeeId(entry.value.id)}
+                      />
                     </div>
                   </td>
                       </>
@@ -1955,6 +2019,13 @@ export function PersonnelPanel({
         emailIssue={getEmployeeFieldIssues(settingsEmployee).email}
         inviteRole={settingsInviteRole}
         canInviteElevatedRoles={canInviteAdmin}
+        account={accountByEmployeeId.get(settingsEmployee.id) ?? null}
+        canChangeAccountRole={canInviteAdmin}
+        isSelfAccount={
+          (accountByEmployeeId.get(settingsEmployee.id)?.email ?? "").toLowerCase() ===
+          viewer.email.toLowerCase()
+        }
+        onAccountRoleChange={(role) => handleAccountRoleChange(settingsEmployee.id, role)}
         inviteLink={settingsInviteLink}
         statusMessage={settingsStatusMessage}
         isBusy={isSaving}

@@ -51,6 +51,23 @@ export function shiftMonthKey(monthKey: string, delta: number) {
 }
 
 /** Returns the current month key in the caller's business timezone. */
+/**
+ * Today's `YYYY-MM-DD` in a given zone.
+ *
+ * Server-side companion to `useBusinessToday`, so a page can render the right
+ * day on the first pass instead of showing the first of the month until the
+ * client corrects it. The hook still runs and wins, which keeps a page left
+ * open across midnight honest.
+ */
+export function getCurrentDateKey(timeZone: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 export function getCurrentMonthKey(timeZone: string) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone,
