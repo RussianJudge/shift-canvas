@@ -1,4 +1,5 @@
-import type { ShiftKind } from "@/lib/types";
+import { createAssignmentKey, shiftForDate } from "@/lib/scheduling";
+import type { Schedule, ShiftKind, StoredAssignment } from "@/lib/types";
 
 /**
  * Helpers for encoding overtime-specific schedule rows.
@@ -131,6 +132,78 @@ export function buildSwapOvertimeAssignmentRows({
     }),
     shift_kind: shiftKindForDate(date),
   }));
+}
+
+/**
+ * Overtime is stored once, on the schedule that needed the coverage, so the
+ * claimant's own schedule has nothing on that date and falls back to their
+ * rotation — reading as OFF while they are actually at work. This synthesises
+ * the away day back onto their home schedule for display, the same way
+ * `buildProjectedSubScheduleAssignments` projects sub-schedule work.
+ *
+ * Mutual and loan rows are skipped because those workflows already write their
+ * own home-schedule row, and a real home assignment always wins: the projection
+ * only fills dates the home schedule left empty.
+ *
+ * The competency and time code travel in the `projected*` fields and the stored
+ * ones stay null. Coverage counting, set completion and autofill all read the
+ * stored fields, so an employee who is away can never be counted as filling a
+ * post on the crew they are away from.
+ */
+export function buildAwayOvertimeAssignments({
+  schedule,
+  awayAssignments,
+  homeAssignments,
+  scheduleNames,
+}: {
+  schedule: Schedule;
+  awayAssignments: StoredAssignment[];
+  homeAssignments: StoredAssignment[];
+  scheduleNames: Record<string, string>;
+}) {
+  const employeeIds = new Set(schedule.employees.map((employee) => employee.id));
+  const occupiedHomeKeys = new Set(
+    homeAssignments
+      .filter((assignment) => assignment.scheduleId === schedule.id)
+      .map((assignment) => createAssignmentKey(schedule.id, assignment.employeeId, assignment.date)),
+  );
+  const projected = new Map<string, StoredAssignment>();
+
+  for (const assignment of awayAssignments) {
+    if (assignment.scheduleId === schedule.id || !employeeIds.has(assignment.employeeId)) {
+      continue;
+    }
+
+    if (assignment.notes?.startsWith("MUT|") || assignment.notes?.startsWith("LOAN|")) {
+      continue;
+    }
+
+    const key = createAssignmentKey(schedule.id, assignment.employeeId, assignment.date);
+
+    if (occupiedHomeKeys.has(key) || projected.has(key)) {
+      continue;
+    }
+
+    projected.set(key, {
+      employeeId: assignment.employeeId,
+      scheduleId: schedule.id,
+      date: assignment.date,
+      competencyId: null,
+      timeCodeId: null,
+      notes: null,
+      shiftKind: shiftForDate(schedule, assignment.date),
+      companyId: assignment.companyId,
+      siteId: assignment.siteId,
+      businessAreaId: assignment.businessAreaId,
+      sourceType: "away-overtime",
+      projectedCompetencyId: assignment.competencyId,
+      projectedTimeCodeId: assignment.timeCodeId,
+      awayScheduleId: assignment.scheduleId,
+      awayScheduleName: scheduleNames[assignment.scheduleId] ?? null,
+    });
+  }
+
+  return Array.from(projected.values());
 }
 
 /**

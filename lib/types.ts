@@ -85,10 +85,13 @@ export interface StoredAssignment extends OrganizationScope {
   timeCodeId: string | null;
   notes?: string | null;
   shiftKind: ShiftKind;
-  sourceType?: "schedule" | "sub-schedule";
+  sourceType?: "schedule" | "sub-schedule" | "away-overtime";
   subScheduleId?: string | null;
   subScheduleName?: string | null;
   projectedCompetencyId?: string | null;
+  projectedTimeCodeId?: string | null;
+  awayScheduleId?: string | null;
+  awayScheduleName?: string | null;
 }
 
 export interface SubSchedule extends OrganizationScope {
@@ -226,6 +229,10 @@ export interface SchedulePageSnapshot
     | "projectedAssignments"
     | "overtimeClaims"
     | "completedSets"
+    /* Names for the schedule selector. Already loaded by the reference
+       snapshot, so exposing them adds no query. The page strips them for
+       workers, who may not open a sub-schedule. */
+    | "subSchedules"
   > {
   selectedScheduleId: string | null;
   assignmentIndex: Record<string, { competencyId: string | null; timeCodeId: string | null; notes: string | null }>;

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
@@ -11,6 +12,9 @@ import {
   saveSubSchedules,
 } from "@/app/actions";
 import { AppDateSelector } from "@/components/app-date-selector";
+import { useWorkspaceNavigationGuard } from "@/components/workspace-shell";
+import { deriveInitials } from "@/lib/initials";
+import { useBusinessToday } from "@/lib/use-business-today";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
 import {
   formatMonthLabel,
@@ -572,10 +576,23 @@ function AddSubScheduleEmployeeModal({
 export function SubSchedulesPanel({
   snapshot,
   initialSelectedSubScheduleId = "",
+  scheduleContextSelector = null,
+  autoCreate = false,
 }: {
   snapshot: SchedulerSnapshot;
   initialSelectedSubScheduleId?: string;
+  /** Set by ?new=1, so "Create sub-schedule" lands ready to name one. */
+  autoCreate?: boolean;
+  /**
+   * The Schedule page's own context selector. When present this panel is
+   * embedded in /schedule, so it drops its page title and defers the choice of
+   * roster to that control instead of rendering a second one beside it.
+   */
+  scheduleContextSelector?: ReactNode;
 }) {
+  const isEmbedded = scheduleContextSelector !== null;
+  const hasAutoCreatedRef = useRef(false);
+  const businessToday = useBusinessToday();
   const router = useRouter();
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
   const competencyMap = useMemo(() => getCompetencyMap(snapshot.competencies), [snapshot.competencies]);
@@ -720,6 +737,47 @@ export function SubSchedulesPanel({
     [assignmentUpdates],
   );
 
+  /**
+   * Write pending edits now instead of waiting out the 2.5s debounce.
+   *
+   * Assignments autosave on a timer, so leaving this panel — switching
+   * schedule context, or any workspace navigation — could otherwise discard
+   * edits the viewer had already made. Returning false keeps them here rather
+   * than navigating away from work that failed to save.
+   *
+   * Same action, same payload as the debounced path; only the timing differs.
+   */
+  const flushPendingAssignmentSave = useCallback(async () => {
+    if (!activeSubSchedule || !isPersistedActiveSubSchedule || activeSubSchedule.isArchived) {
+      return true;
+    }
+
+    if (assignmentUpdates.length === 0) {
+      return true;
+    }
+
+    const updates = assignmentUpdates;
+
+    setAssignmentMessage("Saving changes before leaving...");
+
+    const result = await saveSubScheduleAssignments({
+      subScheduleId: activeSubSchedule.id,
+      updates,
+    } as SaveSubScheduleAssignmentsInput);
+
+    if (!result.ok) {
+      setAssignmentMessage(result.message);
+      return false;
+    }
+
+    lastAssignmentSaveSignatureRef.current = JSON.stringify(updates);
+    return true;
+  }, [activeSubSchedule, assignmentUpdates, isPersistedActiveSubSchedule]);
+
+  // The panel had no navigation guard at all, so sidebar navigation could walk
+  // away from a pending autosave too. Registering it here covers both.
+  useWorkspaceNavigationGuard(hasAssignmentChanges ? flushPendingAssignmentSave : null);
+
   useEffect(() => {
     if (
       !activeSubSchedule ||
@@ -855,6 +913,27 @@ export function SubSchedulesPanel({
     setIsSettingsModalOpen(true);
     setStatusMessage("");
   }
+
+  /**
+   * "Create sub-schedule" in the schedule switcher arrives as ?new=1 and opens
+   * the same draft the panel's own Add button does. The ref keeps a re-render
+   * from creating a second one, and the parameter is dropped from the URL so a
+   * refresh or a back-navigation does not create another.
+   */
+  useEffect(() => {
+    if (!autoCreate || hasAutoCreatedRef.current) {
+      return;
+    }
+
+    hasAutoCreatedRef.current = true;
+    handleAddSubSchedule();
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("new");
+    window.history.replaceState(null, "", url.toString());
+    // handleAddSubSchedule is redefined each render; the ref is the guard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCreate]);
 
   function handleSaveDefinitions({ closeModal = false }: { closeModal?: boolean } = {}) {
     if (invalidSubScheduleIds.size > 0) {
@@ -1115,11 +1194,14 @@ export function SubSchedulesPanel({
 
   return (
     <section className="panel-frame">
-      <div className="panel-heading panel-heading--simple">
-        <h1 className="panel-title">Sub-Schedules</h1>
-      </div>
+      {isEmbedded ? null : (
+        <div className="panel-heading panel-heading--simple">
+          <h1 className="panel-title">Sub-Schedules</h1>
+        </div>
+      )}
 
-      {/* Leads its own toolbar row, as on Schedule. */}
+      {/* Leads its own toolbar row, as on Schedule. Embedded, the schedule
+          selector sits beside the month so both live on one row. */}
       <div className="page-date-toolbar">
         <AppDateSelector
           mode="month"
@@ -1128,6 +1210,7 @@ export function SubSchedulesPanel({
           className="sub-schedules-month-pager"
           onChange={handleMonthChange}
         />
+        {scheduleContextSelector}
       </div>
 
       <div className="workspace-toolbar subschedule-toolbar">
@@ -1211,7 +1294,9 @@ export function SubSchedulesPanel({
               <div
                 className="subschedule-grid"
                 style={{
-                  gridTemplateColumns: `12rem repeat(${monthDays.length}, minmax(2.1rem, 1fr))`,
+                  // Same track definition as the main grid, so both read at the
+                  // same density and a five-character code fits either one.
+                  gridTemplateColumns: `var(--schedule-name-column-width, 11rem) repeat(${monthDays.length}, minmax(var(--schedule-day-column-width, 2.5rem), 1fr))`,
                 }}
               >
                 <div className="employee-header sticky-column">
@@ -1219,15 +1304,23 @@ export function SubSchedulesPanel({
                   <strong>{activeSubSchedule.name}</strong>
                 </div>
 
-                {monthDays.map((day) => (
-                  <div
-                    key={`${activeSubSchedule.id}-${day.date}`}
-                    className={`day-header ${day.isWeekend ? "day-header--weekend" : ""}`}
-                  >
-                    <span>{day.dayName.slice(0, 1)}</span>
-                    <strong>{day.dayNumber}</strong>
-                  </div>
-                ))}
+                {monthDays.map((day) => {
+                  const isToday = day.date === businessToday;
+
+                  return (
+                    <div
+                      key={`${activeSubSchedule.id}-${day.date}`}
+                      aria-current={isToday ? "date" : undefined}
+                      className={`day-header ${day.isWeekend ? "day-header--weekend" : ""} ${
+                        isToday ? "day-header--today" : ""
+                      }`}
+                      title={isToday ? `${day.dayName} ${day.date} (today)` : `${day.dayName} ${day.date}`}
+                    >
+                      <span>{day.dayName.slice(0, 1)}</span>
+                      <strong>{day.dayNumber}</strong>
+                    </div>
+                  );
+                })}
 
                 {rowEmployeeIds.flatMap((employeeId) => {
                   const employee = employeeMap[employeeId];
@@ -1240,9 +1333,25 @@ export function SubSchedulesPanel({
 
                   return [
                     <div key={`sub-row-${employeeId}`} className="employee-cell sticky-column">
+                      {(() => {
+                        // Built from the name fields, not the display name,
+                        // which is "Last, First" and reverses the initials —
+                        // same derivation the main grid uses.
+                        const initials = deriveInitials(
+                          `${employee.firstName} ${employee.lastName}`.trim(),
+                        );
+
+                        return initials ? (
+                          <span className="employee-cell__avatar" aria-hidden="true">
+                            {initials}
+                          </span>
+                        ) : null;
+                      })()}
                       <div className="employee-cell__main">
-                        <strong>{employee.name}</strong>
-                        <span>{homeSchedule?.name ?? "Unassigned"}</span>
+                        <strong title={employee.name}>{employee.name}</strong>
+                        <span className="employee-cell__role">
+                          {homeSchedule?.name ?? "Unassigned"}
+                        </span>
                       </div>
                       {activeSubSchedule.carryWorkersAcrossMonths ? (
                         <button

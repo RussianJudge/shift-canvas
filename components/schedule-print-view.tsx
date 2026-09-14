@@ -403,13 +403,21 @@ function PrintScheduleSheet({
                       competencyId: null,
                       timeCodeId: null,
                     };
+                const projectedAssignment =
+                  projectedAssignmentIndex[createAssignmentKey(schedule.id, employee.sourceEmployeeId, day.date)] ?? null;
+                const isAwayOvertimeCell = projectedAssignment?.sourceType === "away-overtime";
                 const overtimeClaimCompetencyId =
                   !selection.competencyId && !selection.timeCodeId
                     ? employee.overtimeCompetencyByDate?.[day.date] ?? null
                     : null;
-                const effectiveSelection = overtimeClaimCompetencyId
-                  ? { competencyId: overtimeClaimCompetencyId, timeCodeId: null }
-                  : selection;
+                const effectiveSelection = isAwayOvertimeCell
+                  ? {
+                      competencyId: projectedAssignment?.projectedCompetencyId ?? null,
+                      timeCodeId: projectedAssignment?.projectedTimeCodeId ?? null,
+                    }
+                  : overtimeClaimCompetencyId
+                    ? { competencyId: overtimeClaimCompetencyId, timeCodeId: null }
+                    : selection;
                 const activeCompetency = effectiveSelection.competencyId
                   ? competencyMap[effectiveSelection.competencyId]
                   : null;
@@ -417,12 +425,12 @@ function PrintScheduleSheet({
                   ? timeCodeMap[effectiveSelection.timeCodeId]
                   : null;
                 const activeColorToken = activeTimeCode?.colorToken ?? activeCompetency?.colorToken ?? "";
-                const projectedAssignment =
-                  projectedAssignmentIndex[createAssignmentKey(schedule.id, employee.sourceEmployeeId, day.date)] ?? null;
                 const selectionCode = isBorrowedCellVisible
                   ? getSelectionCode(effectiveSelection, competencyMap, timeCodeMap)
                   : "";
-                const cellTitle = projectedAssignment
+                const cellTitle = isAwayOvertimeCell
+                  ? `Overtime on ${projectedAssignment?.awayScheduleName ?? "another schedule"}`
+                  : projectedAssignment
                   ? `${projectedAssignment.subScheduleName ?? "Sub-schedule"} manages this cell`
                   : getScheduleCellComment({
                       notes: selection.notes,
@@ -440,7 +448,9 @@ function PrintScheduleSheet({
                   } ${activeColorToken ? `legend-pill--${activeColorToken.toLowerCase()}` : ""} ${
                     activeColorToken ? "shift-cell--coded" : ""
                   } ${selectionCode ? "" : "shift-cell--blank"
-                  } ${projectedAssignment ? "shift-cell--projected" : ""}`}
+                  } ${projectedAssignment ? "shift-cell--projected" : ""} ${
+                    isAwayOvertimeCell ? "shift-cell--away" : ""
+                  }`}
                 >
                     {selectionCode}
                   </div>

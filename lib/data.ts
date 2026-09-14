@@ -5,6 +5,7 @@ import {
   formatEmployeeDisplayName,
   type EmployeeNameParts,
 } from "@/lib/employee-names";
+import { buildAwayOvertimeAssignments } from "@/lib/overtime";
 import {
   buildAssignmentIndex,
   getCompletedSetDatesForMonth,
@@ -1284,6 +1285,7 @@ type ScheduleReferenceSnapshotOptions = {
   includeManualOvertimePostings?: boolean;
   includeCompletedSets?: boolean;
   includeProjectedAssignments?: boolean;
+  includeAwayAssignments?: boolean;
   assignmentWindow?: "month" | "extended" | "schedule-page";
   completedSetWindow?: "month" | "extended";
   scheduleDataScheduleId?: string | null;
@@ -1316,6 +1318,7 @@ export async function getScheduleReferenceSnapshot(
     includeManualOvertimePostings = false,
     includeCompletedSets = false,
     includeProjectedAssignments = false,
+    includeAwayAssignments = false,
     assignmentWindow = "month",
     completedSetWindow = "month",
     scheduleDataScheduleId,
@@ -1402,6 +1405,7 @@ export async function getScheduleReferenceSnapshot(
   // Batch 2 — reads that depend on the resolved employee list / data window.
   const [
     assignmentsResult,
+    awayAssignmentsResult,
     subScheduleAssignmentsResult,
     overtimeClaimsResult,
     completedSetsResult,
@@ -1428,6 +1432,23 @@ export async function getScheduleReferenceSnapshot(
             );
           })()
         : Promise.resolve({ data: [], error: null })
+      : Promise.resolve({ data: [], error: null }),
+    // Work this crew's employees are doing on another schedule. The main
+    // assignments read is pinned to one schedule_id, so overtime picked up
+    // elsewhere never reaches the grid without a second pass.
+    includeAwayAssignments && resolvedScheduleDataScheduleId && selectedScheduleEmployeeIds.length > 0
+      ? fetchAllRows<AssignmentRow>(
+          supabase
+            .from("schedule_assignments")
+            .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind")
+            .in("employee_id", selectedScheduleEmployeeIds)
+            .neq("schedule_id", resolvedScheduleDataScheduleId)
+            .gte("assignment_date", monthStart)
+            .lte("assignment_date", monthEnd)
+            .order("assignment_date")
+            .order("employee_id")
+            .order("schedule_id", { nullsFirst: false }),
+        )
       : Promise.resolve({ data: [], error: null }),
     includeSubScheduleAssignments
       ? resolvedScheduleDataScheduleId && selectedScheduleEmployeeIds.length === 0
@@ -1501,6 +1522,7 @@ export async function getScheduleReferenceSnapshot(
     ["sub_schedules", subSchedulesResult.error],
     ["sub_schedule_competencies", subScheduleCompetenciesResult.error],
     ["schedule_assignments", assignmentsResult.error],
+    ["schedule_assignments (away)", awayAssignmentsResult.error],
     ["sub_schedule_assignments", subScheduleAssignmentsResult.error],
     ["overtime_claims", overtimeClaimsResult.error],
     ["manual_overtime_postings", manualOvertimePostingsResult.error],
@@ -1529,6 +1551,27 @@ export async function getScheduleReferenceSnapshot(
           mappedSubScheduleAssignments,
         ).map((entry) => entry.row)
       : assignmentRows;
+  const mappedAssignments = includeAssignments ? mapAssignments(filteredAssignmentRows) : [];
+  const subScheduleProjections =
+    includeProjectedAssignments && includeSubSchedules && includeSubScheduleAssignments
+      ? buildProjectedSubScheduleAssignments({
+          schedules: scheduleReference.schedules,
+          subSchedules: mappedSubSchedules,
+          subScheduleAssignments: mappedSubScheduleAssignments,
+        })
+      : [];
+  const awayOvertimeProjections =
+    includeProjectedAssignments && scheduleForDataWindow
+      ? buildAwayOvertimeAssignments({
+          schedule: scheduleForDataWindow,
+          awayAssignments: mapAssignments((awayAssignmentsResult.data as AssignmentRow[] | null) ?? []),
+          // Sub-schedule work occupies the home cell too, so it counts as taken.
+          homeAssignments: [...mappedAssignments, ...subScheduleProjections],
+          scheduleNames: Object.fromEntries(
+            scheduleReference.schedules.map((schedule) => [schedule.id, schedule.name]),
+          ),
+        })
+      : [];
 
   return {
     month,
@@ -1541,15 +1584,8 @@ export async function getScheduleReferenceSnapshot(
       : [],
     schedules: scheduleReference.schedules,
     unassignedEmployees: scheduleReference.unassignedEmployees,
-    assignments: includeAssignments ? mapAssignments(filteredAssignmentRows) : [],
-    projectedAssignments:
-      includeProjectedAssignments && includeSubSchedules && includeSubScheduleAssignments
-        ? buildProjectedSubScheduleAssignments({
-            schedules: scheduleReference.schedules,
-            subSchedules: mappedSubSchedules,
-            subScheduleAssignments: mappedSubScheduleAssignments,
-          })
-        : [],
+    assignments: mappedAssignments,
+    projectedAssignments: [...subScheduleProjections, ...awayOvertimeProjections],
     overtimeClaims: includeOvertimeClaims
       ? mapOvertimeClaims((overtimeClaimsResult.data as OvertimeClaimRow[] | null) ?? [])
       : [],
@@ -1590,6 +1626,7 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     includeAssignments: true,
     includeSubScheduleAssignments: true,
     includeProjectedAssignments: true,
+    includeAwayAssignments: true,
     includeOvertimeClaims: true,
     includeCompletedSets: true,
     assignmentWindow: "schedule-page",
@@ -1618,6 +1655,7 @@ export const getSchedulePageSnapshot = cache(async function getSchedulePageSnaps
     month: snapshot.month,
     selectedScheduleId: resolvedSelectedScheduleId,
     schedules: snapshot.schedules,
+    subSchedules: snapshot.subSchedules,
     competencies: snapshot.competencies,
     timeCodes: snapshot.timeCodes,
     assignments,

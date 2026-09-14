@@ -373,3 +373,255 @@
     font-size: 0.8125rem;
   }
 }
+
+/* ---- Schedule context switcher ------------------------------
+   A popover menu rather than a native select: it groups the main rosters,
+   All schedules and sub-schedules, and carries the create and manage actions
+   a native <select> cannot. Same open/close model as .app-date-selector —
+   click outside or Escape closes it.
+
+   Every class here is new, so no existing rule is restyled and no state
+   modifier can be defeated. */
+
+.schedule-switch {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.schedule-switch__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height-md);
+  padding: 0 var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--control-font-md);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.schedule-switch__trigger:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.schedule-switch__trigger:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.schedule-switch__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.schedule-switch__trigger-label {
+  max-width: 14rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.schedule-switch__chevron {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 140ms ease;
+}
+
+/* Rotation is decoration; aria-expanded on the trigger carries the state. */
+.schedule-switch__trigger[aria-expanded="true"] .schedule-switch__chevron {
+  transform: rotate(180deg);
+}
+
+.schedule-switch__menu {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: 40;
+  display: grid;
+  gap: 1px;
+  min-width: 17rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.schedule-switch__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-field);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--control-font-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-switch__option:hover:not(:disabled) {
+  background: var(--color-surface-muted);
+}
+
+.schedule-switch__option:focus-visible {
+  outline: var(--focus-outline-width) solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.schedule-switch__option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Selection is announced with aria-checked and marked with a tick as well as
+   the tint, so it never rests on colour alone. Declared after :hover so the
+   selected row keeps its fill while the pointer is over it. */
+.schedule-switch__option--selected,
+.schedule-switch__option--selected:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+  font-weight: 600;
+}
+
+.schedule-switch__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.schedule-switch__icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.schedule-switch__icon svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.schedule-switch__check {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.schedule-switch__section {
+  margin: var(--space-2) 0 2px;
+  padding: 0 var(--space-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.schedule-switch__empty {
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-1);
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.schedule-switch__divider {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--color-border);
+}
+
+.schedule-switch__hint {
+  margin: var(--space-1) 0 0;
+  padding: 0 var(--space-2);
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Sub-schedule grid --------------------------------------
+   The sub-schedule builder renders the same cell classes as the month grid —
+   .employee-header, .day-header, .employee-cell, .shift-cell — so it already
+   inherits the typography and cell treatment above. Only its container
+   differed, and that is what these rules align.
+
+   The two grids stay separate implementations on purpose: this one is not
+   virtualized and has no fixed row height, so nothing here assumes the 51px
+   constant. Matching the column variables is what makes them read alike, and
+   it gives the sub grid the same 40px day column, so a five-character code
+   fits here too instead of being clipped at the old 2.1rem. */
+
+.subschedule-grid {
+  --schedule-name-column-width: 11rem;
+  --schedule-day-column-width: clamp(2.5rem, calc((100vw - 18rem) / 31), 2.6rem);
+}
+
+/* Matches .schedule-wrap: a full-bleed working surface, not a card. globals.css
+   gives this wrapper a 1.25rem radius, a border and a warm tint, and dark mode
+   swaps it to --surface-2; all three predate the token layer and are what made
+   the builder read as a card floating on the canvas. The cells carry their own
+   backgrounds, so the wrapper needs none. */
+.subschedule-grid-wrap {
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  overscroll-behavior-x: contain;
+}
+
+@media (max-width: 600px) {
+  .subschedule-grid {
+    --schedule-name-column-width: 7.5rem;
+    --schedule-day-column-width: 2.5rem;
+  }
+}
+
+/* ---- Overtime worked on another schedule ---------------------
+   The day is projected onto the employee's home crew read-only, so it needs to
+   read as "at work, but not here" without being mistaken for this crew's own
+   coverage. The dashed ring carries that meaning without colour, since the pill
+   underneath keeps the real competency's colour.
+
+   The ring is a pseudo-element rather than an outline or a border: the cell
+   already spends its outline on focus and its borders on the grid lines, and
+   .shift-cell--projected owns box-shadow. */
+.shift-cell--away::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
+.shift-cell--away .shift-cell-button {
+  opacity: 0.8;
+}

@@ -393,9 +393,18 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
 }
 
 /* The schedule grid is deliberately full-bleed: it manages its own
-   horizontal scrolling and should reach both edges. */
-.panel-frame:has(.schedule-scroll-shell) {
+   horizontal scrolling and should reach both edges. The sub-schedule builder
+   is the same kind of surface and gets the same treatment — its toolbars then
+   supply the gutter themselves, exactly as .scheduler-toolbar does. */
+.panel-frame:has(.schedule-scroll-shell),
+.panel-frame:has(.subschedule-grid-wrap) {
   padding-inline: 0;
+}
+
+.panel-frame:has(.subschedule-grid-wrap) > .page-date-toolbar,
+.panel-frame:has(.subschedule-grid-wrap) > .panel-heading,
+.panel-frame:has(.subschedule-grid-wrap) > .workspace-toolbar {
+  padding-inline: var(--space-4);
 }
 
 /* globals.css zeroes padding for print with a `padding` shorthand, which the
@@ -430,6 +439,13 @@ html[data-sidebar-collapsed="true"] .workspace-session__identity {
   gap: var(--space-3);
   flex-wrap: wrap;
   padding: var(--space-3) 0;
+}
+
+/* The schedule selector sits beside the month rather than stretching across
+   the row, so the two read as one control group. */
+.page-date-toolbar .schedule-context-field {
+  flex: 0 1 16rem;
+  min-width: 11rem;
 }
 
 .panel-title {

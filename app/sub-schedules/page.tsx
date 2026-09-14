@@ -1,11 +1,7 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
 
-import { SubSchedulesPanel } from "@/components/sub-schedules-panel";
-import { LoadingCardList, LoadingMonthNav, LoadingPanelFrame, LoadingTable, LoadingToolbarWithActions } from "@/components/workspace-loading";
-import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
-import { requireAppSession } from "@/lib/auth";
-import { getSubSchedulesSnapshot } from "@/lib/data";
-import { formatMonthLabel, getCurrentMonthKey } from "@/lib/scheduling";
+import { buildScheduleHref } from "@/lib/schedule-context";
+import { getCurrentMonthKey } from "@/lib/scheduling";
 
 export const dynamic = "force-dynamic";
 
@@ -13,68 +9,29 @@ function isMonthKey(value: string | undefined) {
   return Boolean(value && /^\d{4}-\d{2}$/.test(value));
 }
 
-async function SubSchedulesBoard({
-  session,
-  month,
-  selectedSubScheduleId,
-}: {
-  session: Awaited<ReturnType<typeof requireAppSession>>;
-  month: string;
-  selectedSubScheduleId: string;
-}) {
-  const snapshot = await getSubSchedulesSnapshot(month, session);
-  return <SubSchedulesPanel snapshot={snapshot} initialSelectedSubScheduleId={selectedSubScheduleId} />;
-}
-
-function SubSchedulesBoardFallback({ month }: { month: string }) {
-  return (
-    <LoadingPanelFrame
-      title="Sub-Schedules"
-      headingAside={<LoadingMonthNav monthLabel={formatMonthLabel(month)} />}
-    >
-      <section className="metrics-section subschedule-builder-section">
-        <div className="metrics-section__header">
-          <div className="metrics-section__title-group">
-            <h2 className="metrics-section__title">Definitions</h2>
-          </div>
-        </div>
-        <LoadingToolbarWithActions
-          fields={[
-            { label: "Month", value: formatMonthLabel(month) },
-            { label: "Status", value: "Loading definitions..." },
-          ]}
-        />
-        <LoadingTable columns={["Name", "Summary Code", "Status"]} rows={4} />
-      </section>
-
-      <section className="metrics-section">
-        <div className="metrics-section__header">
-          <div className="metrics-section__title-group">
-            <h2 className="metrics-section__title">Monthly Builder</h2>
-          </div>
-        </div>
-        <LoadingCardList cards={2} />
-      </section>
-    </LoadingPanelFrame>
-  );
-}
-
+/**
+ * Sub-schedules now live inside /schedule, chosen from the schedule selector.
+ *
+ * This route stays as a redirect so existing links and bookmarks keep working,
+ * carrying both the month and the specific sub-schedule across. No session is
+ * required here: /schedule authorises the request, and resolving the context
+ * there means a viewer who may not open a sub-schedule lands on their own
+ * roster instead of being told whether the id existed.
+ */
 export default async function SubSchedulesPage({
   searchParams,
 }: {
   searchParams?: Promise<{ month?: string; subSchedule?: string }>;
 }) {
-  const session = await requireAppSession(["admin", "leader"]);
-  const currentMonth = getCurrentMonthKey("America/Edmonton");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const month = isMonthKey(resolvedSearchParams?.month) ? resolvedSearchParams!.month! : currentMonth;
-  const selectedSubScheduleId = resolvedSearchParams?.subSchedule ?? "";
+  const month = isMonthKey(resolvedSearchParams?.month)
+    ? resolvedSearchParams!.month!
+    : getCurrentMonthKey("America/Edmonton");
+  const subScheduleId = resolvedSearchParams?.subSchedule?.trim();
 
-  return (
-    <WorkspaceShellFrame viewer={session}>
-      <Suspense key={month} fallback={<SubSchedulesBoardFallback month={month} />}>
-        <SubSchedulesBoard session={session} month={month} selectedSubScheduleId={selectedSubScheduleId} />
-      </Suspense>
-    </WorkspaceShellFrame>
+  redirect(
+    subScheduleId
+      ? buildScheduleHref(month, { kind: "sub", subScheduleId })
+      : `/schedule?month=${month}`,
   );
 }

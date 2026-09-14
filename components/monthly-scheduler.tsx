@@ -16,6 +16,7 @@ import {
 } from "@/app/actions";
 import { AppDateSelector } from "@/components/app-date-selector";
 import { IconButton } from "@/components/ui/button";
+import { ScheduleContextSelector } from "@/components/schedule-context-selector";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { deriveInitials } from "@/lib/initials";
 import { parseMutualAssignmentNote } from "@/lib/mutuals";
@@ -728,6 +729,18 @@ function ShiftOrderModal({
     </div>,
     document.body,
   );
+}
+
+/**
+ * A projected cell is read-only wherever it came from, but pointing a planner at
+ * Sub-Schedules to change an overtime day would send them to the wrong place.
+ */
+function getProjectedCellMessage(assignment: StoredAssignment) {
+  if (assignment.sourceType === "away-overtime") {
+    return `This day is overtime on ${assignment.awayScheduleName ?? "another schedule"} and must be changed from Overtime.`;
+  }
+
+  return `This cell is managed by ${assignment.subScheduleName ?? "a sub-schedule"} and must be changed from Sub-Schedules.`;
 }
 
 /** Builds the visible roster, including borrowed overtime and mutual rows for the month. */
@@ -1487,6 +1500,7 @@ export function MonthlyScheduler({
   initialScheduleEmployeeOrderBySchedule,
   canEdit,
   canManageSetBuilder,
+  canManageSubSchedules,
   canSwitchSchedule,
   forcedScheduleId,
   initialSelectedScheduleId,
@@ -1495,6 +1509,8 @@ export function MonthlyScheduler({
   initialScheduleEmployeeOrderBySchedule: Record<string, string[]>;
   canEdit: boolean;
   canManageSetBuilder: boolean;
+  /** Workers may not open a sub-schedule, so they get no create or manage entries. */
+  canManageSubSchedules: boolean;
   canSwitchSchedule: boolean;
   forcedScheduleId: string | null;
   initialSelectedScheduleId?: string | null;
@@ -2609,9 +2625,7 @@ export function MonthlyScheduler({
     const projectedAssignment = getProjectedAssignmentForCell(employeeId, date);
 
     if (projectedAssignment) {
-      setStatusMessage(
-        `This cell is managed by ${projectedAssignment.subScheduleName ?? "a sub-schedule"} and cannot be edited here.`,
-      );
+      setStatusMessage(getProjectedCellMessage(projectedAssignment));
       return;
     }
 
@@ -3293,41 +3307,36 @@ export function MonthlyScheduler({
           </svg>
         </button>
         {canSwitchSchedule ? (
-          <label className="field">
-            <span>Shift</span>
-            <select
-              value={selectedScheduleId}
-              onChange={(event) => {
-                const nextScheduleId = event.target.value;
-                startMonthTransition(async () => {
-                  const savedDrafts = await saveActiveScheduleDrafts({ reason: "navigation" });
+          /* The same control the sub-schedule view renders, so there is one
+             selector for the page rather than one per renderer. The draft
+             save that the shift switcher always ran now gates the switch: a
+             failed save returns false and the viewer stays put. */
+          <ScheduleContextSelector
+            month={currentMonth}
+            context={{ kind: "main", scheduleId: selectedScheduleId }}
+            schedules={snapshot.schedules}
+            subSchedules={snapshot.subSchedules}
+            canManageSubSchedules={canManageSubSchedules}
+            onBeforeNavigate={async () => {
+              const savedDrafts = await saveActiveScheduleDrafts({ reason: "navigation" });
 
-                  if (!savedDrafts) {
-                    return;
-                  }
+              if (!savedDrafts) {
+                return false;
+              }
 
-                  persistDraftAssignmentsToStorage(
-                    baselineAssignmentsRef.current,
-                    draftAssignmentsRef.current,
-                  );
-                  setStatusMessage("Changing shift");
-                  setSelectedCoverageCompetencyId(null);
-                  setSelectedCompetencyFilter("all");
-                  navigateToScheduleRoute(`/schedule?month=${currentMonth}&schedule=${nextScheduleId}`);
-                });
-              }}
-            >
-              <option value="all">All shifts</option>
-              {snapshot.schedules.map((schedule) => (
-                <option key={schedule.id} value={schedule.id}>
-                  {schedule.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              persistDraftAssignmentsToStorage(
+                baselineAssignmentsRef.current,
+                draftAssignmentsRef.current,
+              );
+              setStatusMessage("Changing schedule");
+              setSelectedCoverageCompetencyId(null);
+              setSelectedCompetencyFilter("all");
+              return true;
+            }}
+          />
         ) : (
           <div className="field field--static">
-            <span>Shift</span>
+            <span>Schedule</span>
             <strong>{activeSchedule.name}</strong>
           </div>
         )}
@@ -3650,9 +3659,7 @@ export function MonthlyScheduler({
                         const projectedAssignment = getProjectedAssignmentForCell(cell.employeeId, cell.date);
 
                         if (projectedAssignment) {
-                          setStatusMessage(
-                            `This cell is managed by ${projectedAssignment.subScheduleName ?? "a sub-schedule"} and must be changed from Sub-Schedules.`,
-                          );
+                          setStatusMessage(getProjectedCellMessage(projectedAssignment));
                           return;
                         }
 
@@ -3917,12 +3924,21 @@ function EmployeeRow({
               notes: null,
             };
         const isTemporaryLoanCell = isTemporaryLoanManagedSelection(selection);
+        const isAwayOvertimeCell = projectedAssignment?.sourceType === "away-overtime";
         const overtimeClaimCompetencyId =
           !selection.competencyId && !selection.timeCodeId
             ? employee.overtimeCompetencyByDate?.[day.date] ?? null
             : null;
-        const effectiveSelection =
-          overtimeClaimCompetencyId
+        // An away cell carries its code in the projected fields so the stored
+        // ones stay empty for coverage and autofill. Displaying it is the only
+        // thing that reads them back.
+        const effectiveSelection = isAwayOvertimeCell
+          ? {
+              competencyId: projectedAssignment?.projectedCompetencyId ?? null,
+              timeCodeId: projectedAssignment?.projectedTimeCodeId ?? null,
+              notes: null,
+            }
+          : overtimeClaimCompetencyId
             ? {
                 competencyId: overtimeClaimCompetencyId,
                 timeCodeId: null,
@@ -3945,7 +3961,9 @@ function EmployeeRow({
           setDates.has(day.date) &&
           highlightedMissingDates.has(day.date) &&
           activeCompetency?.id === selectedCoverageCompetencyId;
-        const cellTitle = isProjectedCell
+        const cellTitle = isAwayOvertimeCell
+          ? `Overtime on ${projectedAssignment?.awayScheduleName ?? "another schedule"}`
+          : isProjectedCell
           ? `${projectedAssignment?.subScheduleName ?? "Sub-schedule"} manages this cell`
           : getScheduleCellComment({
               notes: selection.notes,
@@ -3971,8 +3989,8 @@ function EmployeeRow({
             } ${highlightedMissingDates.has(day.date) && setDates.has(day.date) ? "shift-cell--missing-column" : ""} ${
               isCoverageFocus ? "shift-cell--coverage-focus" : ""
             } ${hasCellNote ? "shift-cell--has-note" : ""} ${isProjectedCell ? "shift-cell--projected" : ""} ${
-              isOutsideMonth ? "shift-cell--outside" : ""
-            }`}
+              isAwayOvertimeCell ? "shift-cell--away" : ""
+            } ${isOutsideMonth ? "shift-cell--outside" : ""}`}
             onPointerDown={(event) => {
               if (
                 event.button !== 0 ||
@@ -4015,7 +4033,11 @@ function EmployeeRow({
                 onCellClick({ employeeId: employee.sourceEmployeeId, date: day.date });
               }}
               disabled={!canEdit || !isBorrowedCellVisible}
-              aria-label={`${employee.name} ${day.date} assignment`}
+              aria-label={
+                isAwayOvertimeCell
+                  ? `${employee.name} ${day.date} ${cellTitle}`
+                  : `${employee.name} ${day.date} assignment`
+              }
               title={cellTitle}
             >
               {viewMode === "week" ? (
@@ -4030,7 +4052,9 @@ function EmployeeRow({
                   </span>
                   {isBorrowedCellVisible ? (
                     <span className="shift-cell__detail">
-                      {activeTimeCode?.label ?? activeCompetency?.label ?? shiftKind}
+                      {isAwayOvertimeCell
+                        ? `OT · ${projectedAssignment?.awayScheduleName ?? "Away"}`
+                        : activeTimeCode?.label ?? activeCompetency?.label ?? shiftKind}
                     </span>
                   ) : null}
                 </span>

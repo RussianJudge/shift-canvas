@@ -44,14 +44,45 @@ Consequences for the UI:
 - Preserve each sub-schedule's employees, shifts, codes, notes, settings, and
   permissions.
 
-Phase 5 may present Main and sub-schedules as selectable contexts in the
-Schedule experience. **That is a navigation and presentation change only** and
-must preserve live projection semantics. URL-backed schedule selection is a
-frontend behavioural change requiring its own scope and tests; it is not
-implied by the selector.
+### The schedule selector (Phase 5, implemented)
 
-Do not remove the existing route or navigation until its replacement is
-complete, tested, and reachable.
+Main rosters and sub-schedules are selectable contexts on `/schedule`, chosen
+from one control. **This is navigation and presentation only** — projection
+semantics are unchanged, and no publish, merge or draft state was introduced.
+
+The context lives in the existing `?schedule=` parameter:
+
+| Value | Renders |
+|---|---|
+| `all` | `AllShiftsGrid` — every roster, read-only |
+| `<scheduleId>` | `MonthlyScheduler` — Month and Week |
+| `sub:<subScheduleId>` | `SubSchedulesPanel` — the sub-schedule builder |
+
+One parameter rather than two, so no pair of values can disagree. The `sub:`
+prefix follows the convention Overtime and Competencies already use for
+targets, and sub-schedule ids are generated as `sub-schedule-<uuid>`, so no
+real id can be read as a prefixed one. `?month=` is carried across every
+switch.
+
+Authorisation is resolved server-side on each request, so a link is never
+trusted. Scope filtering stays with the loader; the page adds the role gate
+that `/sub-schedules` used to provide, since `/schedule` admits workers and
+sub-schedules remain admin-and-leader only. A missing, deleted or inaccessible
+id falls back to the viewer's own roster and reports nothing about whether the
+id existed. Workers are not sent the sub-schedule list at all.
+
+Week is offered only by the main-roster renderer. The sub-schedule builder has
+no week view, so no switcher is shown there.
+
+`/sub-schedules` remains as a redirect, carrying `month` and `subSchedule`
+into the new parameter so existing links and bookmarks keep working. Its
+sidebar entry is gone now that selection and management are both reachable
+from Schedule.
+
+Switching context runs the destination-page save protections first: the month
+grid saves its drafts and aborts the switch if that fails, and the
+sub-schedule builder flushes its 2.5s autosave rather than letting a pending
+edit be dropped.
 
 ## Views and navigation
 
@@ -140,6 +171,36 @@ Preserve posting visibility, filters, shift details, vacancies, eligibility,
 claims, withdrawal, ranking/assignment, approvals, administrative actions,
 permissions, and concurrent-update handling. Coverage must use verified data
 and a documented formula.
+
+**Overtime worked away from the home crew is projected at read time.** A claim
+stores one row, on the schedule that needed the coverage, so the claimant's own
+crew had nothing on that date and fell back to their rotation — reading as OFF
+while they were at work. `buildAwayOvertimeAssignments` (`lib/overtime.ts`)
+synthesises that day back onto the home crew for display, the second read-time
+projection alongside sub-schedules. Nothing is written, so releasing the
+overtime removes the marker.
+
+Three properties hold it together, and a change that breaks any of them is a
+defect:
+
+- The projected row's stored `competencyId` and `timeCodeId` stay null; the
+  codes travel in `projectedCompetencyId` / `projectedTimeCodeId` for display
+  only. Coverage counting, set completion and autofill all read the stored
+  fields, so an absent employee can never be counted as filling a post on the
+  crew they are away from.
+- A real home assignment always wins. The projection only fills dates the home
+  schedule left empty, sub-schedule projections included.
+- Mutual and loan rows are skipped, because those workflows already write their
+  own home-schedule row.
+
+The cell is read-only, like any projected cell, and says it is overtime on the
+named schedule rather than pointing at Sub-Schedules. The All-schedules view is
+excluded: it already shows the row on the crew that was covered.
+
+One limitation is deliberate and pre-existing: set autofill treats a cell with
+no stored competency or time code as blank, so it can still fill an away day.
+Making it skip those days would change autofill's results, which is a separate
+behavioral change.
 
 ### Mutuals
 
