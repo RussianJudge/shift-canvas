@@ -576,21 +576,16 @@ function AddSubScheduleEmployeeModal({
 export function SubSchedulesPanel({
   snapshot,
   initialSelectedSubScheduleId = "",
-  scheduleContextSelector = null,
+  scheduleContextSelector,
   autoCreate = false,
 }: {
   snapshot: SchedulerSnapshot;
   initialSelectedSubScheduleId?: string;
   /** Set by ?new=1, so "Create sub-schedule" lands ready to name one. */
   autoCreate?: boolean;
-  /**
-   * The Schedule page's own context selector. When present this panel is
-   * embedded in /schedule, so it drops its page title and defers the choice of
-   * roster to that control instead of rendering a second one beside it.
-   */
-  scheduleContextSelector?: ReactNode;
+  /** The Schedule page's context selector — the only way to pick a sub-schedule. */
+  scheduleContextSelector: ReactNode;
 }) {
-  const isEmbedded = scheduleContextSelector !== null;
   const hasAutoCreatedRef = useRef(false);
   const businessToday = useBusinessToday();
   const router = useRouter();
@@ -1194,14 +1189,8 @@ export function SubSchedulesPanel({
 
   return (
     <section className="panel-frame">
-      {isEmbedded ? null : (
-        <div className="panel-heading panel-heading--simple">
-          <h1 className="panel-title">Sub-Schedules</h1>
-        </div>
-      )}
-
-      {/* Leads its own toolbar row, as on Schedule. Embedded, the schedule
-          selector sits beside the month so both live on one row. */}
+      {/* Leads its own toolbar row, as on Schedule: the schedule selector sits
+          beside the month so both live on one row. */}
       <div className="page-date-toolbar">
         <AppDateSelector
           mode="month"
@@ -1219,22 +1208,6 @@ export function SubSchedulesPanel({
             <strong>No sub-schedules yet.</strong>
             <span>Add one to start planning outage or event staffing.</span>
           </div>
-        ) : activeSubSchedule ? (
-          <label className="field">
-            <span>Sub-schedule</span>
-            <select
-              value={selectedSubScheduleId}
-              onChange={(event) => setSelectedSubScheduleId(event.target.value)}
-            >
-              {subSchedules.map((subSchedule) => (
-                <option key={subSchedule.id} value={subSchedule.id}>
-                  {subSchedule.name}
-                  {subSchedule.isArchived ? " (Archived)" : ""}
-                  {dirtySubScheduleIds.has(subSchedule.id) ? " *" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
         ) : null}
 
         <div className="toolbar-actions">
