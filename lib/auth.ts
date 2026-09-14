@@ -5,6 +5,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { resolveSessionScheduleId } from "@/lib/session-schedule";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 import type { AppRole, AppSession } from "@/lib/types";
 
@@ -130,9 +131,10 @@ function decodeSession(value: string | undefined): AppSession | null {
 /**
  * Reads the current signed session cookie, if one exists.
  *
- * Memoized per request. Resolving a session costs a `profiles` lookup plus four
- * scope-name queries, and a route with a `loading.tsx` resolves it at least
- * twice — once for the fallback shell and once for the page.
+ * Memoized per request. Resolving a session costs a `profiles` lookup plus the
+ * employee and scope-name queries batched after it, and a route with a
+ * `loading.tsx` resolves it at least twice — once for the fallback shell and
+ * once for the page.
  */
 export const getAppSession = cache(async () => {
   const cookieStore = await cookies();
@@ -178,7 +180,14 @@ export const getAppSession = cache(async () => {
   let siteName = cookieSession.siteName;
   let businessAreaName = cookieSession.businessAreaName;
 
-  const [scheduleResult, companyResult, siteResult, businessAreaResult] = await Promise.all([
+  const [employeeResult, scheduleResult, companyResult, siteResult, businessAreaResult] = await Promise.all([
+    profile.employee_id
+      ? supabase
+          .from("employees")
+          .select("schedule_id")
+          .eq("id", profile.employee_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     profile.schedule_id
       ? supabase
           .from("schedules")
@@ -203,8 +212,32 @@ export const getAppSession = cache(async () => {
       .maybeSingle(),
   ]);
 
+  const resolvedScheduleId = resolveSessionScheduleId({
+    employeeId: profile.employee_id,
+    scheduleId: profile.schedule_id,
+    employeeScheduleId:
+      (employeeResult.data as { schedule_id?: string | null } | null)?.schedule_id ?? null,
+  });
+
   if (!scheduleResult.error) {
     scheduleName = (scheduleResult.data as ScheduleNameRow | null)?.name ?? null;
+  }
+
+  // Only a profile whose copy has drifted pays for a second name lookup.
+  if (resolvedScheduleId !== profile.schedule_id) {
+    scheduleName = null;
+
+    if (resolvedScheduleId) {
+      const resolvedScheduleResult = await supabase
+        .from("schedules")
+        .select("name")
+        .eq("id", resolvedScheduleId)
+        .maybeSingle();
+
+      if (!resolvedScheduleResult.error) {
+        scheduleName = (resolvedScheduleResult.data as ScheduleNameRow | null)?.name ?? null;
+      }
+    }
   }
 
   if (!companyResult.error) {
@@ -223,7 +256,7 @@ export const getAppSession = cache(async () => {
     ...cookieSession,
     role: profile.role,
     displayName: profile.display_name || profile.email.split("@")[0] || cookieSession.displayName,
-    scheduleId: profile.schedule_id,
+    scheduleId: resolvedScheduleId,
     employeeId: profile.employee_id,
     scheduleName,
     companyId: profile.company_id,
