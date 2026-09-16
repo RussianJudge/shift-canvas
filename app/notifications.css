@@ -1,0 +1,191 @@
+/* ============================================================
+   Notifications
+   ============================================================
+   A flat operational list, not a stack of cards: rows separated by hairlines,
+   grouped by age, scanning top to bottom. Everything is scoped under
+   `.notifications` so none of it reaches the shell's own notification badge,
+   which keeps its `.workspace-notifications__badge` styling. */
+
+.notifications {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-block: var(--space-4);
+}
+
+.notifications__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.notifications__title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.notifications__summary {
+  margin: 2px 0 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.notifications__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.notifications__error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-control);
+  font-size: var(--control-font-sm);
+  color: var(--color-text);
+}
+
+.notifications__retry {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.notifications__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.notifications__group-title {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.notifications__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--color-border);
+}
+
+/* One row, whether it links somewhere or only marks itself read. */
+.notifications__row {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  /* Comfortably past a 44px touch target. */
+  min-height: 3.5rem;
+  padding: var(--space-3) var(--space-2);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.notifications__row:hover {
+  background: var(--color-surface-muted);
+}
+
+.notifications__row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.notifications__row:disabled {
+  cursor: default;
+}
+
+/* Unread carries a weight change and the word "Unread" as well as the accent
+   bar, so it survives both themes and reads without colour. */
+.notifications__row--unread {
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+
+.notifications__row-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.notifications__row--unread .notifications__row-heading strong {
+  font-weight: 700;
+}
+
+.notifications__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
+}
+
+.notifications__dot--unread {
+  background: var(--color-primary);
+}
+
+.notifications__badge {
+  padding: 0 var(--space-2);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.notifications__row--unread .notifications__badge {
+  color: var(--color-primary);
+}
+
+.notifications__body {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.notifications__meta {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 720px) {
+  .notifications__title {
+    font-size: 1.5rem;
+  }
+
+  .notifications__actions {
+    width: 100%;
+  }
+
+  .notifications__actions .ui-segmented {
+    flex: 1 1 auto;
+  }
+}

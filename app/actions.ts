@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import type {
   AppRole,
+  SchedulerSnapshot,
   ApplyToMutualPostingInput,
   ApproveMutualPostingInput,
   RejectMutualPostingInput,
@@ -41,6 +42,8 @@ import {
   parseOvertimeAssignmentNote,
   type OvertimeAssignmentRow,
 } from "@/lib/overtime";
+import { canBeNotifiedAboutPosting } from "@/lib/overtime-eligibility";
+import { buildOvertimePostingNotification } from "@/lib/notifications";
 import {
   buildAcceptedMutualAssignmentRows,
   parseMutualAssignmentNote,
@@ -296,6 +299,69 @@ async function createOvertimeRemovedNotifications(
   }
 
   return { ok: true as const };
+}
+
+/**
+ * Tells everyone who could actually work a newly posted shift about it.
+ *
+ * Recipients are recomputed here from the snapshot, never taken from the
+ * request: the browser's idea of who is eligible is a rendering detail, and the
+ * only list that matters is the one the claim flow itself would accept.
+ *
+ * Called after the posting row is committed and never allowed to fail the
+ * action. A posting that exists with nobody told is a smaller problem than a
+ * posting that silently failed to be created, and the ids are stable, so a
+ * retry writes the same rows rather than a second set.
+ */
+async function createOvertimePostingNotifications(
+  supabase: SupabaseAdminClient,
+  input: {
+    postingId: string;
+    competencyId: string | null;
+    dates: string[];
+    month: string;
+    assignmentLabel: string;
+    scheduleName: string;
+    scope: ActionScope;
+    snapshot: SchedulerSnapshot;
+  },
+) {
+  const target = { competencyId: input.competencyId, dates: input.dates };
+  const recipients = input.snapshot.schedules
+    .flatMap((schedule) => schedule.employees)
+    .filter((employee) => canBeNotifiedAboutPosting(employee, target, input.snapshot));
+
+  if (recipients.length === 0) {
+    return { ok: true as const, notified: 0 };
+  }
+
+  const rows = recipients.map((employee) => ({
+    ...buildOvertimePostingNotification({
+      postingId: input.postingId,
+      employeeId: employee.id,
+      assignmentLabel: input.assignmentLabel,
+      scheduleName: input.scheduleName,
+      dates: input.dates,
+      month: input.month,
+    }),
+    ...toDatabaseScope(input.scope),
+  }));
+
+  // The id is derived from the posting and the recipient, so a replayed
+  // enqueue collides with what it already wrote instead of duplicating it.
+  const { error } = await supabase
+    .from("notifications")
+    .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+
+  if (error) {
+    console.error(
+      `Overtime posting ${input.postingId} was created but its notifications could not be written:`,
+      error.message,
+    );
+    return { ok: false as const, notified: 0 };
+  }
+
+  return { ok: true as const, notified: rows.length };
 }
 
 async function createTemporaryLoanNotifications(
@@ -850,6 +916,71 @@ export async function deleteNotification(formData: FormData) {
     .eq("recipient_employee_id", session.employeeId);
 
   revalidatePath("/notifications");
+}
+
+/**
+ * Clears the unread state on everything the viewer can see.
+ *
+ * Constrained to their own recipient id like every other notification
+ * mutation: the caller names no recipient, so there is nothing for a crafted
+ * request to point at.
+ */
+export async function markAllNotificationsRead() {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session?.employeeId) {
+    return { ok: false, message: "Your account is not linked to an employee record." };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return { ok: false, message: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("recipient_employee_id", session.employeeId)
+    .is("read_at", null);
+
+  if (error) {
+    return { ok: false, message: `Could not mark notifications read: ${error.message}` };
+  }
+
+  revalidatePath("/notifications");
+
+  return { ok: true, message: "" };
+}
+
+/** Marks one notification read, for the row the viewer clicked. */
+export async function markNotificationReadById(notificationId: string) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session?.employeeId || isBlank(notificationId)) {
+    return { ok: false, message: "That notification could not be updated." };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return { ok: false, message: "Supabase is not configured yet." };
+  }
+
+  const { error } = await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("id", notificationId)
+    .eq("recipient_employee_id", session.employeeId)
+    .is("read_at", null);
+
+  if (error) {
+    return { ok: false, message: `Could not mark that notification read: ${error.message}` };
+  }
+
+  revalidatePath("/notifications");
+
+  return { ok: true, message: "" };
 }
 
 export async function markNotificationRead(formData: FormData) {
@@ -2353,8 +2484,9 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     businessAreaId: schedule?.businessAreaId ?? subSchedule?.businessAreaId ?? sessionScope.businessAreaId,
   };
 
+  const postingId = `manual-ot-${crypto.randomUUID()}`;
   const { error } = await supabase.from("manual_overtime_postings").insert({
-    id: `manual-ot-${crypto.randomUUID()}`,
+    id: postingId,
     schedule_id: schedule?.id ?? null,
     sub_schedule_id: subSchedule?.id ?? null,
     competency_id: competency?.id ?? null,
@@ -2373,12 +2505,30 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
     };
   }
 
+  // The posting is committed from here on. Telling people about it is a
+  // separate concern and must not be able to undo it.
+  const notified = await createOvertimePostingNotifications(supabase, {
+    postingId,
+    competencyId: competency?.id ?? null,
+    dates,
+    month,
+    assignmentLabel: (competency?.code ?? timeCode?.code) || "overtime",
+    scheduleName: schedule?.name ?? subSchedule?.name ?? "the schedule",
+    scope: postingScope,
+    snapshot,
+  });
+
   revalidatePath("/overtime");
   revalidatePath("/sub-schedules");
+  revalidatePath("/notifications");
+
+  const createdMessage = `Manual overtime posting created for ${slotCount} ${(competency?.code ?? timeCode?.code) || "assignment"} slot${slotCount === 1 ? "" : "s"}${subSchedule ? ` on ${subSchedule.name}` : ""}.`;
 
   return {
     ok: true,
-    message: `Manual overtime posting created for ${slotCount} ${(competency?.code ?? timeCode?.code) || "assignment"} slot${slotCount === 1 ? "" : "s"}${subSchedule ? ` on ${subSchedule.name}` : ""}.`,
+    message: notified.ok
+      ? `${createdMessage}${notified.notified > 0 ? ` ${notified.notified} eligible worker${notified.notified === 1 ? "" : "s"} notified.` : " No eligible workers to notify."}`
+      : `${createdMessage} Notifications could not be sent — the posting is live and can be shared manually.`,
   };
 }
 

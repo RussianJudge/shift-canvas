@@ -14,8 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, TextInput } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
-import { parseMutualAssignmentNote } from "@/lib/mutuals";
 import { parseOvertimeAssignmentNote, resolveDefaultClaimingEmployeeId } from "@/lib/overtime";
+import { describeOvertimeBlocker, findOvertimeBlocker } from "@/lib/overtime-eligibility";
 import {
   buildAssignmentIndex,
   createAssignmentKey,
@@ -361,15 +361,6 @@ function getCellSelection(
   };
 }
 
-function hasMutualAssignmentOnDate(snapshot: SchedulerSnapshot, employeeId: string, date: string) {
-  return snapshot.assignments.some(
-    (assignment) =>
-      assignment.employeeId === employeeId &&
-      assignment.date === date &&
-      Boolean(parseMutualAssignmentNote(assignment.notes).postingId),
-  );
-}
-
 function countScheduleAssignmentsForTarget({
   assignments,
   scheduleId,
@@ -412,7 +403,6 @@ function getClaimStatus(
   employee: Employee | null,
   posting: OvertimePosting,
   snapshot: SchedulerSnapshot,
-  assignments: Record<string, { competencyId: string | null; timeCodeId: string | null }>,
 ) {
   // Workers can only claim OT that sits on their scheduled days off and does not
   // conflict with any existing assignment already on the calendar.
@@ -428,42 +418,12 @@ function getClaimStatus(
     return { canClaim: false, blocking: false, reason: "This posting is fully claimed." };
   }
 
-  if (posting.competencyId && !employee.competencyIds.includes(posting.competencyId)) {
-    return { canClaim: false, blocking: true, reason: "Employee is not qualified for this post." };
-  }
+  // The blocking rules live in lib/overtime-eligibility so the server can apply
+  // exactly the same ones when it decides who to notify about a new posting.
+  const blocker = findOvertimeBlocker(employee, posting, snapshot);
 
-  const employeeSchedule = getScheduleById(snapshot, employee.scheduleId);
-
-  for (const date of posting.dates) {
-    if (hasMutualAssignmentOnDate(snapshot, employee.id, date)) {
-      return { canClaim: false, blocking: true, reason: "Employee has a mutual scheduled on one or more posting dates." };
-    }
-
-    const hasExistingAssignment = snapshot.assignments.some(
-      (assignment) =>
-        assignment.employeeId === employee.id &&
-        assignment.date === date &&
-        Boolean(assignment.competencyId || assignment.timeCodeId),
-    );
-
-    if (hasExistingAssignment) {
-      return { canClaim: false, blocking: true, reason: "Employee already has an assignment on one or more posting dates." };
-    }
-
-    const hasExistingSubScheduleAssignment = snapshot.subScheduleAssignments.some(
-      (assignment) =>
-        assignment.employeeId === employee.id &&
-        assignment.date === date &&
-        Boolean(assignment.competencyId || assignment.timeCodeId),
-    );
-
-    if (hasExistingSubScheduleAssignment) {
-      return { canClaim: false, blocking: true, reason: "Employee already has a sub-schedule assignment on one or more posting dates." };
-    }
-
-    if (shiftForDate(employeeSchedule, date) !== "OFF") {
-      return { canClaim: false, blocking: true, reason: "Posting falls on this employee's regular shift." };
-    }
+  if (blocker) {
+    return { canClaim: false, blocking: true, reason: describeOvertimeBlocker(blocker) };
   }
 
   return { canClaim: true, blocking: false, reason: "Available to claim." };
@@ -1912,7 +1872,7 @@ export function OvertimePanel({
         ? allEmployees
             .filter(
               (employee) =>
-                getClaimStatus(employee, selectedEligibilityReportPosting, snapshot, assignmentIndex).canClaim,
+                getClaimStatus(employee, selectedEligibilityReportPosting, snapshot).canClaim,
             )
             .map((employee) => ({
               id: employee.id,
@@ -2344,11 +2304,11 @@ export function OvertimePanel({
                   return true;
                 }
 
-                return getClaimStatus(claimingEmployee, posting, snapshot, assignmentIndex).canClaim;
+                return getClaimStatus(claimingEmployee, posting, snapshot).canClaim;
               }) ?? null;
             const selectedPosting = selectedPostingCandidate ?? preferredClaimablePosting ?? visiblePostings[0];
             const claimStatus = selectedPosting
-              ? getClaimStatus(claimingEmployee, selectedPosting, snapshot, assignmentIndex)
+              ? getClaimStatus(claimingEmployee, selectedPosting, snapshot)
               : { canClaim: false, blocking: false, reason: "No overtime posting selected." };
             const selectedPostingClaimedByViewer = selectedPosting
               ? selectedPosting.claimedEmployeeIds.includes(claimingEmployeeId)

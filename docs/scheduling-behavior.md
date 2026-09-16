@@ -172,6 +172,25 @@ claims, withdrawal, ranking/assignment, approvals, administrative actions,
 permissions, and concurrent-update handling. Coverage must use verified data
 and a documented formula.
 
+**A new posting notifies the workers who could actually take it.**
+`createManualOvertimePosting` commits the posting first, then writes one
+durable `overtime_posted` notification per eligible worker. Eligibility is
+recomputed on the server from the snapshot — the browser's view of who is
+eligible is a rendering detail and is never trusted — using
+`findOvertimeBlocker` (`lib/overtime-eligibility.ts`), the same rules the claim
+form applies. A worker is excluded only for a reason that describes them: not
+qualified, a mutual on one of the dates, an existing assignment, a
+sub-schedule assignment, or the dates falling on their regular shift. The
+state of the posting — full, already claimed, nobody selected — is not an
+eligibility failure and plays no part here.
+
+The notification id is derived from the posting and the recipient, so the text
+primary key is the idempotency key: a retried enqueue collides with the row it
+already wrote. Delivery never fails the posting; if the write fails the posting
+stands, the action says so, and the failure is logged. There is no email for
+these — recording delivery status would need a column, and nothing claims an
+email was sent.
+
 **Overtime worked away from the home crew is projected at read time.** A claim
 stores one row, on the schedule that needed the coverage, so the claimant's own
 crew had nothing on that date and fell back to their rotation — reading as OFF

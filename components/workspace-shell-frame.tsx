@@ -1,6 +1,6 @@
 import { WorkspaceShell, type AdminScopePayload } from "@/components/workspace-shell";
 import type { AppSession } from "@/lib/types";
-import { getAdminScopeOptions } from "@/lib/data";
+import { getAdminScopeOptions, getNotificationsForViewer } from "@/lib/data";
 
 async function loadAdminScope(viewer: AppSession): Promise<AdminScopePayload | null> {
   if (viewer.role !== "admin") {
@@ -25,13 +25,23 @@ export async function WorkspaceShellFrame({
   viewer: AppSession;
   children: React.ReactNode;
 }) {
-  const initialAdminScope = await loadAdminScope(viewer);
+  /**
+   * One bounded read for the badge, in parallel with the scope lookup.
+   *
+   * Unread only and capped, because the badge needs a count rather than the
+   * list — and an account with no employee record behind it gets nothing, so
+   * the badge never appears for someone with no notifications to open.
+   */
+  const [initialAdminScope, unreadNotifications] = await Promise.all([
+    loadAdminScope(viewer),
+    getNotificationsForViewer(viewer, { unreadOnly: true, limit: 50 }),
+  ]);
 
   return (
     <WorkspaceShell
       viewer={viewer}
       initialAdminScope={initialAdminScope}
-      initialNotifications={[]}
+      initialNotifications={unreadNotifications}
     >
       {children}
     </WorkspaceShell>

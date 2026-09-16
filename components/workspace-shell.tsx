@@ -19,6 +19,7 @@ import { BrandLockup } from "@/components/brand-lockup";
 import { Button, IconButton } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
 import { deriveInitials } from "@/lib/initials";
+import { countUnread } from "@/lib/notifications";
 import {
   SIDEBAR_COLLAPSE_STORAGE_KEY,
   resolveSidebarCollapseForViewport,
@@ -490,6 +491,8 @@ export function WorkspaceShell({
     }
   };
 
+  // The frame loads unread notifications only, so the list length is the count.
+  const unreadCount = countUnread(notifications);
   const notificationsNavItem = (
     <div className="workspace-nav-notifications">
       <Link
@@ -499,13 +502,24 @@ export function WorkspaceShell({
         className={`workspace-nav-link ${pathname === "/notifications" ? "workspace-nav-link--active" : ""}`}
         title="Notifications"
         aria-current={pathname === "/notifications" ? "page" : undefined}
+        aria-label={
+          unreadCount > 0
+            ? `Notifications, ${unreadCount} unread`
+            : "Notifications"
+        }
         onClick={(event) => handleNavLinkNavigate(event, "/notifications")}
       >
         <span className="workspace-nav-icon">
           <NotificationsIcon />
         </span>
         <strong>Notifications</strong>
-        {notifications.length > 0 ? <span className="workspace-notifications__badge">{notifications.length}</span> : null}
+        {/* The count is already in the link's accessible name, so the badge
+            itself is decoration and must not be announced twice. */}
+        {unreadCount > 0 ? (
+          <span className="workspace-notifications__badge" aria-hidden="true">
+            {unreadCount > 49 ? "49+" : unreadCount}
+          </span>
+        ) : null}
       </Link>
     </div>
   );
