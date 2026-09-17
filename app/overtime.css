@@ -488,3 +488,42 @@
     justify-content: flex-start;
   }
 }
+
+/* ---- Claimed workers ----------------------------------------
+   Who is on a posting, and the control to take one of them off it. A plain
+   list rather than a card: it sits inside the posting detail, which is
+   already a surface. */
+.overtime-claimed-workers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.overtime-claimed-workers__title {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.overtime-claimed-workers__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.overtime-claimed-workers__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 2.75rem;
+  padding: var(--space-1) 0;
+}

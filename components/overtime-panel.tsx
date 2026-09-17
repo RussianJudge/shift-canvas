@@ -443,6 +443,11 @@ function needsTurnaroundConfirmation(employee: Employee | null, posting: Overtim
   );
 }
 
+/** Crews are named with numbers stored as text, so "10" sorts after "2". */
+function compareScheduleNames(left: string, right: string) {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
 function isDirectOvertimeOption(posting: OvertimePosting) {
   return (
     !posting.competencyId ||
@@ -1118,6 +1123,7 @@ export function OvertimePanel({
   );
   const [selectedTargetKey, setSelectedTargetKey] = useState<OvertimeTargetKey | "">(buildInitialTargetKey(snapshot));
   const [selectedAssignmentFilter, setSelectedAssignmentFilter] = useState("all");
+  const [sortMode, setSortMode] = useState<"date" | "shift">("date");
   const [availabilityFilter, setAvailabilityFilter] = useState<OvertimeAvailabilityFilter>("available");
   const [selectedPostingByGroup, setSelectedPostingByGroup] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
@@ -1129,6 +1135,10 @@ export function OvertimePanel({
   const [isMyClaimsModalOpen, setIsMyClaimsModalOpen] = useState(false);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [eligibilityReportPostingId, setEligibilityReportPostingId] = useState<string | null>(null);
+  /** The worker a leader is about to take off a posting, pending confirmation. */
+  const [removeClaimTarget, setRemoveClaimTarget] = useState<
+    { posting: OvertimePosting; employeeId: string; employeeName: string } | null
+  >(null);
   const [turnaroundConfirmationPostingId, setTurnaroundConfirmationPostingId] = useState<string | null>(null);
   const [deletePostingId, setDeletePostingId] = useState<string | null>(null);
   const currentPostingMonth = useMemo(() => getCurrentMonthKey("America/Edmonton"), []);
@@ -1840,14 +1850,19 @@ export function OvertimePanel({
           groups[key].postings.push(posting);
           return groups;
         }, {}),
-      ).sort(
-        (left, right) =>
-          left.dates[0].localeCompare(right.dates[0]) ||
-          left.dates[left.dates.length - 1].localeCompare(right.dates[right.dates.length - 1]) ||
-          left.scheduleName.localeCompare(right.scheduleName) ||
-          left.shiftKind.localeCompare(right.shiftKind),
+      ).sort((left, right) =>
+        sortMode === "shift"
+          ? // Crew names are numbers held as text, so "10" has to sort after
+            // "2" rather than before it.
+            compareScheduleNames(left.scheduleName, right.scheduleName) ||
+            left.shiftKind.localeCompare(right.shiftKind) ||
+            left.dates[0].localeCompare(right.dates[0])
+          : left.dates[0].localeCompare(right.dates[0]) ||
+            left.dates[left.dates.length - 1].localeCompare(right.dates[right.dates.length - 1]) ||
+            compareScheduleNames(left.scheduleName, right.scheduleName) ||
+            left.shiftKind.localeCompare(right.shiftKind),
       ),
-    [filteredPostings],
+    [filteredPostings, sortMode],
   );
 
   const claimingEmployee = claimingEmployeeId ? employeeMap[claimingEmployeeId] ?? null : null;
@@ -1998,9 +2013,27 @@ export function OvertimePanel({
       return;
     }
 
-    const actingEmployeeId = claimingEmployeeId;
-    const actingEmployeeName = employeeMap[actingEmployeeId]?.name ?? viewer.displayName;
+    releaseClaimForEmployee(
+      posting,
+      claimingEmployeeId,
+      employeeMap[claimingEmployeeId]?.name ?? viewer.displayName,
+    );
+  }
 
+  /**
+   * Releases one worker's claim on a posting.
+   *
+   * The same path whether someone is standing down themselves or a leader is
+   * taking them off it — the server already allows anyone but a worker to
+   * release on another employee's behalf, and it does the whole unlink:
+   * deletes the claim, clears the rows it generated, restores a swapped
+   * worker's original post, and tells the person they are off it.
+   */
+  function releaseClaimForEmployee(
+    posting: OvertimePosting,
+    actingEmployeeId: string,
+    actingEmployeeName: string,
+  ) {
     setClaimActionState((current) => ({ ...current, [posting.id]: "release" }));
     setStatusMessage("");
 
@@ -2046,6 +2079,17 @@ export function OvertimePanel({
         });
       }
     })();
+  }
+
+  function confirmRemoveClaimedWorker() {
+    const target = removeClaimTarget;
+
+    if (!target) {
+      return;
+    }
+
+    setRemoveClaimTarget(null);
+    releaseClaimForEmployee(target.posting, target.employeeId, target.employeeName);
   }
 
   function handleReleaseClaimRow(claim: MyOvertimeClaimRow) {
@@ -2211,6 +2255,15 @@ export function OvertimePanel({
             ))}
           </optgroup>
         </Select>
+
+          <Select
+            label="Sort by"
+            value={sortMode}
+            onChange={(event) => setSortMode(event.target.value as "date" | "shift")}
+          >
+            <option value="date">Date</option>
+            <option value="shift">Shift</option>
+          </Select>
 
           <Select
             label="Assignment"
@@ -2482,6 +2535,45 @@ export function OvertimePanel({
                   </div>
                 ) : null}
 
+                {/* Taking a specific worker off a posting. The server already
+                    lets anyone but a worker release on someone else's behalf;
+                    without this the only route was switching the board to act
+                    as them first, which reads like impersonating them. */}
+                {selectedPosting && canManageManualPostings && selectedPosting.claimedEmployeeIds.length > 0 ? (
+                  <div className="overtime-claimed-workers">
+                    <h3 className="overtime-claimed-workers__title">Claimed by</h3>
+                    <ul className="overtime-claimed-workers__list">
+                      {selectedPosting.claimedEmployeeIds.map((employeeId, index) => {
+                        const employeeName =
+                          employeeMap[employeeId]?.name ??
+                          selectedPosting.claimedByNames[index] ??
+                          "Unknown worker";
+
+                        return (
+                          <li key={employeeId} className="overtime-claimed-workers__row">
+                            <span>{employeeName}</span>
+                            <Button
+                              variant="subtle"
+                              size="sm"
+                              className="overtime-danger-action"
+                              disabled={Boolean(selectedPostingClaimAction)}
+                              onClick={() =>
+                                setRemoveClaimTarget({
+                                  posting: selectedPosting,
+                                  employeeId,
+                                  employeeName,
+                                })
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : null}
+
                 {selectedPosting ? (
                   <p
                     className={`overtime-row__hint ${
@@ -2561,6 +2653,31 @@ export function OvertimePanel({
           onSubmit={handleCreateManualPosting}
           isSubmitting={isManagingManual}
         />
+      ) : null}
+
+      {removeClaimTarget ? (
+        <Modal
+          open
+          onClose={() => setRemoveClaimTarget(null)}
+          eyebrow="Overtime"
+          title={`Remove ${removeClaimTarget.employeeName} from this overtime?`}
+          description={`${removeClaimTarget.posting.competencyCode} on ${removeClaimTarget.posting.scheduleName}, ${removeClaimTarget.posting.dates.map(formatShortDate).join(", ")}.`}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setRemoveClaimTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmRemoveClaimedWorker}>
+                Remove from overtime
+              </Button>
+            </>
+          }
+        >
+          <p className="overtime-modal-note">
+            This clears the shift from the schedule and notifies {removeClaimTarget.employeeName}. The
+            posting stays open for someone else to claim.
+          </p>
+        </Modal>
       ) : null}
 
       {isMyClaimsModalOpen ? (
