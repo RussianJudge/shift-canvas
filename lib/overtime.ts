@@ -221,6 +221,81 @@ export function buildAwayOvertimeAssignments({
 }
 
 /**
+ * The post a claim exists to cover, which is not always the post claimed.
+ *
+ * A swap claim moves an on-team worker onto the post that was short and puts
+ * the claimant somewhere else, so the claim records one competency while the
+ * shortage it answers is another. Only the assignment note carries the pair —
+ * `overtime_claims` stores the claimed competency alone — so the coverage post
+ * is recovered from the rows the claim generated.
+ *
+ * Deciding whether a claim is still needed against the claimed post instead of
+ * the covered one measures the wrong shortage: the covered post can be filled
+ * by someone regular while the claimed post still looks empty, and the
+ * overtime is never released.
+ */
+export function buildOvertimeCoverageIndex(
+  assignments: Array<{ scheduleId: string; date: string; notes?: string | null }>,
+) {
+  const index = new Map<string, string>();
+
+  for (const assignment of assignments) {
+    const parsed = parseOvertimeAssignmentNote(assignment.notes);
+
+    if (!parsed.claimantEmployeeId || !parsed.claimedCompetencyId || !parsed.coverageCompetencyId) {
+      continue;
+    }
+
+    index.set(
+      buildOvertimeCoverageKey({
+        scheduleId: assignment.scheduleId,
+        employeeId: parsed.claimantEmployeeId,
+        competencyId: parsed.claimedCompetencyId,
+        date: assignment.date,
+      }),
+      parsed.coverageCompetencyId,
+    );
+  }
+
+  return index;
+}
+
+function buildOvertimeCoverageKey(input: {
+  scheduleId: string;
+  employeeId: string;
+  competencyId: string;
+  date: string;
+}) {
+  return `${input.scheduleId}:${input.employeeId}:${input.competencyId}:${input.date}`;
+}
+
+/** The covered post for a claim, falling back to the post it names. */
+export function resolveClaimCoverageCompetencyId(
+  claim: {
+    scheduleId: string | null;
+    employeeId: string;
+    competencyId: string | null;
+    date: string;
+  },
+  coverageIndex: Map<string, string>,
+) {
+  if (!claim.scheduleId || !claim.competencyId) {
+    return claim.competencyId;
+  }
+
+  return (
+    coverageIndex.get(
+      buildOvertimeCoverageKey({
+        scheduleId: claim.scheduleId,
+        employeeId: claim.employeeId,
+        competencyId: claim.competencyId,
+        date: claim.date,
+      }),
+    ) ?? claim.competencyId
+  );
+}
+
+/**
  * Who the viewer is acting as on the overtime board.
  *
  * Admins and leaders act as themselves. They can still claim on someone else's

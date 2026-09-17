@@ -38,8 +38,10 @@ import type {
 import { getScheduleReferenceSnapshot, readMutualSettings } from "@/lib/data";
 import {
   buildOvertimeAssignmentNote,
+  buildOvertimeCoverageIndex,
   buildSwapOvertimeAssignmentRows,
   parseOvertimeAssignmentNote,
+  resolveClaimCoverageCompetencyId,
   type OvertimeAssignmentRow,
 } from "@/lib/overtime";
 import { canBeNotifiedAboutPosting } from "@/lib/overtime-eligibility";
@@ -1061,9 +1063,15 @@ async function removeStaleOvertimeClaims(
 
       return set;
     }, new Set<string>());
+    // A swap claim names one post but answers a shortage on another, so the
+    // claim is measured against the post it covers. Keyed on the claimed post
+    // it looked permanently needed: the covered post could be filled by someone
+    // regular while the claimed post still read as empty.
+    const coverageIndex = buildOvertimeCoverageIndex(snapshot.assignments);
     const claimsByCoverageKey = snapshot.overtimeClaims.reduce<Record<string, typeof snapshot.overtimeClaims>>(
       (map, claim) => {
-        const key = `${claim.scheduleId}:${claim.competencyId}:${claim.date}`;
+        const coveredCompetencyId = resolveClaimCoverageCompetencyId(claim, coverageIndex);
+        const key = `${claim.scheduleId}:${coveredCompetencyId}:${claim.date}`;
         map[key] ??= [];
         map[key].push(claim);
         return map;
