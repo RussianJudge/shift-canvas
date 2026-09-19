@@ -4,11 +4,15 @@ import test from "node:test";
 import {
   buildOvertimePostingNotification,
   buildOvertimePostingNotificationId,
+  buildOvertimeRemovedNotificationId,
+  buildShortfallNotificationIdPrefix,
+  buildShortfallPostingId,
   countUnread,
   describeDateRange,
   formatNotificationAge,
   groupNotificationsByAge,
 } from "../lib/notifications";
+import { buildShortfallKey } from "../lib/overtime-shortfalls";
 
 test("the id is derived from the posting and the recipient", () => {
   const first = buildOvertimePostingNotificationId("manual-ot-1", "emp-1");
@@ -105,4 +109,64 @@ test("empty groups are left out", () => {
   const groups = groupNotificationsByAge([{ createdAt: "2026-09-14T08:00:00.000Z" }], "2026-09-14");
 
   assert.deepEqual(groups.map((group) => group.label), ["Today"]);
+});
+
+test("a removed-overtime id is derived from the claim it releases", () => {
+  assert.equal(
+    buildOvertimeRemovedNotificationId("claim-42"),
+    "notification-overtime_removed-claim-42",
+  );
+});
+
+test("the same claim always produces the same removed-overtime id", () => {
+  // The cleanup sweep can re-detect a release after an early return, and the
+  // repeat has to collide with the row it already wrote.
+  assert.equal(
+    buildOvertimeRemovedNotificationId("claim-42"),
+    buildOvertimeRemovedNotificationId("claim-42"),
+  );
+});
+
+test("different claims produce different removed-overtime ids", () => {
+  assert.notEqual(
+    buildOvertimeRemovedNotificationId("claim-42"),
+    buildOvertimeRemovedNotificationId("claim-43"),
+  );
+});
+
+test("removed and posted ids cannot collide", () => {
+  assert.notEqual(
+    buildOvertimeRemovedNotificationId("posting-1-emp-1"),
+    buildOvertimePostingNotificationId("posting-1", "emp-1"),
+  );
+});
+
+test("a generated-overtime notice id starts with its month's prefix", () => {
+  // The server skips slots already announced by fetching ids with this prefix,
+  // so every id it writes for the month has to match it.
+  const key = buildShortfallKey({
+    scheduleId: "schedule-602",
+    competencyId: "comp-bhl",
+    segmentStart: "2026-09-25",
+    slotIndex: 1,
+  });
+  const notification = buildOvertimePostingNotification({
+    postingId: buildShortfallPostingId(key),
+    employeeId: "emp-1",
+    assignmentLabel: "BHL",
+    scheduleName: "Shift 2",
+    dates: ["2026-09-25"],
+    month: "2026-09",
+  });
+
+  assert.ok(notification.id.startsWith(buildShortfallNotificationIdPrefix("2026-09")));
+  assert.ok(!notification.id.startsWith(buildShortfallNotificationIdPrefix("2026-10")));
+});
+
+test("generated and manual posting notices cannot collide", () => {
+  const generated = buildOvertimePostingNotificationId(buildShortfallPostingId("2026-09:s:c:2026-09-25:0"), "emp-1");
+  const manual = buildOvertimePostingNotificationId("manual-ot-1", "emp-1");
+
+  assert.notEqual(generated, manual);
+  assert.ok(!manual.startsWith(buildShortfallNotificationIdPrefix("2026-09")));
 });

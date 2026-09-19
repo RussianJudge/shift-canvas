@@ -191,6 +191,22 @@ stands, the action says so, and the failure is logged. There is no email for
 these — recording delivery status would need a column, and nothing claims an
 email was sent.
 
+**Generated overtime notifies too.** The board's generated postings — the gaps a
+completed set leaves — have no posting row, so they are announced from the
+saves that open them instead: every save passes through
+`removeStaleOvertimeClaims`, which schedules `notifyNewOvertimeShortfalls` to
+run after the response, and Personnel does the same when removing a competency
+clears assignments. Both read the gaps from `findOvertimeShortfalls`
+(`lib/overtime-shortfalls.ts`), the same definition the board renders from, so
+what is announced is exactly what is shown.
+
+Each open slot is announced once. Its id comes from where it sits in the
+rotation — schedule, post, the segment's first day, and how deep the slot is —
+not from the dates it covers, which move as people are shuffled. A slot that
+fills and later reopens is not announced again; announcing on every reopen would
+notify everyone each time a leader moves someone. Only dates from today onward
+count, and only the direct post is announced, not the board's swap routes.
+
 **Overtime worked away from the home crew is projected at read time.** A claim
 stores one row, on the schedule that needed the coverage, so the claimant's own
 crew had nothing on that date and fell back to their rotation — reading as OFF

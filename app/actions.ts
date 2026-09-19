@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
 import type {
   AppRole,
@@ -35,7 +36,19 @@ import type {
   WithdrawMutualApplicationInput,
   WithdrawMutualPostingInput,
 } from "@/lib/types";
-import { getScheduleReferenceSnapshot, readMutualSettings } from "@/lib/data";
+import {
+  getEmployeeContactsByIds,
+  getScheduleReferenceSnapshot,
+  readMutualSettings,
+  readNotificationEmailOptouts,
+} from "@/lib/data";
+import { sendNotificationEmails } from "@/lib/email";
+import {
+  selectEmailRecipients,
+  type EmployeeContact,
+  type NotificationEmailCandidate,
+  type NotificationEmailRecipient,
+} from "@/lib/notification-email";
 import {
   buildOvertimeAssignmentNote,
   buildOvertimeCoverageIndex,
@@ -45,7 +58,15 @@ import {
   type OvertimeAssignmentRow,
 } from "@/lib/overtime";
 import { canBeNotifiedAboutPosting } from "@/lib/overtime-eligibility";
-import { buildOvertimePostingNotification } from "@/lib/notifications";
+import {
+  buildOvertimePostingNotification,
+  buildOvertimeRemovedNotificationId,
+  buildShortfallNotificationIdPrefix,
+  buildShortfallPostingId,
+  EMAILED_NOTIFICATION_TYPES,
+  NOTIFICATION_TYPES,
+} from "@/lib/notifications";
+import { findOvertimeShortfalls } from "@/lib/overtime-shortfalls";
 import {
   buildAcceptedMutualAssignmentRows,
   parseMutualAssignmentNote,
@@ -62,6 +83,7 @@ import {
   createSetRangeKey,
   getEmployeeMap,
   getExtendedMonthDays,
+  getCurrentDateKey,
   getMonthDays,
   getMonthKeysForDateRange,
   getScheduleById,
@@ -97,6 +119,7 @@ type StaffingCompetency = {
   requiredStaff: number;
 };
 type RemovedOvertimeClaimNotification = {
+  claimId: string;
   employeeId: string;
   scheduleName: string;
   assignmentLabel: string;
@@ -269,6 +292,88 @@ function doesAssignmentFillManualPosting(
   );
 }
 
+/**
+ * A release sweep can touch a whole month at once — unmarking a completed set,
+ * or dropping one competency from one person. In-app that is just a list; as
+ * email it is a mail-out nobody asked for, so past this point the sweep tells
+ * people in the app only.
+ */
+const MAX_OVERTIME_REMOVED_EMAILS_PER_SWEEP = 25;
+
+/** The operation's local day decides which shortfalls are still ahead. */
+const BUSINESS_TIME_ZONE = "America/Edmonton";
+
+type NotificationRowForEmail = {
+  id: string;
+  recipient_employee_id: string;
+  type: string;
+  title: string;
+  body: string;
+  href: string | null;
+};
+
+function toEmailCandidates(rows: NotificationRowForEmail[]): NotificationEmailCandidate[] {
+  return rows.map((row) => ({
+    id: row.id,
+    employeeId: row.recipient_employee_id,
+    type: row.type as NotificationEmailCandidate["type"],
+    title: row.title,
+    body: row.body,
+    href: row.href,
+  }));
+}
+
+/**
+ * Hands the send to the runtime once the response has gone out.
+ *
+ * `after` throws synchronously outside a request scope, and a notification
+ * write must never be able to fail the mutation that caused it, so the
+ * scheduling itself is guarded. `sendNotificationEmails` never rejects, which
+ * is what makes the fallback safe to leave floating.
+ */
+function scheduleNotificationEmails(recipients: NotificationEmailRecipient[]) {
+  if (recipients.length === 0) {
+    return;
+  }
+
+  try {
+    after(() => sendNotificationEmails({ recipients }));
+  } catch (error) {
+    console.error("Notification email could not be deferred, sending inline instead:", error);
+    void sendNotificationEmails({ recipients });
+  }
+}
+
+async function queueNotificationEmails(
+  rows: NotificationRowForEmail[],
+  contactsByEmployeeId: Map<string, EmployeeContact>,
+) {
+  if (rows.length === 0) {
+    return;
+  }
+
+  const optouts = await readNotificationEmailOptouts(rows.map((row) => row.recipient_employee_id));
+
+  if (!optouts.ok) {
+    return;
+  }
+
+  const selection = selectEmailRecipients({
+    notifications: toEmailCandidates(rows),
+    contactsByEmployeeId,
+    mutedKeys: optouts.muted,
+  });
+
+  if (selection.skipped.noEmail > 0 || selection.skipped.muted > 0 || selection.skipped.collapsed > 0) {
+    console.info(
+      `Notification email skipped: ${selection.skipped.noEmail} without an address, ` +
+        `${selection.skipped.muted} opted out, ${selection.skipped.collapsed} folded into another email.`,
+    );
+  }
+
+  scheduleNotificationEmails(selection.recipients);
+}
+
 function createNotificationId() {
   return `notification-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -282,7 +387,7 @@ async function createOvertimeRemovedNotifications(
   }
 
   const rows = notifications.map((notification) => ({
-    id: createNotificationId(),
+    id: buildOvertimeRemovedNotificationId(notification.claimId),
     recipient_employee_id: notification.employeeId,
     type: "overtime_removed",
     title: "Overtime no longer needed",
@@ -291,16 +396,55 @@ async function createOvertimeRemovedNotifications(
     ...toDatabaseScope(notification.scope),
   }));
 
-  const { error } = await supabase.from("notifications").insert(rows);
+  // Keyed on the claim, so a sweep that re-detects the same release after an
+  // earlier attempt returned early collides instead of writing a second row.
+  const { data, error } = await supabase
+    .from("notifications")
+    .upsert(rows, { onConflict: "id", ignoreDuplicates: true })
+    .select("id");
 
   if (error) {
     return {
       ok: false as const,
       message: `Could not create overtime notification: ${error.message}`,
+      inserted: [] as typeof rows,
     };
   }
 
-  return { ok: true as const };
+  const insertedIds = new Set(((data as Array<{ id: string }> | null) ?? []).map((row) => row.id));
+  const inserted = rows.filter((row) => insertedIds.has(row.id));
+
+  if (inserted.length > MAX_OVERTIME_REMOVED_EMAILS_PER_SWEEP) {
+    console.warn(
+      `${inserted.length} overtime releases in one sweep exceeded the email cap of ` +
+        `${MAX_OVERTIME_REMOVED_EMAILS_PER_SWEEP}; the notifications were written but not emailed.`,
+    );
+    return { ok: true as const, inserted };
+  }
+
+  const contactsByScope = await Promise.all(
+    Array.from(
+      notifications.reduce((map, notification) => {
+        const key = `${notification.scope.companyId}:${notification.scope.siteId}:${notification.scope.businessAreaId}`;
+        const entry = map.get(key) ?? { scope: notification.scope, employeeIds: [] as string[] };
+        entry.employeeIds.push(notification.employeeId);
+        map.set(key, entry);
+        return map;
+      }, new Map<string, { scope: ActionScope; employeeIds: string[] }>()).values(),
+    ).map((entry) => getEmployeeContactsByIds(entry.employeeIds, entry.scope)),
+  );
+
+  const contacts = new Map<string, EmployeeContact>();
+
+  for (const scopedContacts of contactsByScope) {
+    for (const [employeeId, contact] of scopedContacts) {
+      contacts.set(employeeId, contact);
+    }
+  }
+
+  await queueNotificationEmails(inserted, contacts);
+
+  return { ok: true as const, inserted };
 }
 
 /**
@@ -351,19 +495,197 @@ async function createOvertimePostingNotifications(
 
   // The id is derived from the posting and the recipient, so a replayed
   // enqueue collides with what it already wrote instead of duplicating it.
-  const { error } = await supabase
+  // `ignoreDuplicates` compiles to ON CONFLICT DO NOTHING, so what comes back
+  // is only what was actually inserted — which is what email is gated on.
+  const { data, error } = await supabase
     .from("notifications")
-    .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+    .upsert(rows, { onConflict: "id", ignoreDuplicates: true })
+    .select("id");
 
   if (error) {
     console.error(
       `Overtime posting ${input.postingId} was created but its notifications could not be written:`,
       error.message,
     );
-    return { ok: false as const, notified: 0 };
+    return { ok: false as const, notified: 0, inserted: [] as typeof rows };
   }
 
-  return { ok: true as const, notified: rows.length };
+  const insertedIds = new Set(((data as Array<{ id: string }> | null) ?? []).map((row) => row.id));
+  const inserted = rows.filter((row) => insertedIds.has(row.id));
+
+  // The recipients came out of the snapshot, so their addresses are already here.
+  const contacts = new Map<string, EmployeeContact>(
+    recipients.map((employee) => [
+      employee.id,
+      { email: employee.email, name: employee.firstName?.trim() || employee.name },
+    ]),
+  );
+
+  await queueNotificationEmails(inserted, contacts);
+
+  return { ok: true as const, notified: rows.length, inserted };
+}
+
+/**
+ * Tells eligible workers about generated overtime: the gaps a completed set
+ * leaves, which have no posting row for `createManualOvertimePosting` to
+ * notify from.
+ *
+ * Runs after every save that can open a gap. Each open slot is announced once —
+ * ids derive from the slot's stable key, and the month's already-sent ids are
+ * read first, so an autosave every few seconds writes nothing unless a new slot
+ * has opened. A slot that is filled and later reopens is not announced again;
+ * the alternative is re-notifying everyone while a leader shuffles people.
+ *
+ * Only the direct post is announced. The board also offers swap routes to
+ * people holding a different post, but those depend on who is currently
+ * standing where, which changes with every edit.
+ */
+async function notifyNewOvertimeShortfalls(
+  supabase: SupabaseAdminClient,
+  months: string[],
+  session: Awaited<ReturnType<typeof getAppSession>> | null,
+) {
+  const sessionScope = getSessionScope(session);
+
+  if (!sessionScope) {
+    return;
+  }
+
+  const today = getCurrentDateKey(BUSINESS_TIME_ZONE);
+  let wroteAny = false;
+
+  for (const month of Array.from(new Set(months.filter(Boolean)))) {
+    if (month < today.slice(0, 7)) {
+      continue;
+    }
+
+    const snapshot = await getScheduleReferenceSnapshot(month, session, {
+      includeEmployeeCompetencies: true,
+      includeCompetencies: true,
+      includeTimeCodes: true,
+      includeSubSchedules: false,
+      includeAssignments: true,
+      includeSubScheduleAssignments: true,
+      includeOvertimeClaims: false,
+      includeManualOvertimePostings: false,
+      includeCompletedSets: true,
+      assignmentWindow: "extended",
+      completedSetWindow: "extended",
+    });
+    const shortfalls = findOvertimeShortfalls(snapshot, today);
+
+    if (shortfalls.length === 0) {
+      continue;
+    }
+
+    const alreadySent = new Set<string>();
+    let sentLookupFailed = false;
+
+    // Paged: a response stops at 1,000 rows, and a truncated list would re-offer
+    // the overflow to the insert on every autosave.
+    for (let from = 0; ; from += 1000) {
+      const { data: sentRows, error: sentError } = await supabase
+        .from("notifications")
+        .select("id")
+        .eq("type", NOTIFICATION_TYPES.overtimePosted)
+        .like("id", `${buildShortfallNotificationIdPrefix(month)}%`)
+        .order("id")
+        .range(from, from + 999);
+
+      if (sentError) {
+        console.error(`Generated overtime for ${month} could not be checked for earlier notices:`, sentError.message);
+        sentLookupFailed = true;
+        break;
+      }
+
+      const page = (sentRows as Array<{ id: string }> | null) ?? [];
+      page.forEach((row) => alreadySent.add(row.id));
+
+      if (page.length < 1000) {
+        break;
+      }
+    }
+
+    if (sentLookupFailed) {
+      continue;
+    }
+
+    const employees = snapshot.schedules.flatMap((schedule) => schedule.employees);
+    const rows = shortfalls.flatMap((shortfall) => {
+      const schedule = snapshot.schedules.find((entry) => entry.id === shortfall.scheduleId);
+      const scope = {
+        companyId: schedule?.companyId ?? sessionScope.companyId,
+        siteId: schedule?.siteId ?? sessionScope.siteId,
+        businessAreaId: schedule?.businessAreaId ?? sessionScope.businessAreaId,
+      };
+      const target = { competencyId: shortfall.competencyId, dates: shortfall.dates };
+
+      return employees
+        .filter((employee) => canBeNotifiedAboutPosting(employee, target, snapshot))
+        .map((employee) => ({
+          ...buildOvertimePostingNotification({
+            postingId: buildShortfallPostingId(shortfall.key),
+            employeeId: employee.id,
+            assignmentLabel: shortfall.competencyCode,
+            scheduleName: `Shift ${shortfall.scheduleName}`,
+            dates: shortfall.dates,
+            month,
+          }),
+          ...toDatabaseScope(scope),
+        }))
+        .filter((row) => !alreadySent.has(row.id));
+    });
+
+    if (rows.length === 0) {
+      continue;
+    }
+
+    const { data, error } = await supabase
+      .from("notifications")
+      .upsert(rows, { onConflict: "id", ignoreDuplicates: true })
+      .select("id");
+
+    if (error) {
+      console.error(`Generated overtime notifications for ${month} could not be written:`, error.message);
+      continue;
+    }
+
+    const insertedIds = new Set(((data as Array<{ id: string }> | null) ?? []).map((row) => row.id));
+    const inserted = rows.filter((row) => insertedIds.has(row.id));
+    const contacts = new Map<string, EmployeeContact>(
+      employees.map((employee) => [
+        employee.id,
+        { email: employee.email, name: employee.firstName?.trim() || employee.name },
+      ]),
+    );
+
+    wroteAny ||= inserted.length > 0;
+    await queueNotificationEmails(inserted, contacts);
+  }
+
+  if (wroteAny) {
+    revalidatePath("/notifications");
+  }
+}
+
+/** Runs the shortfall notices once the save's response has gone out. */
+function scheduleShortfallNotifications(
+  supabase: SupabaseAdminClient,
+  months: string[],
+  session: Awaited<ReturnType<typeof getAppSession>> | null,
+) {
+  const run = () =>
+    notifyNewOvertimeShortfalls(supabase, months, session).catch((error: unknown) => {
+      console.error("Generated overtime notifications failed:", error);
+    });
+
+  try {
+    after(run);
+  } catch (error) {
+    console.error("Generated overtime notifications could not be deferred, running inline instead:", error);
+    void run();
+  }
 }
 
 async function createTemporaryLoanNotifications(
@@ -745,23 +1067,6 @@ async function cleanupRemovedEmployeeCompetencyWork(
   }
 
   if (claimsToRemove.length > 0) {
-    const notificationRows = claimsToRemove.map<RemovedOvertimeClaimNotification>((claim) => ({
-      employeeId: claim.employee_id,
-      scheduleName: "Your",
-      assignmentLabel: "posting",
-      date: claim.assignment_date,
-      scope: {
-        companyId: claim.company_id,
-        siteId: claim.site_id,
-        businessAreaId: claim.business_area_id,
-      },
-    }));
-    const notificationResult = await createOvertimeRemovedNotifications(supabase, notificationRows);
-
-    if (!notificationResult.ok) {
-      console.error(notificationResult.message);
-    }
-
     const claimDeleteResult = await supabase
       .from("overtime_claims")
       .delete()
@@ -776,6 +1081,26 @@ async function cleanupRemovedEmployeeCompetencyWork(
         removedClaims,
         touchedMonths: Array.from(touchedMonths),
       };
+    }
+
+    // Only once the claims are actually gone: telling someone their overtime
+    // was released and then leaving it in place is the worse order.
+    const notificationRows = claimsToRemove.map<RemovedOvertimeClaimNotification>((claim) => ({
+      claimId: claim.id,
+      employeeId: claim.employee_id,
+      scheduleName: "Your",
+      assignmentLabel: "posting",
+      date: claim.assignment_date,
+      scope: {
+        companyId: claim.company_id,
+        siteId: claim.site_id,
+        businessAreaId: claim.business_area_id,
+      },
+    }));
+    const notificationResult = await createOvertimeRemovedNotifications(supabase, notificationRows);
+
+    if (!notificationResult.ok) {
+      console.error(notificationResult.message);
     }
 
     removedClaims += claimsToRemove.length;
@@ -832,10 +1157,17 @@ async function cleanupRemovedEmployeeCompetencyWork(
         .from("schedule_assignments")
         .delete({ count: "exact" })
         .eq("employee_id", removal.employeeId)
-        .in("competency_id", removal.removedCompetencyIds),
+        .in("competency_id", removal.removedCompetencyIds)
+        .select("assignment_date"),
     ),
   );
   const mainAssignmentDeleteError = mainAssignmentDeleteResults.find((result) => result.error)?.error;
+
+  for (const result of mainAssignmentDeleteResults) {
+    for (const row of (result.data as Array<{ assignment_date: string }> | null) ?? []) {
+      touchedMonths.add(row.assignment_date.slice(0, 7));
+    }
+  }
 
   if (mainAssignmentDeleteError) {
     return {
@@ -1039,6 +1371,10 @@ async function removeStaleOvertimeClaims(
   let removedClaims = 0;
   let removedManualPostings = 0;
 
+  // Every save that can open a gap passes through here. Deferred, so it reads
+  // the schedule as this sweep leaves it and never slows the save.
+  scheduleShortfallNotifications(supabase, uniqueMonths, session);
+
   for (const month of uniqueMonths) {
     const snapshot = await getScheduleReferenceSnapshot(month, session, {
       includeEmployeeCompetencies: false,
@@ -1186,6 +1522,7 @@ async function removeStaleOvertimeClaims(
           : null;
 
         return {
+          claimId: claim.id,
           employeeId: claim.employeeId,
           scheduleName: schedule?.name ? `Shift ${schedule.name}` : "Your",
           assignmentLabel: competency?.code ?? timeCode?.code ?? "posting",
@@ -1197,11 +1534,6 @@ async function removeStaleOvertimeClaims(
           },
         };
       }).filter((notification) => notification.scope.companyId && notification.scope.siteId && notification.scope.businessAreaId);
-      const notificationResult = await createOvertimeRemovedNotifications(supabase, notificationRows);
-
-      if (!notificationResult.ok) {
-        console.error(notificationResult.message);
-      }
 
       const restoreResult = await restoreSwappedAssignmentsForClaims(
         supabase,
@@ -1232,6 +1564,15 @@ async function removeStaleOvertimeClaims(
           removedClaims,
           removedManualPostings,
         };
+      }
+
+      // Only once the claims are actually gone. This sweep runs on every
+      // autosave, so notifying before the delete meant a failure here replayed
+      // the same notifications every few seconds.
+      const notificationResult = await createOvertimeRemovedNotifications(supabase, notificationRows);
+
+      if (!notificationResult.ok) {
+        console.error(notificationResult.message);
       }
 
       const clearAssignmentsResult = await clearClaimantAssignmentsForClaims(
@@ -2370,7 +2711,10 @@ export async function createManualOvertimePosting(input: CreateManualOvertimePos
 
   const month = monthKeys[0] ?? "";
   const snapshot = await getScheduleReferenceSnapshot(month, session, {
-    includeEmployeeCompetencies: false,
+    // Required: eligibility starts by testing the posting's competency against
+    // the employee's own, so leaving these out makes every worker read as
+    // unqualified and the posting notifies nobody.
+    includeEmployeeCompetencies: true,
     includeCompetencies: true,
     includeTimeCodes: true,
     includeSubSchedules: true,
@@ -2682,9 +3026,22 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
   }
 
   if ((count ?? 0) > 0) {
+    const { error: claimDeleteError } = await supabase
+      .from("overtime_claims")
+      .delete()
+      .eq("manual_posting_id", input.postingId);
+
+    if (claimDeleteError) {
+      return {
+        ok: false,
+        message: `Could not release overtime claims: ${claimDeleteError.message}`,
+      };
+    }
+
     const notificationResult = await createOvertimeRemovedNotifications(
       supabase,
       claimRows.map((claim) => ({
+        claimId: claim.id,
         employeeId: claim.employee_id,
         scheduleName: "Your",
         assignmentLabel: "posting",
@@ -2696,18 +3053,6 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
     if (!notificationResult.ok) {
       console.error(notificationResult.message);
       notificationWarning = ` Notification was not sent: ${notificationResult.message}`;
-    }
-
-    const { error: claimDeleteError } = await supabase
-      .from("overtime_claims")
-      .delete()
-      .eq("manual_posting_id", input.postingId);
-
-    if (claimDeleteError) {
-      return {
-        ok: false,
-        message: `Could not release overtime claims: ${claimDeleteError.message}`,
-      };
     }
   }
 
@@ -5231,6 +5576,12 @@ export async function savePersonnel(input: SavePersonnelInput) {
     };
   }
 
+  // Taking a post off someone clears their assignments on it, which can open a
+  // gap without going through the schedule save sweep.
+  if (removedCompetencyCleanupResult.removedAssignments > 0) {
+    scheduleShortfallNotifications(supabase, removedCompetencyCleanupResult.touchedMonths, session);
+  }
+
   if (input.deletedEmployeeIds.length > 0) {
     const { error: deleteError } = await supabase
       .from("employees")
@@ -6537,4 +6888,60 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
     ok: true,
     message: "Time code changes saved to Supabase.",
   };
+}
+
+/**
+ * Mutes or unmutes one notification type for the signed-in user's email.
+ *
+ * The employee is taken from the session and never from the request: these are
+ * personal preferences, and accepting an id here would let anyone silence
+ * anyone else's alerts.
+ */
+export async function setNotificationEmailPreference(input: {
+  notificationType: string;
+  muted: boolean;
+}) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session) {
+    return { ok: false, message: "Sign in to change your notification settings." };
+  }
+
+  if (!session.employeeId) {
+    return {
+      ok: false,
+      message: "Your account is not linked to an employee record yet, so there is nothing to notify.",
+    };
+  }
+
+  if (!EMAILED_NOTIFICATION_TYPES.some((type) => type.value === input.notificationType)) {
+    return { ok: false, message: "That notification type does not send email." };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return { ok: false, message: "Supabase is not configured yet. Notification settings are unavailable." };
+  }
+
+  const { error } = input.muted
+    ? await supabase
+        .from("notification_email_optouts")
+        .upsert(
+          { employee_id: session.employeeId, notification_type: input.notificationType },
+          { onConflict: "employee_id,notification_type", ignoreDuplicates: true },
+        )
+    : await supabase
+        .from("notification_email_optouts")
+        .delete()
+        .eq("employee_id", session.employeeId)
+        .eq("notification_type", input.notificationType);
+
+  if (error) {
+    return { ok: false, message: `Could not save your notification settings: ${error.message}` };
+  }
+
+  revalidatePath("/notifications/settings");
+
+  return { ok: true, message: "Notification settings saved." };
 }

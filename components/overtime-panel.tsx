@@ -17,17 +17,18 @@ import { Modal } from "@/components/ui/modal";
 import { parseOvertimeAssignmentNote, resolveDefaultClaimingEmployeeId } from "@/lib/overtime";
 import { describeOvertimeBlocker, findOvertimeBlocker } from "@/lib/overtime-eligibility";
 import {
+  buildCompletedSetCoverage,
+  countScheduleAssignmentsForTarget,
+  getOpenSlotDates,
+} from "@/lib/overtime-shortfalls";
+import {
   buildAssignmentIndex,
   createAssignmentKey,
-  createSetRangeKey,
-  createSetRangeKeyFromEntry,
   formatMonthLabel,
   getCurrentMonthKey,
   getEmployeeMap,
-  getExtendedMonthDays,
   getMonthDays,
   getScheduleById,
-  getWorkedSetDays,
   needsNightBeforeFirstDayShiftConfirmation,
   shiftMonthKey,
   shiftForDate,
@@ -285,70 +286,6 @@ function buildOvertimeAssignmentKey(competencyId: string | null, timeCodeId: str
   return "";
 }
 
-/** Groups a schedule's month into worked sets and their day/night segments. */
-function getWorkedSets(
-  schedule: SchedulerSnapshot["schedules"][number],
-  monthDays: Array<{ date: string }>,
-  extendedMonthDays: Array<{ date: string }>,
-) {
-  const sets: Array<{
-    dates: string[];
-    segments: Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>;
-  }> = [];
-  const processedKeys = new Set<string>();
-
-  for (const day of monthDays) {
-    if (shiftForDate(schedule, day.date) === "OFF") {
-      continue;
-    }
-
-    const setDays = getWorkedSetDays(schedule, extendedMonthDays, day.date);
-
-    if (setDays.length === 0) {
-      continue;
-    }
-
-    const setKey = `${setDays[0].date}:${setDays[setDays.length - 1].date}`;
-
-    if (processedKeys.has(setKey)) {
-      continue;
-    }
-
-    processedKeys.add(setKey);
-
-    const segments = setDays.reduce<Array<{ shiftKind: Exclude<ShiftKind, "OFF">; dates: string[] }>>(
-      (currentSegments, setDay) => {
-        const shiftKind = shiftForDate(schedule, setDay.date);
-
-        if (shiftKind === "OFF") {
-          return currentSegments;
-        }
-
-        const currentSegment = currentSegments[currentSegments.length - 1];
-
-        if (!currentSegment || currentSegment.shiftKind !== shiftKind) {
-          currentSegments.push({
-            shiftKind,
-            dates: [setDay.date],
-          });
-          return currentSegments;
-        }
-
-        currentSegment.dates.push(setDay.date);
-        return currentSegments;
-      },
-      [],
-    );
-
-    sets.push({
-      dates: setDays.map((setDay) => setDay.date),
-      segments,
-    });
-  }
-
-  return sets;
-}
-
 function getCellSelection(
   employee: Employee,
   scheduleId: string,
@@ -359,32 +296,6 @@ function getCellSelection(
     competencyId: null,
     timeCodeId: null,
   };
-}
-
-function countScheduleAssignmentsForTarget({
-  assignments,
-  scheduleId,
-  date,
-  competencyId,
-  timeCodeId = null,
-}: {
-  assignments: SchedulerSnapshot["assignments"];
-  scheduleId: string;
-  date: string;
-  competencyId: string | null;
-  timeCodeId?: string | null;
-}) {
-  return assignments.reduce(
-    (count, assignment) =>
-      count +
-      Number(
-        assignment.scheduleId === scheduleId &&
-          assignment.date === date &&
-          ((competencyId && assignment.competencyId === competencyId) ||
-            (timeCodeId && assignment.timeCodeId === timeCodeId)),
-      ),
-    0,
-  );
 }
 
 function buildInitialTargetKey(snapshot: SchedulerSnapshot): OvertimeTargetKey | "" {
@@ -1181,11 +1092,6 @@ export function OvertimePanel({
     [snapshot.assignments],
   );
   const monthDays = useMemo(() => getMonthDays(snapshot.month), [snapshot.month]);
-  const extendedMonthDays = useMemo(() => getExtendedMonthDays(snapshot.month), [snapshot.month]);
-  const completedSetRangeKeys = useMemo(
-    () => new Set(snapshot.completedSets.map(createSetRangeKeyFromEntry)),
-    [snapshot.completedSets],
-  );
   const allEmployees = useMemo(
     () =>
       snapshot.schedules
@@ -1381,260 +1287,219 @@ export function OvertimePanel({
     const nextPostings: OvertimePosting[] = [];
     const selectedEmployeeClaims = snapshot.overtimeClaims.filter((claim) => claim.employeeId === claimingEmployeeId);
 
-    for (const schedule of snapshot.schedules) {
-      const workedSets = getWorkedSets(schedule, monthDays, extendedMonthDays);
+    for (const coverage of buildCompletedSetCoverage(snapshot)) {
+      const { schedule, competency, maxMissing, staffedPeople } = coverage;
+      const segment = { shiftKind: coverage.shiftKind };
+      const setDates = coverage.dates;
+      const claimedDates = selectedEmployeeClaims
+        .filter(
+          (claim) =>
+            claim.scheduleId === schedule.id &&
+            claim.competencyId === competency.id &&
+            setDates.includes(claim.date),
+        )
+        .map((claim) => claim.date)
+        .sort();
 
-      for (const workedSet of workedSets) {
-        const setKey = createSetRangeKey(
-          schedule.id,
-          workedSet.dates[0],
-          workedSet.dates[workedSet.dates.length - 1],
-        );
-
-        if (!completedSetRangeKeys.has(setKey)) {
-          continue;
+      const claimDatesByEmployee = snapshot.overtimeClaims.reduce<Record<string, string[]>>((map, claim) => {
+        if (
+          claim.scheduleId === schedule.id &&
+          claim.competencyId === competency.id &&
+          setDates.includes(claim.date)
+        ) {
+          map[claim.employeeId] ??= [];
+          map[claim.employeeId].push(claim.date);
         }
 
-        for (const segment of workedSet.segments) {
-          if (segment.dates[0]?.slice(0, 7) !== snapshot.month) {
+        return map;
+      }, {});
+
+      for (const [employeeId, employeeDates] of Object.entries(claimDatesByEmployee)) {
+        const orderedDates = setDates.filter((date) => employeeDates.includes(date));
+        const claimEmployee = employeeMap[employeeId];
+        const assignmentMeta = orderedDates[0]
+          ? assignmentMetaIndex[createAssignmentKey(schedule.id, employeeId, orderedDates[0])]
+          : undefined;
+        const coverageCompetencyId = assignmentMeta?.coverageCompetencyId ?? competency.id;
+        const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
+        const swapEmployeeId = assignmentMeta?.swapEmployeeId ?? null;
+        const swapEmployee = swapEmployeeId ? employeeMap[swapEmployeeId] : null;
+        let currentRun: string[] = [];
+
+        const flushRun = () => {
+          if (currentRun.length === 0) {
+            return;
+          }
+
+          nextPostings.push({
+            id: `claimed:${schedule.id}:${competency.id}:${employeeId}:${currentRun[0]}`,
+            source: "auto",
+            targetMode: "main",
+            scheduleId: schedule.id,
+            subScheduleId: null,
+            scheduleName: schedule.name,
+            shiftKind: segment.shiftKind,
+            competencyId: competency.id,
+            timeCodeId: null,
+            assignmentKey: buildOvertimeAssignmentKey(competency.id, null),
+            slotCount: 1,
+            competencyCode: competency.code,
+            competencyLabel: competency.label,
+            coverageCompetencyId,
+            coverageCompetencyCode: coverageCompetency?.code ?? competency.code,
+            coverageCompetencyLabel: coverageCompetency?.label ?? competency.label,
+            colorToken: competency.colorToken,
+            dates: [...currentRun],
+            staffedPeople,
+            requiredStaff: competency.requiredStaff,
+            openShifts: 0,
+            manualPostingId: null,
+            claimedEmployeeId: employeeId,
+            claimedByName: claimEmployee?.name ?? "Unknown worker",
+            claimedEmployeeIds: [employeeId],
+            claimedByNames: [claimEmployee?.name ?? "Unknown worker"],
+            swapEmployeeId,
+            swapEmployeeName: swapEmployee?.name ?? null,
+          });
+          currentRun = [];
+        };
+
+        for (let index = 0; index < orderedDates.length; index += 1) {
+          const date = orderedDates[index];
+          const previousDate = orderedDates[index - 1];
+          const currentDateIndex = setDates.indexOf(date);
+          const previousDateIndex = previousDate ? setDates.indexOf(previousDate) : -1;
+
+          if (previousDate && currentDateIndex !== previousDateIndex + 1) {
+            flushRun();
+          }
+
+          currentRun.push(date);
+        }
+
+        flushRun();
+      }
+
+      for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
+        const postingDates = getOpenSlotDates(coverage, slotIndex);
+
+        if (postingDates.length === 0) {
+          continue;
+        }
+        const swapCandidates = schedule.employees.reduce<
+          Record<string, { employeeId: string; employeeName: string; competencyId: string }>
+        >((map, teamEmployee) => {
+          if (!teamEmployee.competencyIds.includes(competency.id)) {
+            return map;
+          }
+
+          const assignedCompetencyIds = postingDates.reduce<string[]>((ids, date) => {
+            const selection = getCellSelection(teamEmployee, schedule.id, date, assignmentIndex);
+
+            if (selection.competencyId) {
+              ids.push(selection.competencyId);
+            }
+
+            return ids;
+          }, []);
+
+          if (assignedCompetencyIds.length !== postingDates.length) {
+            return map;
+          }
+
+          const offeredCompetencyId = assignedCompetencyIds[0];
+
+          if (
+            !offeredCompetencyId ||
+            offeredCompetencyId === competency.id ||
+            assignedCompetencyIds.some((assignedCompetencyId) => assignedCompetencyId !== offeredCompetencyId)
+          ) {
+            return map;
+          }
+
+          if (map[offeredCompetencyId]) {
+            return map;
+          }
+
+          map[offeredCompetencyId] = {
+            employeeId: teamEmployee.id,
+            employeeName: teamEmployee.name,
+            competencyId: offeredCompetencyId,
+          };
+
+          return map;
+        }, {});
+
+        const candidateEntries = Object.values(swapCandidates);
+
+          nextPostings.push({
+            id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
+            source: "auto",
+            targetMode: "main",
+            scheduleId: schedule.id,
+            subScheduleId: null,
+            scheduleName: schedule.name,
+            shiftKind: segment.shiftKind,
+            competencyId: competency.id,
+            timeCodeId: null,
+            assignmentKey: buildOvertimeAssignmentKey(competency.id, null),
+            slotCount: 1,
+          competencyCode: competency.code,
+          competencyLabel: competency.label,
+          coverageCompetencyId: competency.id,
+          coverageCompetencyCode: competency.code,
+          coverageCompetencyLabel: competency.label,
+          colorToken: competency.colorToken,
+          dates: postingDates,
+          staffedPeople,
+          requiredStaff: competency.requiredStaff,
+          openShifts: postingDates.length,
+          manualPostingId: null,
+          claimedEmployeeId: null,
+          claimedByName: null,
+          claimedEmployeeIds: [],
+          claimedByNames: [],
+          swapEmployeeId: null,
+          swapEmployeeName: null,
+        });
+
+        for (const candidate of candidateEntries) {
+          const offeredCompetency = snapshot.competencies.find((entry) => entry.id === candidate.competencyId);
+
+          if (!offeredCompetency) {
             continue;
           }
 
-          const setDates = segment.dates;
-
-          const scheduleCompetencies = snapshot.competencies.filter((competency) =>
-            schedule.competencyIds.includes(competency.id),
-          );
-
-          for (const competency of scheduleCompetencies) {
-            const missingSlotsByDate = setDates.map((date) => {
-              const filledCount = countScheduleAssignmentsForTarget({
-                assignments: snapshot.assignments,
-                scheduleId: schedule.id,
-                date,
-                competencyId: competency.id,
-              });
-
-              return Math.max(0, competency.requiredStaff - filledCount);
-            });
-
-            const maxMissing = Math.max(0, ...missingSlotsByDate);
-            const filledCells =
-              setDates.length * competency.requiredStaff -
-              missingSlotsByDate.reduce((sum, value) => sum + value, 0);
-            const staffedPeople = setDates.length > 0 ? filledCells / setDates.length : 0;
-            const claimedDates = selectedEmployeeClaims
-              .filter(
-                (claim) =>
-                  claim.scheduleId === schedule.id &&
-                  claim.competencyId === competency.id &&
-                  setDates.includes(claim.date),
-              )
-              .map((claim) => claim.date)
-              .sort();
-
-            const claimDatesByEmployee = snapshot.overtimeClaims.reduce<Record<string, string[]>>((map, claim) => {
-              if (
-                claim.scheduleId === schedule.id &&
-                claim.competencyId === competency.id &&
-                setDates.includes(claim.date)
-              ) {
-                map[claim.employeeId] ??= [];
-                map[claim.employeeId].push(claim.date);
-              }
-
-              return map;
-            }, {});
-
-            for (const [employeeId, employeeDates] of Object.entries(claimDatesByEmployee)) {
-              const orderedDates = setDates.filter((date) => employeeDates.includes(date));
-              const claimEmployee = employeeMap[employeeId];
-              const assignmentMeta = orderedDates[0]
-                ? assignmentMetaIndex[createAssignmentKey(schedule.id, employeeId, orderedDates[0])]
-                : undefined;
-              const coverageCompetencyId = assignmentMeta?.coverageCompetencyId ?? competency.id;
-              const coverageCompetency = snapshot.competencies.find((entry) => entry.id === coverageCompetencyId);
-              const swapEmployeeId = assignmentMeta?.swapEmployeeId ?? null;
-              const swapEmployee = swapEmployeeId ? employeeMap[swapEmployeeId] : null;
-              let currentRun: string[] = [];
-
-              const flushRun = () => {
-                if (currentRun.length === 0) {
-                  return;
-                }
-
-                nextPostings.push({
-                  id: `claimed:${schedule.id}:${competency.id}:${employeeId}:${currentRun[0]}`,
-                  source: "auto",
-                  targetMode: "main",
-                  scheduleId: schedule.id,
-                  subScheduleId: null,
-                  scheduleName: schedule.name,
-                  shiftKind: segment.shiftKind,
-                  competencyId: competency.id,
-                  timeCodeId: null,
-                  assignmentKey: buildOvertimeAssignmentKey(competency.id, null),
-                  slotCount: 1,
-                  competencyCode: competency.code,
-                  competencyLabel: competency.label,
-                  coverageCompetencyId,
-                  coverageCompetencyCode: coverageCompetency?.code ?? competency.code,
-                  coverageCompetencyLabel: coverageCompetency?.label ?? competency.label,
-                  colorToken: competency.colorToken,
-                  dates: [...currentRun],
-                  staffedPeople,
-                  requiredStaff: competency.requiredStaff,
-                  openShifts: 0,
-                  manualPostingId: null,
-                  claimedEmployeeId: employeeId,
-                  claimedByName: claimEmployee?.name ?? "Unknown worker",
-                  claimedEmployeeIds: [employeeId],
-                  claimedByNames: [claimEmployee?.name ?? "Unknown worker"],
-                  swapEmployeeId,
-                  swapEmployeeName: swapEmployee?.name ?? null,
-                });
-                currentRun = [];
-              };
-
-              for (let index = 0; index < orderedDates.length; index += 1) {
-                const date = orderedDates[index];
-                const previousDate = orderedDates[index - 1];
-                const currentDateIndex = setDates.indexOf(date);
-                const previousDateIndex = previousDate ? setDates.indexOf(previousDate) : -1;
-
-                if (previousDate && currentDateIndex !== previousDateIndex + 1) {
-                  flushRun();
-                }
-
-                currentRun.push(date);
-              }
-
-              flushRun();
-            }
-
-            for (let slotIndex = 0; slotIndex < maxMissing; slotIndex += 1) {
-              const postingDates = setDates.filter((_, index) => missingSlotsByDate[index] > slotIndex);
-
-              if (postingDates.length === 0) {
-                continue;
-              }
-              const swapCandidates = schedule.employees.reduce<
-                Record<string, { employeeId: string; employeeName: string; competencyId: string }>
-              >((map, teamEmployee) => {
-                if (!teamEmployee.competencyIds.includes(competency.id)) {
-                  return map;
-                }
-
-                const assignedCompetencyIds = postingDates.reduce<string[]>((ids, date) => {
-                  const selection = getCellSelection(teamEmployee, schedule.id, date, assignmentIndex);
-
-                  if (selection.competencyId) {
-                    ids.push(selection.competencyId);
-                  }
-
-                  return ids;
-                }, []);
-
-                if (assignedCompetencyIds.length !== postingDates.length) {
-                  return map;
-                }
-
-                const offeredCompetencyId = assignedCompetencyIds[0];
-
-                if (
-                  !offeredCompetencyId ||
-                  offeredCompetencyId === competency.id ||
-                  assignedCompetencyIds.some((assignedCompetencyId) => assignedCompetencyId !== offeredCompetencyId)
-                ) {
-                  return map;
-                }
-
-                if (map[offeredCompetencyId]) {
-                  return map;
-                }
-
-                map[offeredCompetencyId] = {
-                  employeeId: teamEmployee.id,
-                  employeeName: teamEmployee.name,
-                  competencyId: offeredCompetencyId,
-                };
-
-                return map;
-              }, {});
-
-              const candidateEntries = Object.values(swapCandidates);
-
-                nextPostings.push({
-                  id: `${schedule.id}:${competency.id}:${postingDates[0]}:${slotIndex}`,
-                  source: "auto",
-                  targetMode: "main",
-                  scheduleId: schedule.id,
-                  subScheduleId: null,
-                  scheduleName: schedule.name,
-                  shiftKind: segment.shiftKind,
-                  competencyId: competency.id,
-                  timeCodeId: null,
-                  assignmentKey: buildOvertimeAssignmentKey(competency.id, null),
-                  slotCount: 1,
-                competencyCode: competency.code,
-                competencyLabel: competency.label,
-                coverageCompetencyId: competency.id,
-                coverageCompetencyCode: competency.code,
-                coverageCompetencyLabel: competency.label,
-                colorToken: competency.colorToken,
-                dates: postingDates,
-                staffedPeople,
-                requiredStaff: competency.requiredStaff,
-                openShifts: postingDates.length,
-                manualPostingId: null,
-                claimedEmployeeId: null,
-                claimedByName: null,
-                claimedEmployeeIds: [],
-                claimedByNames: [],
-                swapEmployeeId: null,
-                swapEmployeeName: null,
-              });
-
-              for (const candidate of candidateEntries) {
-                const offeredCompetency = snapshot.competencies.find((entry) => entry.id === candidate.competencyId);
-
-                if (!offeredCompetency) {
-                  continue;
-                }
-
-                nextPostings.push({
-                  id: `${schedule.id}:${candidate.competencyId}:${competency.id}:${postingDates[0]}:${slotIndex}:swap`,
-                  source: "auto",
-                  targetMode: "main",
-                  scheduleId: schedule.id,
-                  subScheduleId: null,
-                  scheduleName: schedule.name,
-                  shiftKind: segment.shiftKind,
-                  competencyId: candidate.competencyId,
-                  timeCodeId: null,
-                  assignmentKey: buildOvertimeAssignmentKey(candidate.competencyId, null),
-                  slotCount: 1,
-                  competencyCode: offeredCompetency.code,
-                  competencyLabel: offeredCompetency.label,
-                  coverageCompetencyId: competency.id,
-                  coverageCompetencyCode: competency.code,
-                  coverageCompetencyLabel: competency.label,
-                  colorToken: offeredCompetency.colorToken,
-                  dates: postingDates,
-                  staffedPeople,
-                  requiredStaff: competency.requiredStaff,
-                  openShifts: postingDates.length,
-                  manualPostingId: null,
-                  claimedEmployeeId: null,
-                  claimedByName: null,
-                  claimedEmployeeIds: [],
-                  claimedByNames: [],
-                  swapEmployeeId: candidate.employeeId,
-                  swapEmployeeName: candidate.employeeName,
-                });
-              }
-            }
-          }
+          nextPostings.push({
+            id: `${schedule.id}:${candidate.competencyId}:${competency.id}:${postingDates[0]}:${slotIndex}:swap`,
+            source: "auto",
+            targetMode: "main",
+            scheduleId: schedule.id,
+            subScheduleId: null,
+            scheduleName: schedule.name,
+            shiftKind: segment.shiftKind,
+            competencyId: candidate.competencyId,
+            timeCodeId: null,
+            assignmentKey: buildOvertimeAssignmentKey(candidate.competencyId, null),
+            slotCount: 1,
+            competencyCode: offeredCompetency.code,
+            competencyLabel: offeredCompetency.label,
+            coverageCompetencyId: competency.id,
+            coverageCompetencyCode: competency.code,
+            coverageCompetencyLabel: competency.label,
+            colorToken: offeredCompetency.colorToken,
+            dates: postingDates,
+            staffedPeople,
+            requiredStaff: competency.requiredStaff,
+            openShifts: postingDates.length,
+            manualPostingId: null,
+            claimedEmployeeId: null,
+            claimedByName: null,
+            claimedEmployeeIds: [],
+            claimedByNames: [],
+            swapEmployeeId: candidate.employeeId,
+            swapEmployeeName: candidate.employeeName,
+          });
         }
       }
     }
@@ -1736,11 +1601,8 @@ export function OvertimePanel({
       );
   }, [
     assignmentIndex,
-    completedSetRangeKeys,
     competencyMap,
     employeeMap,
-    extendedMonthDays,
-    monthDays,
     assignmentMetaIndex,
     snapshot,
     snapshot.competencies,

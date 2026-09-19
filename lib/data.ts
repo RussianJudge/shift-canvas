@@ -5,6 +5,7 @@ import {
   formatEmployeeDisplayName,
   type EmployeeNameParts,
 } from "@/lib/employee-names";
+import { buildOptoutKey, type EmployeeContact } from "@/lib/notification-email";
 import { buildAwayOvertimeAssignments } from "@/lib/overtime";
 import {
   buildAssignmentIndex,
@@ -2746,4 +2747,114 @@ export async function getNotificationsForViewer(
   }
 
   return mapNotifications((data as NotificationRow[] | null) ?? []);
+}
+
+export type RequiredOrganizationScope = {
+  companyId: string;
+  siteId: string;
+  businessAreaId: string;
+};
+
+/**
+ * Addresses for notification recipients, for the cleanup paths that hold only
+ * employee ids.
+ *
+ * The scope is an explicit argument rather than an `AppSession` because
+ * `applySessionScope` passes a query through untouched when the session has no
+ * company, and `cleanupRemovedEmployeeCompetencyWork` has no session at all —
+ * an optional-session reader there would quietly cross tenants.
+ */
+export async function getEmployeeContactsByIds(
+  employeeIds: string[],
+  scope: RequiredOrganizationScope,
+): Promise<Map<string, EmployeeContact>> {
+  const uniqueIds = Array.from(new Set(employeeIds));
+  const supabase = getDataClient();
+
+  if (!supabase || uniqueIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("employees")
+    .select("id, email, first_name, last_name")
+    .in("id", uniqueIds)
+    .eq("company_id", scope.companyId)
+    .eq("site_id", scope.siteId)
+    .eq("business_area_id", scope.businessAreaId);
+
+  if (error) {
+    console.error("Notification recipient addresses failed to load:", error.message);
+    return new Map();
+  }
+
+  const rows = (data as Array<{
+    id: string;
+    email: string | null;
+    first_name: string | null;
+    last_name: string | null;
+  }> | null) ?? [];
+
+  return new Map(
+    rows.map((row) => {
+      const nameParts: EmployeeNameParts = {
+        firstName: row.first_name ?? "",
+        lastName: row.last_name ?? "",
+      };
+
+      return [
+        row.id,
+        {
+          email: row.email,
+          // A greeting, so the given name rather than the roster's "Last, First".
+          name: nameParts.firstName.trim() || formatEmployeeDisplayName(nameParts),
+        },
+      ];
+    }),
+  );
+}
+
+/**
+ * Who has muted which notification type for email.
+ *
+ * Deliberately not scoped through `applySessionScope`: the table carries no
+ * company/site/business-area columns, and that helper always filters on
+ * `company_id`, so the query would 400 forever. The ids always arrive from an
+ * already-scoped read, and `employees.id` is globally unique.
+ *
+ * The two failure directions are not the same. A missing table means the
+ * migration has not landed, so nobody *can* have opted out yet and sending is
+ * safe. Any other error might be hiding real opt-out rows, and mailing someone
+ * who asked not to be mailed is the worse mistake — so that fails closed.
+ */
+export async function readNotificationEmailOptouts(
+  employeeIds: string[],
+): Promise<{ ok: true; muted: Set<string> } | { ok: false }> {
+  const uniqueIds = Array.from(new Set(employeeIds));
+  const supabase = getDataClient();
+
+  if (!supabase || uniqueIds.length === 0) {
+    return { ok: true, muted: new Set() };
+  }
+
+  const { data, error } = await supabase
+    .from("notification_email_optouts")
+    .select("employee_id, notification_type")
+    .in("employee_id", uniqueIds);
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") {
+      return { ok: true, muted: new Set() };
+    }
+
+    console.error("Notification email opt-outs could not be read, so no email was sent:", error.message);
+    return { ok: false };
+  }
+
+  const rows = (data as Array<{ employee_id: string; notification_type: string }> | null) ?? [];
+
+  return {
+    ok: true,
+    muted: new Set(rows.map((row) => buildOptoutKey(row.employee_id, row.notification_type))),
+  };
 }

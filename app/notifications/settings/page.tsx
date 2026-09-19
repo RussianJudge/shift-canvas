@@ -1,7 +1,9 @@
 import Link from "next/link";
 
+import { NotificationSettingsPanel } from "@/components/notification-settings-panel";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
+import { readNotificationEmailOptouts } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +18,15 @@ function SpeechBubbleIcon() {
 
 export default async function NotificationSettingsPage() {
   const session = await requireAppSession(["admin", "leader", "worker"]);
+  const optouts = session.employeeId
+    ? await readNotificationEmailOptouts([session.employeeId])
+    : null;
+  const mutedTypes =
+    optouts?.ok && session.employeeId
+      ? Array.from(optouts.muted)
+          .filter((key) => key.startsWith(`${session.employeeId}:`))
+          .map((key) => key.slice(key.indexOf(":") + 1))
+      : [];
 
   return (
     <WorkspaceShellFrame viewer={session}>
@@ -30,10 +41,19 @@ export default async function NotificationSettingsPage() {
           </Link>
         </div>
 
-        <div className="empty-state">
-          <strong>Notification settings are not connected yet.</strong>
-          <span>Delivery preferences and alert categories can be added here when the notification backend is introduced.</span>
-        </div>
+        {!session.employeeId ? (
+          <div className="empty-state">
+            <strong>Your account is not linked to an employee record.</strong>
+            <span>Notifications are addressed to an employee, so there is nothing to configure until a leader links your account.</span>
+          </div>
+        ) : optouts && !optouts.ok ? (
+          <div className="empty-state">
+            <strong>Your notification settings could not be loaded.</strong>
+            <span>Refresh the page to try again.</span>
+          </div>
+        ) : (
+          <NotificationSettingsPanel mutedTypes={mutedTypes} />
+        )}
       </section>
     </WorkspaceShellFrame>
   );

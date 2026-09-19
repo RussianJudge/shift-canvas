@@ -176,6 +176,59 @@
   color: var(--color-text-secondary);
 }
 
+.notification-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+}
+
+.notification-settings__intro {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.notification-settings__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notification-settings__row {
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.notification-settings__row .subschedule-status-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.notification-settings__row input[type="checkbox"] {
+  margin-top: 0.15rem;
+  flex: none;
+}
+
+.notification-settings__label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.notification-settings__description {
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
 @media (max-width: 720px) {
   .notifications__title {
     font-size: 1.5rem;

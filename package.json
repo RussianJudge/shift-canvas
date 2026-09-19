@@ -9,6 +9,7 @@
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@react-email/render": "^2.1.0",
     "@supabase/supabase-js": "^2.49.8",
     "@tanstack/react-virtual": "^3.13.24",
     "@vercel/speed-insights": "^2.0.0",

@@ -9,6 +9,25 @@ export const NOTIFICATION_TYPES = {
 export type NotificationType = (typeof NOTIFICATION_TYPES)[keyof typeof NOTIFICATION_TYPES];
 
 /**
+ * The types that also send email, and the only ones the settings page offers.
+ *
+ * Schedule loans are absent because their notification ids are still random,
+ * so a repeated write would mail the same person twice.
+ */
+export const EMAILED_NOTIFICATION_TYPES = [
+  {
+    value: NOTIFICATION_TYPES.overtimePosted,
+    label: "Overtime available",
+    description: "When a posting is created that you are eligible to claim.",
+  },
+  {
+    value: NOTIFICATION_TYPES.overtimeRemoved,
+    label: "Overtime no longer needed",
+    description: "When overtime you claimed is released because the posting was filled or changed.",
+  },
+] as const;
+
+/**
  * The id doubles as the idempotency key.
  *
  * `notifications.id` is a text primary key, so deriving it from what the
@@ -18,6 +37,32 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[keyof typeof NOTIFICA
  */
 export function buildOvertimePostingNotificationId(postingId: string, employeeId: string) {
   return `notification-${NOTIFICATION_TYPES.overtimePosted}-${postingId}-${employeeId}`;
+}
+
+/**
+ * Keyed on the claim, because the claim is what stopped being needed.
+ *
+ * The three cleanup paths all write their notifications before deleting the
+ * claims and can return early in between, so a repeated sweep re-detects the
+ * same releases. A random id turned that into a second notification every time;
+ * deriving it from the claim makes the retry collide instead.
+ */
+export function buildOvertimeRemovedNotificationId(claimId: string) {
+  return `notification-${NOTIFICATION_TYPES.overtimeRemoved}-${claimId}`;
+}
+
+/**
+ * Generated overtime has no posting row, so the open slot's own key stands in
+ * for a posting id. The key leads with the month, which lets the server fetch
+ * one month's worth of already-sent ids with a prefix match instead of
+ * re-upserting every open slot's recipients on every autosave.
+ */
+export function buildShortfallPostingId(shortfallKey: string) {
+  return `auto:${shortfallKey}`;
+}
+
+export function buildShortfallNotificationIdPrefix(month: string) {
+  return `notification-${NOTIFICATION_TYPES.overtimePosted}-${buildShortfallPostingId(month)}:`;
 }
 
 export type OvertimePostingNotificationInput = {
