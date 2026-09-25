@@ -93,6 +93,50 @@
 }
 
 /* One row, whether it links somewhere or only marks itself read. */
+.notifications__row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* The row already drew the separator when it sat on its own. */
+.notifications__row-wrap .notifications__row {
+  flex: 1 1 auto;
+  border-bottom: 0;
+}
+
+.notifications__dismiss {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A 44px touch target, same as the row. */
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.notifications__dismiss svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.notifications__dismiss:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
 .notifications__row {
   display: grid;
   gap: var(--space-1);

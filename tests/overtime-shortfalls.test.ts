@@ -6,6 +6,8 @@ import {
   buildShortfallKey,
   findOvertimeShortfalls,
   getOpenSlotDates,
+  groupShortfallNotices,
+  buildShortfallNoticeKey,
 } from "../lib/overtime-shortfalls";
 import type { CompletedSet, SchedulerSnapshot, StoredAssignment } from "../lib/types";
 
@@ -169,4 +171,69 @@ test("competencies the schedule does not require are ignored", () => {
   const shortfalls = findOvertimeShortfalls(snapshot({ competencies: [COMPETENCY, other] }), "2026-09-01");
 
   assert.ok(shortfalls.every((shortfall) => shortfall.competencyId === "comp-ops"));
+});
+
+test("one person short several posts in a set gets one notice, not one each", () => {
+  const shortfalls = findOvertimeShortfalls(snapshot(), "2026-09-01");
+  const notices = groupShortfallNotices(
+    shortfalls.map((shortfall) => ({ employeeId: "emp-1", shortfall })),
+  );
+
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].slotCount, 2);
+  assert.deepEqual(notices[0].dates, ["2026-09-01", "2026-09-02"]);
+  assert.equal(notices[0].scheduleName, "1");
+});
+
+test("each person gets their own notice", () => {
+  const shortfalls = findOvertimeShortfalls(snapshot(), "2026-09-01");
+  const notices = groupShortfallNotices(
+    ["emp-1", "emp-2"].flatMap((employeeId) => shortfalls.map((shortfall) => ({ employeeId, shortfall }))),
+  );
+
+  assert.deepEqual(notices.map((notice) => notice.employeeId).sort(), ["emp-1", "emp-2"]);
+  assert.ok(notices.every((notice) => notice.key === notices[0].key));
+});
+
+test("a notice keeps its key as the set's gaps change", () => {
+  // Someone is added on the 1st, so that day is covered. The 2nd is still two
+  // short, so the same notice stays, now describing only that day.
+  const before = groupShortfallNotices(
+    findOvertimeShortfalls(snapshot(), "2026-09-01").map((shortfall) => ({ employeeId: "emp-1", shortfall })),
+  )[0];
+  const after = groupShortfallNotices(
+    findOvertimeShortfalls(
+      snapshot({ assignments: [...staffed("2026-09-01", 2), ...staffed("2026-09-03", 2), ...staffed("2026-09-04", 2)] }),
+      "2026-09-01",
+    ).map((shortfall) => ({ employeeId: "emp-1", shortfall })),
+  )[0];
+
+  assert.equal(after.key, before.key);
+  assert.equal(before.dates.length, 2);
+  assert.equal(after.slotCount, 2);
+  assert.deepEqual(after.dates, ["2026-09-02"]);
+});
+
+test("nothing open means no notice to keep", () => {
+  const full = snapshot({
+    assignments: ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"].flatMap((date) => staffed(date, 2)),
+  });
+
+  assert.deepEqual(
+    groupShortfallNotices(
+      findOvertimeShortfalls(full, "2026-09-01").map((shortfall) => ({ employeeId: "emp-1", shortfall })),
+    ),
+    [],
+  );
+});
+
+test("the notice key names the set, so two sets do not merge", () => {
+  const keys = new Set(
+    findOvertimeShortfalls(snapshot(), "2026-09-01").map((shortfall) =>
+      buildShortfallNoticeKey({ scheduleId: shortfall.scheduleId, setStart: shortfall.setStart }),
+    ),
+  );
+
+  assert.equal(keys.size, 1);
+  assert.ok([...keys][0].startsWith("2026-09:schedule-1:"));
 });

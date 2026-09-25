@@ -47,7 +47,6 @@ import {
   selectEmailRecipients,
   type EmployeeContact,
   type NotificationEmailCandidate,
-  type NotificationEmailRecipient,
 } from "@/lib/notification-email";
 import {
   buildOvertimeAssignmentNote,
@@ -60,13 +59,14 @@ import {
 import { canBeNotifiedAboutPosting } from "@/lib/overtime-eligibility";
 import {
   buildOvertimePostingNotification,
+  buildOvertimePostingNotificationId,
   buildOvertimeRemovedNotificationId,
+  buildShortfallNotification,
   buildShortfallNotificationIdPrefix,
-  buildShortfallPostingId,
   EMAILED_NOTIFICATION_TYPES,
   NOTIFICATION_TYPES,
 } from "@/lib/notifications";
-import { findOvertimeShortfalls } from "@/lib/overtime-shortfalls";
+import { findOvertimeShortfalls, groupShortfallNotices } from "@/lib/overtime-shortfalls";
 import {
   buildAcceptedMutualAssignmentRows,
   parseMutualAssignmentNote,
@@ -331,47 +331,151 @@ function toEmailCandidates(rows: NotificationRowForEmail[]): NotificationEmailCa
  * scheduling itself is guarded. `sendNotificationEmails` never rejects, which
  * is what makes the fallback safe to leave floating.
  */
-function scheduleNotificationEmails(recipients: NotificationEmailRecipient[]) {
-  if (recipients.length === 0) {
-    return;
-  }
+function scheduleEmailFlush(supabase: SupabaseAdminClient) {
+  const run = () =>
+    flushNotificationEmails(supabase).catch((error: unknown) => {
+      console.error("Notification email failed:", error);
+    });
 
   try {
-    after(() => sendNotificationEmails({ recipients }));
+    after(run);
   } catch (error) {
     console.error("Notification email could not be deferred, sending inline instead:", error);
-    void sendNotificationEmails({ recipients });
+    void run();
   }
 }
 
-async function queueNotificationEmails(
-  rows: NotificationRowForEmail[],
-  contactsByEmployeeId: Map<string, EmployeeContact>,
-) {
-  if (rows.length === 0) {
+/** Resend's daily allowance on this plan, shared with account invites. */
+const DAILY_NOTIFICATION_EMAIL_LIMIT = 100;
+
+/** No single save may spend the whole day's allowance. */
+const PER_RUN_NOTIFICATION_EMAIL_LIMIT = 40;
+
+/** Nobody wants to hear about a shift that opened last month. */
+const NOTIFICATION_EMAIL_BACKLOG_DAYS = 7;
+
+/**
+ * Sends the notifications that are still owed an email.
+ *
+ * `emailed_at` makes the notifications table its own outbox: a row that is
+ * still open, still unread and still unsent is work to do. A burst larger than
+ * the daily allowance therefore sends what it can and leaves the rest for the
+ * next save, rather than losing the overflow to a rejected request — which is
+ * what happened when each write tried to send its own notifications there and
+ * then.
+ *
+ * The column records that a notification's email was *decided*, not that it
+ * was delivered. Rows skipped for an opt-out or a missing address are stamped
+ * too, or every later run would pick them up again forever.
+ */
+async function flushNotificationEmails(supabase: SupabaseAdminClient) {
+  const startOfDay = new Date();
+  startOfDay.setUTCHours(0, 0, 0, 0);
+
+  const { count, error: countError } = await supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .gte("emailed_at", startOfDay.toISOString());
+
+  if (countError) {
+    console.error("Notification email budget could not be read, so nothing was sent:", countError.message);
     return;
   }
 
-  const optouts = await readNotificationEmailOptouts(rows.map((row) => row.recipient_employee_id));
+  const budget = Math.min(
+    DAILY_NOTIFICATION_EMAIL_LIMIT - (count ?? 0),
+    PER_RUN_NOTIFICATION_EMAIL_LIMIT,
+  );
+
+  if (budget <= 0) {
+    console.warn(
+      `Notification email paused: ${count ?? 0} already sent today against a limit of ${DAILY_NOTIFICATION_EMAIL_LIMIT}.`,
+    );
+    return;
+  }
+
+  const backlogCutoff = new Date(Date.now() - NOTIFICATION_EMAIL_BACKLOG_DAYS * 24 * 60 * 60 * 1000);
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id, recipient_employee_id, type, title, body, href, company_id, site_id, business_area_id")
+    .is("emailed_at", null)
+    .is("dismissed_at", null)
+    .is("resolved_at", null)
+    .is("read_at", null)
+    .in("type", EMAILED_NOTIFICATION_TYPES.map((entry) => entry.value))
+    .gte("created_at", backlogCutoff.toISOString())
+    .order("created_at")
+    .limit(200);
+
+  if (error) {
+    console.error("Notifications awaiting email could not be read:", error.message);
+    return;
+  }
+
+  const pending = (data as Array<NotificationRowForEmail & ScopedDatabaseRow> | null) ?? [];
+
+  if (pending.length === 0) {
+    return;
+  }
+
+  const optouts = await readNotificationEmailOptouts(pending.map((row) => row.recipient_employee_id));
 
   if (!optouts.ok) {
     return;
   }
 
-  const selection = selectEmailRecipients({
-    notifications: toEmailCandidates(rows),
-    contactsByEmployeeId,
-    mutedKeys: optouts.muted,
-  });
+  const contacts = new Map<string, EmployeeContact>();
+  const byScope = pending.reduce((map, row) => {
+    const key = `${row.company_id}:${row.site_id}:${row.business_area_id}`;
+    const entry = map.get(key) ?? {
+      scope: { companyId: row.company_id, siteId: row.site_id, businessAreaId: row.business_area_id },
+      employeeIds: [] as string[],
+    };
+    entry.employeeIds.push(row.recipient_employee_id);
+    map.set(key, entry);
+    return map;
+  }, new Map<string, { scope: ActionScope; employeeIds: string[] }>());
 
-  if (selection.skipped.noEmail > 0 || selection.skipped.muted > 0 || selection.skipped.collapsed > 0) {
-    console.info(
-      `Notification email skipped: ${selection.skipped.noEmail} without an address, ` +
-        `${selection.skipped.muted} opted out, ${selection.skipped.collapsed} folded into another email.`,
-    );
+  for (const entry of byScope.values()) {
+    for (const [employeeId, contact] of await getEmployeeContactsByIds(entry.employeeIds, entry.scope)) {
+      contacts.set(employeeId, contact);
+    }
   }
 
-  scheduleNotificationEmails(selection.recipients);
+  const selection = selectEmailRecipients({
+    notifications: toEmailCandidates(pending),
+    contactsByEmployeeId: contacts,
+    mutedKeys: optouts.muted,
+  });
+  const sending = selection.recipients.slice(0, budget);
+  const deferred = selection.recipients.slice(budget);
+
+  if (sending.length > 0) {
+    await sendNotificationEmails({ recipients: sending });
+  }
+
+  // Everything considered this round is stamped, apart from what the budget
+  // pushed to the next run.
+  const deferredIds = new Set(deferred.flatMap((recipient) => recipient.notificationIds));
+  const handledIds = pending.map((row) => row.id).filter((id) => !deferredIds.has(id));
+
+  for (let from = 0; from < handledIds.length; from += 200) {
+    const { error: stampError } = await supabase
+      .from("notifications")
+      .update({ emailed_at: new Date().toISOString() })
+      .in("id", handledIds.slice(from, from + 200));
+
+    if (stampError) {
+      console.error("Notification email state could not be recorded:", stampError.message);
+      break;
+    }
+  }
+
+  console.info(
+    `Notification email: ${sending.length} sent, ${deferred.length} held for the next run, ` +
+      `${selection.skipped.noEmail} without an address, ${selection.skipped.muted} opted out, ` +
+      `${selection.skipped.collapsed} folded into another email.`,
+  );
 }
 
 function createNotificationId() {
@@ -434,15 +538,7 @@ async function createOvertimeRemovedNotifications(
     ).map((entry) => getEmployeeContactsByIds(entry.employeeIds, entry.scope)),
   );
 
-  const contacts = new Map<string, EmployeeContact>();
-
-  for (const scopedContacts of contactsByScope) {
-    for (const [employeeId, contact] of scopedContacts) {
-      contacts.set(employeeId, contact);
-    }
-  }
-
-  await queueNotificationEmails(inserted, contacts);
+  scheduleEmailFlush(supabase);
 
   return { ok: true as const, inserted };
 }
@@ -513,35 +609,27 @@ async function createOvertimePostingNotifications(
   const insertedIds = new Set(((data as Array<{ id: string }> | null) ?? []).map((row) => row.id));
   const inserted = rows.filter((row) => insertedIds.has(row.id));
 
-  // The recipients came out of the snapshot, so their addresses are already here.
-  const contacts = new Map<string, EmployeeContact>(
-    recipients.map((employee) => [
-      employee.id,
-      { email: employee.email, name: employee.firstName?.trim() || employee.name },
-    ]),
-  );
-
-  await queueNotificationEmails(inserted, contacts);
+  scheduleEmailFlush(supabase);
 
   return { ok: true as const, notified: rows.length, inserted };
 }
 
 /**
- * Tells eligible workers about generated overtime: the gaps a completed set
- * leaves, which have no posting row for `createManualOvertimePosting` to
- * notify from.
+ * Keeps the bell in step with the overtime the board is generating.
  *
- * Runs after every save that can open a gap. Each open slot is announced once —
- * ids derive from the slot's stable key, and the month's already-sent ids are
- * read first, so an autosave every few seconds writes nothing unless a new slot
- * has opened. A slot that is filled and later reopens is not announced again;
- * the alternative is re-notifying everyone while a leader shuffles people.
+ * Generated postings are gaps a completed set leaves; they have no posting row
+ * to notify from, and they open and close as a schedule is edited. So this
+ * reconciles rather than appends: it works out what overtime each worker could
+ * claim right now and makes their notices say that, announcing a set that has
+ * become short, correcting the count as it moves, and retiring the notice once
+ * nothing in that set is open to them. A notice for overtime somebody else has
+ * already taken is worse than no notice at all.
  *
- * Only the direct post is announced. The board also offers swap routes to
- * people holding a different post, but those depend on who is currently
- * standing where, which changes with every edit.
+ * Retired notices are hidden, not deleted. The row's id is what records that
+ * the announcement was made, so keeping it means a set that goes short again
+ * shows up again without sending a second email.
  */
-async function notifyNewOvertimeShortfalls(
+async function reconcileOvertimeShortfallNotices(
   supabase: SupabaseAdminClient,
   months: string[],
   session: Awaited<ReturnType<typeof getAppSession>> | null,
@@ -553,7 +641,7 @@ async function notifyNewOvertimeShortfalls(
   }
 
   const today = getCurrentDateKey(BUSINESS_TIME_ZONE);
-  let wroteAny = false;
+  let changedAny = false;
 
   for (const month of Array.from(new Set(months.filter(Boolean)))) {
     if (month < today.slice(0, 7)) {
@@ -573,99 +661,142 @@ async function notifyNewOvertimeShortfalls(
       assignmentWindow: "extended",
       completedSetWindow: "extended",
     });
-    const shortfalls = findOvertimeShortfalls(snapshot, today);
-
-    if (shortfalls.length === 0) {
-      continue;
-    }
-
-    const alreadySent = new Set<string>();
-    let sentLookupFailed = false;
-
-    // Paged: a response stops at 1,000 rows, and a truncated list would re-offer
-    // the overflow to the insert on every autosave.
-    for (let from = 0; ; from += 1000) {
-      const { data: sentRows, error: sentError } = await supabase
-        .from("notifications")
-        .select("id")
-        .eq("type", NOTIFICATION_TYPES.overtimePosted)
-        .like("id", `${buildShortfallNotificationIdPrefix(month)}%`)
-        .order("id")
-        .range(from, from + 999);
-
-      if (sentError) {
-        console.error(`Generated overtime for ${month} could not be checked for earlier notices:`, sentError.message);
-        sentLookupFailed = true;
-        break;
-      }
-
-      const page = (sentRows as Array<{ id: string }> | null) ?? [];
-      page.forEach((row) => alreadySent.add(row.id));
-
-      if (page.length < 1000) {
-        break;
-      }
-    }
-
-    if (sentLookupFailed) {
-      continue;
-    }
-
     const employees = snapshot.schedules.flatMap((schedule) => schedule.employees);
-    const rows = shortfalls.flatMap((shortfall) => {
-      const schedule = snapshot.schedules.find((entry) => entry.id === shortfall.scheduleId);
-      const scope = {
-        companyId: schedule?.companyId ?? sessionScope.companyId,
-        siteId: schedule?.siteId ?? sessionScope.siteId,
-        businessAreaId: schedule?.businessAreaId ?? sessionScope.businessAreaId,
-      };
-      const target = { competencyId: shortfall.competencyId, dates: shortfall.dates };
-
-      return employees
-        .filter((employee) => canBeNotifiedAboutPosting(employee, target, snapshot))
-        .map((employee) => ({
-          ...buildOvertimePostingNotification({
-            postingId: buildShortfallPostingId(shortfall.key),
-            employeeId: employee.id,
-            assignmentLabel: shortfall.competencyCode,
-            scheduleName: `Shift ${shortfall.scheduleName}`,
-            dates: shortfall.dates,
-            month,
-          }),
-          ...toDatabaseScope(scope),
-        }))
-        .filter((row) => !alreadySent.has(row.id));
-    });
-
-    if (rows.length === 0) {
-      continue;
-    }
-
-    const { data, error } = await supabase
-      .from("notifications")
-      .upsert(rows, { onConflict: "id", ignoreDuplicates: true })
-      .select("id");
-
-    if (error) {
-      console.error(`Generated overtime notifications for ${month} could not be written:`, error.message);
-      continue;
-    }
-
-    const insertedIds = new Set(((data as Array<{ id: string }> | null) ?? []).map((row) => row.id));
-    const inserted = rows.filter((row) => insertedIds.has(row.id));
-    const contacts = new Map<string, EmployeeContact>(
-      employees.map((employee) => [
-        employee.id,
-        { email: employee.email, name: employee.firstName?.trim() || employee.name },
-      ]),
+    const notices = groupShortfallNotices(
+      findOvertimeShortfalls(snapshot, today).flatMap((shortfall) =>
+        employees
+          .filter((employee) =>
+            canBeNotifiedAboutPosting(
+              employee,
+              { competencyId: shortfall.competencyId, dates: shortfall.dates },
+              snapshot,
+            ),
+          )
+          .map((employee) => ({ employeeId: employee.id, shortfall })),
+      ),
     );
 
-    wroteAny ||= inserted.length > 0;
-    await queueNotificationEmails(inserted, contacts);
+    const existing = await readShortfallNoticeRows(supabase, month);
+
+    if (!existing) {
+      continue;
+    }
+
+    const wanted = notices.map((notice) => {
+      const schedule = snapshot.schedules.find((entry) => entry.id === notice.scheduleId);
+
+      return {
+        ...buildShortfallNotification({
+          noticeKey: notice.key,
+          employeeId: notice.employeeId,
+          scheduleName: `Shift ${notice.scheduleName}`,
+          dates: notice.dates,
+          slotCount: notice.slotCount,
+          month,
+        }),
+        resolved_at: null,
+        ...toDatabaseScope({
+          companyId: schedule?.companyId ?? sessionScope.companyId,
+          siteId: schedule?.siteId ?? sessionScope.siteId,
+          businessAreaId: schedule?.businessAreaId ?? sessionScope.businessAreaId,
+        }),
+      };
+    });
+
+    const wantedIds = new Set(wanted.map((row) => row.id));
+    const changed = wanted.filter((row) => {
+      const current = existing.get(row.id);
+      return !current || current.body !== row.body || current.resolvedAt !== null;
+    });
+    const staleIds = Array.from(existing.entries())
+      .filter(([id, row]) => !wantedIds.has(id) && row.resolvedAt === null)
+      .map(([id]) => id);
+
+    if (changed.length > 0) {
+      const { error } = await supabase.from("notifications").upsert(changed, { onConflict: "id" });
+
+      if (error) {
+        console.error(`Generated overtime notices for ${month} could not be written:`, error.message);
+        continue;
+      }
+
+      changedAny = true;
+    }
+
+    for (let from = 0; from < staleIds.length; from += 200) {
+      const { error } = await supabase
+        .from("notifications")
+        .update({ resolved_at: new Date().toISOString() })
+        .in("id", staleIds.slice(from, from + 200));
+
+      if (error) {
+        console.error(`Filled overtime notices for ${month} could not be retired:`, error.message);
+        break;
+      }
+
+      changedAny = true;
+    }
   }
 
-  if (wroteAny) {
+  if (changedAny) {
     revalidatePath("/notifications");
+  }
+}
+
+/**
+ * Every generated-overtime notice already written for the month.
+ *
+ * Returns null when the read fails, so the caller leaves the month alone rather
+ * than treating "could not check" as "nothing sent" and announcing it all over.
+ */
+async function readShortfallNoticeRows(supabase: SupabaseAdminClient, month: string) {
+  const rows = new Map<string, { body: string; resolvedAt: string | null }>();
+
+  // Paged: a response stops at 1,000 rows, and a truncated list would re-announce
+  // the overflow on every autosave.
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("id, body, resolved_at")
+      .eq("type", NOTIFICATION_TYPES.overtimePosted)
+      .like("id", `${buildShortfallNotificationIdPrefix(month)}%`)
+      .order("id")
+      .range(from, from + 999);
+
+    if (error) {
+      console.error(`Generated overtime for ${month} could not be checked for earlier notices:`, error.message);
+      return null;
+    }
+
+    const page = (data as Array<{ id: string; body: string; resolved_at: string | null }> | null) ?? [];
+
+    for (const row of page) {
+      rows.set(row.id, { body: row.body, resolvedAt: row.resolved_at });
+    }
+
+    if (page.length < 1000) {
+      return rows;
+    }
+  }
+}
+
+
+/**
+ * Retires the "overtime available" notices for a posting that no longer exists.
+ *
+ * Only the claimants are told the overtime went away; everyone else who was
+ * offered it would otherwise keep a notice pointing at a posting that is gone.
+ */
+async function resolveManualPostingNotices(supabase: SupabaseAdminClient, postingId: string) {
+  const { error } = await supabase
+    .from("notifications")
+    .update({ resolved_at: new Date().toISOString() })
+    .eq("type", NOTIFICATION_TYPES.overtimePosted)
+    .like("id", `${buildOvertimePostingNotificationId(postingId, "")}%`)
+    .is("resolved_at", null);
+
+  if (error) {
+    console.error(`Notices for overtime posting ${postingId} could not be retired:`, error.message);
   }
 }
 
@@ -676,7 +807,7 @@ function scheduleShortfallNotifications(
   session: Awaited<ReturnType<typeof getAppSession>> | null,
 ) {
   const run = () =>
-    notifyNewOvertimeShortfalls(supabase, months, session).catch((error: unknown) => {
+    reconcileOvertimeShortfallNotices(supabase, months, session).catch((error: unknown) => {
       console.error("Generated overtime notifications failed:", error);
     });
 
@@ -1229,27 +1360,69 @@ async function requireActionRole(allowedRoles: AppRole[]) {
   return session;
 }
 
-export async function deleteNotification(formData: FormData) {
+/**
+ * Hides one notification for good.
+ *
+ * Dismissing marks the row rather than deleting it: the id is what records that
+ * the announcement was made, and a deleted row would be written again the next
+ * time the schedule was saved. Constrained to the caller's own recipient id,
+ * like every other notification mutation.
+ */
+export async function dismissNotification(notificationId: string) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
-  const notificationId = String(formData.get("notificationId") ?? "");
 
   if (!session?.employeeId || isBlank(notificationId)) {
-    return;
+    return { ok: false, message: "That notification could not be cleared." };
   }
 
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
-    return;
+    return { ok: false, message: "Supabase is not configured yet. Notifications are unavailable." };
   }
 
-  await supabase
+  const { error } = await supabase
     .from("notifications")
-    .delete()
+    .update({ dismissed_at: new Date().toISOString() })
     .eq("id", notificationId)
     .eq("recipient_employee_id", session.employeeId);
 
+  if (error) {
+    return { ok: false, message: `Could not clear that notification: ${error.message}` };
+  }
+
   revalidatePath("/notifications");
+
+  return { ok: true, message: "Notification cleared." };
+}
+
+/** Hides everything the viewer can currently see. */
+export async function dismissAllNotifications() {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session?.employeeId) {
+    return { ok: false, message: "Sign in to clear your notifications." };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return { ok: false, message: "Supabase is not configured yet. Notifications are unavailable." };
+  }
+
+  const { error } = await supabase
+    .from("notifications")
+    .update({ dismissed_at: new Date().toISOString() })
+    .eq("recipient_employee_id", session.employeeId)
+    .is("dismissed_at", null);
+
+  if (error) {
+    return { ok: false, message: `Could not clear your notifications: ${error.message}` };
+  }
+
+  revalidatePath("/notifications");
+
+  return { ok: true, message: "Notifications cleared." };
 }
 
 /**
@@ -3055,6 +3228,8 @@ export async function deleteManualOvertimePosting(input: DeleteManualOvertimePos
       notificationWarning = ` Notification was not sent: ${notificationResult.message}`;
     }
   }
+
+  await resolveManualPostingNotices(supabase, input.postingId);
 
   const { error } = await supabase.from("manual_overtime_postings").delete().eq("id", input.postingId);
 

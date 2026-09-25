@@ -187,9 +187,16 @@ eligibility failure and plays no part here.
 The notification id is derived from the posting and the recipient, so the text
 primary key is the idempotency key: a retried enqueue collides with the row it
 already wrote. Delivery never fails the posting; if the write fails the posting
-stands, the action says so, and the failure is logged. There is no email for
-these — recording delivery status would need a column, and nothing claims an
-email was sent.
+stands, the action says so, and the failure is logged.
+
+Eligible workers are emailed as well as notified in the app. `emailed_at` turns
+the notifications table into its own outbox: a row still open, still unread and
+still unsent is an email owed, so a burst larger than the day's allowance sends
+what it can and the next save carries the rest rather than dropping it. The
+column records that the email was decided, not delivered — rows skipped for an
+opt-out or a missing address are stamped too, or they would be reconsidered
+forever. Sending is never on the request path, never fails the write that
+caused it, and honours the per-type opt-outs on `/notifications/settings`.
 
 **Generated overtime notifies too.** The board's generated postings — the gaps a
 completed set leaves — have no posting row, so they are announced from the
@@ -200,12 +207,30 @@ clears assignments. Both read the gaps from `findOvertimeShortfalls`
 (`lib/overtime-shortfalls.ts`), the same definition the board renders from, so
 what is announced is exactly what is shown.
 
-Each open slot is announced once. Its id comes from where it sits in the
-rotation — schedule, post, the segment's first day, and how deep the slot is —
-not from the dates it covers, which move as people are shuffled. A slot that
-fills and later reopens is not announced again; announcing on every reopen would
-notify everyone each time a leader moves someone. Only dates from today onward
-count, and only the direct post is announced, not the board's swap routes.
+These notices are reconciled, not appended. A generated posting opens and
+closes as a schedule is edited, so `reconcileOvertimeShortfallNotices` works out
+what each worker could claim right now and makes their notices say that:
+announcing a set that has gone short, correcting the count as it moves, and
+retiring the notice once nothing in that set is open to them. A notice for
+overtime somebody else has already taken is worse than no notice at all.
+
+One notice per person per set, not per open slot. A set short four posts is one
+piece of news, and the set is also the unit that survives editing — its dates
+come from the rotation, while individual slots move as people are shuffled
+between posts. Only dates from today onward count, and only the direct post is
+announced, not the board's swap routes.
+
+Notices are hidden rather than deleted, through two columns that must stay
+distinct. `resolved_at` is the system's: the row's id is what records that the
+announcement was made, so keeping it means a set that goes short again is shown
+again without sending a second email — email goes out only on a notice's first
+appearance. `dismissed_at` is the reader's and outranks it, so something they
+cleared stays cleared even if the overtime reopens. Deleting the row instead
+would announce the same overtime again on the next save.
+
+Manual postings are retired the same way: deleting a posting resolves the
+"overtime available" notices of everyone who was offered it, since only the
+claimants are told separately that it went away.
 
 **Overtime worked away from the home crew is projected at read time.** A claim
 stores one row, on the schedule that needed the coverage, so the claimant's own

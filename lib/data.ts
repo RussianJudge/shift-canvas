@@ -2723,23 +2723,39 @@ export async function getNotificationsForViewer(
   }
 
   const { unreadOnly = false, limit = 20 } = options;
-  let query = applySessionScope(
-    supabase
-      .from("notifications")
-      .select(
-        "id, recipient_employee_id, type, title, body, href, read_at, created_at, company_id, site_id, business_area_id",
-      )
-      .eq("recipient_employee_id", session.employeeId)
-      .order("created_at", { ascending: false })
-      .limit(limit),
-    session,
-  );
 
-  if (unreadOnly) {
-    query = query.is("read_at", null);
+  const run = (withLifecycle: boolean) => {
+    let query = applySessionScope(
+      supabase
+        .from("notifications")
+        .select(
+          "id, recipient_employee_id, type, title, body, href, read_at, created_at, company_id, site_id, business_area_id",
+        )
+        .eq("recipient_employee_id", session.employeeId)
+        .order("created_at", { ascending: false })
+        .limit(limit),
+      session,
+    );
+
+    if (withLifecycle) {
+      query = query.is("dismissed_at", null).is("resolved_at", null);
+    }
+
+    if (unreadOnly) {
+      query = query.is("read_at", null);
+    }
+
+    return query;
+  };
+
+  let { data, error } = await run(true);
+
+  // Before the lifecycle migration lands there is nothing to hide, and an
+  // empty bell would read as "no notifications" rather than as a missing
+  // column.
+  if (error?.code === "42703") {
+    ({ data, error } = await run(false));
   }
-
-  const { data, error } = await query;
 
   if (error) {
     console.error("Notifications failed to load:", error.message);

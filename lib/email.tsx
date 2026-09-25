@@ -41,6 +41,29 @@ function getResendConfig() {
 }
 
 /**
+ * While testing, restricts notification email to named addresses.
+ *
+ * Set NOTIFICATION_EMAIL_ALLOWLIST to a comma-separated list and nothing
+ * reaches anyone else; leave it unset and email goes to whoever is eligible.
+ * The recipients are real people on a live schedule, so the safe state is the
+ * one you can switch on before the first send rather than after it.
+ */
+function getNotificationEmailAllowlist() {
+  const raw = process.env.NOTIFICATION_EMAIL_ALLOWLIST?.trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  return new Set(
+    raw
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+/**
  * Builds a direct account-creation link for the invite email.
  *
  * We deep-link into the dedicated sign-up page so invite links open directly
@@ -142,15 +165,29 @@ export async function sendNotificationEmails(input: {
   const { resend, from, replyTo } = config;
   const appBaseUrl = getPublicAppUrl(input.baseUrl);
   const settingsUrl = `${appBaseUrl}/notifications/settings`;
+  const allowlist = getNotificationEmailAllowlist();
+  const recipients = allowlist
+    ? input.recipients.filter((recipient) => allowlist.has(recipient.email))
+    : input.recipients;
+
+  if (allowlist) {
+    console.info(
+      `Notification email allowlist is on: ${recipients.length} of ${input.recipients.length} recipients will be emailed.`,
+    );
+  }
+
   let sent = 0;
   let failed = 0;
 
-  for (const chunk of chunkForBatchSend(input.recipients)) {
+  for (const chunk of chunkForBatchSend(recipients)) {
     const payload = chunk.map((recipient) => ({
       from,
       to: recipient.email,
       replyTo,
       subject: recipient.title,
+      // Mail clients surface this as their own unsubscribe control, and its
+      // absence is itself a spam signal on bulk mail.
+      headers: { "List-Unsubscribe": `<${settingsUrl}>` },
       react: (
         <NotificationEmail
           recipientName={recipient.name}

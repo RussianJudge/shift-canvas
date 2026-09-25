@@ -123,6 +123,8 @@ test("several same-type notifications for one person become one email", () => {
   assert.equal(result.recipients[0].notificationId, "n1");
   assert.equal(result.recipients[0].additionalCount, 2);
   assert.equal(result.skipped.collapsed, 2);
+  // All three rows are covered by the one email, so all three are accounted for.
+  assert.deepEqual(result.recipients[0].notificationIds, ["n1", "n2", "n3"]);
 });
 
 test("a blank name falls back rather than greeting nobody", () => {

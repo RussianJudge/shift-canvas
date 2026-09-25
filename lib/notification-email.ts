@@ -21,6 +21,8 @@ export type NotificationEmailCandidate = {
 
 export type NotificationEmailRecipient = {
   notificationId: string;
+  /** Every notification this one email covers, including the folded-in extras. */
+  notificationIds: string[];
   employeeId: string;
   type: NotificationType;
   email: string;
@@ -75,6 +77,7 @@ export function selectEmailRecipients(input: {
 
     if (existing) {
       existing.additionalCount += 1;
+      existing.notificationIds.push(notification.id);
       skipped.collapsed += 1;
       continue;
     }
@@ -94,6 +97,7 @@ export function selectEmailRecipients(input: {
 
     recipients.set(groupKey, {
       notificationId: notification.id,
+      notificationIds: [notification.id],
       employeeId: notification.employeeId,
       type: notification.type,
       email,

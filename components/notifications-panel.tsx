@@ -4,8 +4,14 @@ import { useMemo, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { markAllNotificationsRead, markNotificationReadById } from "@/app/actions";
+import {
+  dismissAllNotifications,
+  dismissNotification,
+  markAllNotificationsRead,
+  markNotificationReadById,
+} from "@/app/actions";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   countUnread,
@@ -38,14 +44,23 @@ export function NotificationsPanel({
   const [filter, setFilter] = useState<Filter>("all");
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState("");
-  const [optimistic, markOptimistic] = useOptimistic(
+  const [confirmingClearAll, setConfirmingClearAll] = useState(false);
+  const [optimistic, applyOptimistic] = useOptimistic(
     notifications,
-    (current: AppNotification[], readIds: string[] | "all") =>
-      current.map((notification) =>
-        notification.readAt || (readIds !== "all" && !readIds.includes(notification.id))
+    (current: AppNotification[], action: { type: "read" | "dismiss"; ids: string[] | "all" }) => {
+      const matches = (notification: AppNotification) =>
+        action.ids === "all" || action.ids.includes(notification.id);
+
+      if (action.type === "dismiss") {
+        return current.filter((notification) => !matches(notification));
+      }
+
+      return current.map((notification) =>
+        notification.readAt || !matches(notification)
           ? notification
           : { ...notification, readAt: new Date().toISOString() },
-      ),
+      );
+    },
   );
 
   const unreadCount = countUnread(optimistic);
@@ -61,7 +76,7 @@ export function NotificationsPanel({
   function handleMarkAll() {
     startTransition(async () => {
       setErrorMessage("");
-      markOptimistic("all");
+      applyOptimistic({ type: "read", ids: "all" });
 
       const result = await markAllNotificationsRead();
 
@@ -80,9 +95,40 @@ export function NotificationsPanel({
 
     startTransition(async () => {
       setErrorMessage("");
-      markOptimistic([notification.id]);
+      applyOptimistic({ type: "read", ids: [notification.id] });
 
       const result = await markNotificationReadById(notification.id);
+
+      if (!result.ok) {
+        setErrorMessage(result.message);
+      }
+
+      router.refresh();
+    });
+  }
+
+  function handleDismiss(notification: AppNotification) {
+    startTransition(async () => {
+      setErrorMessage("");
+      applyOptimistic({ type: "dismiss", ids: [notification.id] });
+
+      const result = await dismissNotification(notification.id);
+
+      if (!result.ok) {
+        setErrorMessage(result.message);
+      }
+
+      router.refresh();
+    });
+  }
+
+  function handleClearAll() {
+    setConfirmingClearAll(false);
+    startTransition(async () => {
+      setErrorMessage("");
+      applyOptimistic({ type: "dismiss", ids: "all" });
+
+      const result = await dismissAllNotifications();
 
       if (!result.ok) {
         setErrorMessage(result.message);
@@ -122,6 +168,13 @@ export function NotificationsPanel({
           >
             Mark all as read
           </Button>
+          <Button
+            variant="secondary"
+            onClick={() => setConfirmingClearAll(true)}
+            disabled={optimistic.length === 0 || isPending}
+          >
+            Clear all
+          </Button>
         </div>
       </header>
 
@@ -154,6 +207,7 @@ export function NotificationsPanel({
                     notification={notification}
                     today={businessToday}
                     onOpen={() => handleMarkOne(notification)}
+                    onDismiss={() => handleDismiss(notification)}
                   />
                 </li>
               ))}
@@ -161,6 +215,27 @@ export function NotificationsPanel({
           </section>
         ))
       )}
+
+      {confirmingClearAll ? (
+        <Modal
+          open
+          onClose={() => setConfirmingClearAll(false)}
+          eyebrow="Notifications"
+          title="Clear all notifications?"
+          description={`This clears ${optimistic.length} notification${optimistic.length === 1 ? "" : "s"} from your list. You cannot bring them back, and clearing does not change your schedule or any overtime you have claimed.`}
+          size="sm"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setConfirmingClearAll(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handleClearAll}>
+                Clear all
+              </Button>
+            </>
+          }
+        />
+      ) : null}
     </section>
   );
 }
@@ -169,10 +244,12 @@ function NotificationRow({
   notification,
   today,
   onOpen,
+  onDismiss,
 }: {
   notification: AppNotification;
   today: string;
   onOpen: () => void;
+  onDismiss: () => void;
 }) {
   const isUnread = !notification.readAt;
   const age = formatNotificationAge(notification.createdAt, `${today}T23:59:59.000Z`);
@@ -192,26 +269,40 @@ function NotificationRow({
     </>
   );
 
-  if (notification.href) {
-    return (
-      <Link
-        href={notification.href}
-        className={`notifications__row ${isUnread ? "notifications__row--unread" : ""}`}
-        onClick={onOpen}
-      >
-        {body}
-      </Link>
-    );
-  }
-
+  // The clear control sits beside the row rather than inside it: the row is
+  // itself a link or a button, and one cannot nest inside the other.
   return (
-    <button
-      type="button"
-      className={`notifications__row ${isUnread ? "notifications__row--unread" : ""}`}
-      onClick={onOpen}
-      disabled={!isUnread}
-    >
-      {body}
-    </button>
+    <div className="notifications__row-wrap">
+      {notification.href ? (
+        <Link
+          href={notification.href}
+          className={`notifications__row ${isUnread ? "notifications__row--unread" : ""}`}
+          onClick={onOpen}
+        >
+          {body}
+        </Link>
+      ) : (
+        <button
+          type="button"
+          className={`notifications__row ${isUnread ? "notifications__row--unread" : ""}`}
+          onClick={onOpen}
+          disabled={!isUnread}
+        >
+          {body}
+        </button>
+      )}
+
+      <button
+        type="button"
+        className="notifications__dismiss"
+        onClick={onDismiss}
+        aria-label={`Clear notification: ${notification.title}`}
+        title="Clear"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
   );
 }

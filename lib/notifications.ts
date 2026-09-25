@@ -52,17 +52,43 @@ export function buildOvertimeRemovedNotificationId(claimId: string) {
 }
 
 /**
- * Generated overtime has no posting row, so the open slot's own key stands in
- * for a posting id. The key leads with the month, which lets the server fetch
- * one month's worth of already-sent ids with a prefix match instead of
- * re-upserting every open slot's recipients on every autosave.
+ * Generated overtime has no posting row, so the set's own key stands in for a
+ * posting id. The key leads with the month, which lets the server fetch one
+ * month's notices with a prefix match and reconcile them against what is
+ * currently open.
  */
-export function buildShortfallPostingId(shortfallKey: string) {
-  return `auto:${shortfallKey}`;
+export function buildShortfallPostingId(noticeKey: string) {
+  return `auto:${noticeKey}`;
 }
 
 export function buildShortfallNotificationIdPrefix(month: string) {
   return `notification-${NOTIFICATION_TYPES.overtimePosted}-${buildShortfallPostingId(month)}:`;
+}
+
+/**
+ * What a set's open overtime reads as in the bell.
+ *
+ * Counts and dates rather than a list of posts: the point is whether it is
+ * worth opening the board, and the board is where the detail belongs.
+ */
+export function buildShortfallNotification(input: {
+  noticeKey: string;
+  employeeId: string;
+  scheduleName: string;
+  dates: string[];
+  slotCount: number;
+  month: string;
+}) {
+  const shiftLabel = input.slotCount === 1 ? "shift" : "shifts";
+
+  return {
+    id: buildOvertimePostingNotificationId(buildShortfallPostingId(input.noticeKey), input.employeeId),
+    recipient_employee_id: input.employeeId,
+    type: NOTIFICATION_TYPES.overtimePosted,
+    title: `Overtime available: ${input.scheduleName}`,
+    body: `${input.slotCount} open ${shiftLabel} on ${describeDateRange(input.dates)} you are eligible to claim.`,
+    href: `/overtime?month=${input.month}`,
+  };
 }
 
 export type OvertimePostingNotificationInput = {

@@ -744,7 +744,10 @@ export async function createAccountInvite(input: {
       baseUrl: publicAppUrl,
     });
     message = `Invite created and emailed to ${normalizedEmail}.`;
-  } catch {
+  } catch (error) {
+    // Logged rather than swallowed: a missing renderer made every one of these
+    // fail for months, and the fallback copy reads like a deliberate choice.
+    console.error(`Invite email to ${normalizedEmail} could not be sent:`, error);
     message = `Invite created for ${displayName}. Copy the link below to share it manually.`;
   }
 

@@ -96,6 +96,8 @@ export function countScheduleAssignmentsForTarget({
 
 export type SegmentCoverage = {
   schedule: Schedule;
+  setStart: string;
+  setEnd: string;
   shiftKind: WorkingShiftKind;
   competency: Competency;
   dates: string[];
@@ -153,6 +155,8 @@ export function buildCompletedSetCoverage(snapshot: SchedulerSnapshot): SegmentC
 
           coverage.push({
             schedule,
+            setStart: workedSet.dates[0],
+            setEnd: workedSet.dates[workedSet.dates.length - 1],
             shiftKind: segment.shiftKind,
             competency,
             dates: segment.dates,
@@ -182,6 +186,8 @@ export type OvertimeShortfall = {
   key: string;
   scheduleId: string;
   scheduleName: string;
+  setStart: string;
+  setEnd: string;
   competencyId: string;
   competencyCode: string;
   shiftKind: WorkingShiftKind;
@@ -224,6 +230,8 @@ export function findOvertimeShortfalls(snapshot: SchedulerSnapshot, today: strin
           }),
           scheduleId: coverage.schedule.id,
           scheduleName: coverage.schedule.name,
+          setStart: coverage.setStart,
+          setEnd: coverage.setEnd,
           competencyId: coverage.competency.id,
           competencyCode: coverage.competency.code,
           shiftKind: coverage.shiftKind,
@@ -233,4 +241,69 @@ export function findOvertimeShortfalls(snapshot: SchedulerSnapshot, today: strin
       ];
     }),
   );
+}
+
+export type ShortfallNotice = {
+  key: string;
+  employeeId: string;
+  scheduleId: string;
+  scheduleName: string;
+  month: string;
+  dates: string[];
+  slotCount: number;
+  competencyCodes: string[];
+};
+
+/**
+ * One notice per person per set, rather than one per open slot.
+ *
+ * A set short four posts is one piece of news — "there is overtime on Shift 2
+ * that week" — and a worker qualified for several of them would otherwise get a
+ * separate notice for each. The set is also the unit that survives editing: its
+ * dates come from the rotation, while the individual slots move as people are
+ * shuffled between posts.
+ */
+export function groupShortfallNotices(
+  entries: Array<{ employeeId: string; shortfall: OvertimeShortfall }>,
+): ShortfallNotice[] {
+  const notices = new Map<string, ShortfallNotice & { dateSet: Set<string>; codeSet: Set<string> }>();
+
+  for (const { employeeId, shortfall } of entries) {
+    const key = buildShortfallNoticeKey({
+      scheduleId: shortfall.scheduleId,
+      setStart: shortfall.setStart,
+    });
+    const existing = notices.get(`${key}:${employeeId}`);
+
+    if (existing) {
+      existing.slotCount += 1;
+      shortfall.dates.forEach((date) => existing.dateSet.add(date));
+      existing.codeSet.add(shortfall.competencyCode);
+      continue;
+    }
+
+    notices.set(`${key}:${employeeId}`, {
+      key,
+      employeeId,
+      scheduleId: shortfall.scheduleId,
+      scheduleName: shortfall.scheduleName,
+      month: shortfall.setStart.slice(0, 7),
+      dates: [],
+      slotCount: 1,
+      competencyCodes: [],
+      dateSet: new Set(shortfall.dates),
+      codeSet: new Set([shortfall.competencyCode]),
+    });
+  }
+
+  return Array.from(notices.values()).map(({ dateSet, codeSet, ...notice }) => ({
+    ...notice,
+    dates: Array.from(dateSet).sort(),
+    competencyCodes: Array.from(codeSet).sort(),
+  }));
+}
+
+/** Identifies a set's notice: the rotation places it, so editing cannot move it. */
+export function buildShortfallNoticeKey(input: { scheduleId: string; setStart: string }) {
+  return `${input.setStart.slice(0, 7)}:${input.scheduleId}:${input.setStart}`;
 }
