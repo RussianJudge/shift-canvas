@@ -290,9 +290,13 @@ export async function clearAppSession() {
   cookieStore.delete(SESSION_COOKIE);
 }
 
-/** Chooses the first page a role should see after authentication. */
-export function getSessionHomePath(session: AppSession) {
-  return session.role === "worker" ? "/profile" : "/schedule";
+/**
+ * Everyone lands on the schedule, workers included — it is what they open the
+ * app to see. `/schedule` admits every role, so this is also safe as the
+ * redirect for a page a role cannot reach.
+ */
+export function getSessionHomePath() {
+  return "/schedule";
 }
 
 /** Guards a server route and redirects users who are missing or under-scoped. */
@@ -304,7 +308,7 @@ export async function requireAppSession(allowedRoles?: AppRole[]) {
   }
 
   if (allowedRoles && !allowedRoles.includes(session.role)) {
-    redirect(getSessionHomePath(session));
+    redirect(getSessionHomePath());
   }
 
   return session;

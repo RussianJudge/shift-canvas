@@ -13,7 +13,7 @@ export default async function SignInPage({
   const session = await getAppSession();
 
   if (session) {
-    redirect(getSessionHomePath(session));
+    redirect(getSessionHomePath());
   }
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;

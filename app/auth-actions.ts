@@ -414,7 +414,7 @@ export async function signIn(formData: FormData) {
     );
   }
 
-  redirect(getSessionHomePath(sessionResult.session));
+  redirect(getSessionHomePath());
 }
 
 /**
@@ -540,7 +540,7 @@ export async function signUp(formData: FormData) {
     );
   }
 
-  redirect(getSessionHomePath(sessionResult.session));
+  redirect(getSessionHomePath());
 }
 
 export async function createAccountInvite(input: {
