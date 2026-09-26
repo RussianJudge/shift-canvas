@@ -38,12 +38,12 @@
   }
 }
 
-.overtime-toolbar__month {
+/* Its own row above the filters, rather than the first item inside them: the
+   date frames the whole page, it does not narrow what the filters match. */
+.overtime-month-selector {
   display: flex;
-  align-items: flex-end;
   justify-content: flex-start;
-  flex: 0 0 auto;
-  order: -1;
+  padding-top: var(--space-3);
 }
 
 .overtime-toolbar__filters {
@@ -484,9 +484,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .overtime-toolbar__month {
-    justify-content: flex-start;
-  }
 }
 
 /* ---- Claimed workers ----------------------------------------

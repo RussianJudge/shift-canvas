@@ -2067,19 +2067,19 @@ export function OvertimePanel({
         ) : null}
       </div>
 
-      <div className="overtime-toolbar">
-        {availableMonths.length > 0 ? (
-          <div className="overtime-toolbar__month">
-            <AppDateSelector
-              mode="month"
-              value={snapshot.month}
-              label="Overtime month"
-              availableMonths={availableMonths}
-              onChange={(nextMonth) => router.push(`/overtime?month=${nextMonth}`)}
-            />
-          </div>
-        ) : null}
+      {availableMonths.length > 0 ? (
+        <div className="overtime-month-selector">
+          <AppDateSelector
+            mode="month"
+            value={snapshot.month}
+            label="Overtime month"
+            availableMonths={availableMonths}
+            onChange={(nextMonth) => router.push(`/overtime?month=${nextMonth}`)}
+          />
+        </div>
+      ) : null}
 
+      <div className="overtime-toolbar">
         <div className="overtime-toolbar__filters">
         {viewer.role === "worker" ? (
           <div className="overtime-static-field">

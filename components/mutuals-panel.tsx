@@ -888,7 +888,7 @@ export function MutualsPanel({
           <span className="mutuals-section__count">{openPostings.length}</span>
         </div>
 
-        <div className="mutuals-list">
+        <div className="mutuals-grid">
           {openPostings.length > 0 ? (
             openPostings.map((posting) => {
               const canCancelPosting =
@@ -1095,10 +1095,11 @@ export function MutualsPanel({
                   </div>
 
                   {canApproveOwner || canApproveApplicant ? (
-                    <div className="mutual-card__actions">
-                      {canApproveOwner ? (
+                    <div className="mutual-card__actions mutual-card__actions--approval">
+                      {acceptedApplication ? (
                         <Button
                           variant="primary"
+                          className="mutual-approve-button mutual-approve-button--owner"
                           onClick={() =>
                             runAction(() =>
                               approveMutualPosting({
@@ -1107,14 +1108,17 @@ export function MutualsPanel({
                               }),
                             )
                           }
-                          disabled={isSubmitting}
+                          disabled={isSubmitting || !canApproveOwner}
                         >
-                          Approve {posting.ownerScheduleName}
+                          {posting.ownerLeaderApprovedAt
+                            ? `${posting.ownerScheduleName} approved`
+                            : `Approve ${posting.ownerScheduleName}`}
                         </Button>
                       ) : null}
-                      {canApproveApplicant && acceptedApplication ? (
+                      {acceptedApplication ? (
                         <Button
                           variant="primary"
+                          className="mutual-approve-button mutual-approve-button--applicant"
                           onClick={() =>
                             runAction(() =>
                               approveMutualPosting({
@@ -1123,23 +1127,25 @@ export function MutualsPanel({
                               }),
                             )
                           }
-                          disabled={isSubmitting}
+                          disabled={isSubmitting || !canApproveApplicant}
                         >
-                          Approve {acceptedApplication.applicantScheduleName}
+                          {posting.applicantLeaderApprovedAt
+                            ? `${acceptedApplication.applicantScheduleName} approved`
+                            : `Approve ${acceptedApplication.applicantScheduleName}`}
                         </Button>
                       ) : null}
                       <Button
-                        variant="subtle"
+                        variant="secondary"
                         className="mutual-reject-button"
                         onClick={() =>
                           confirmAction(
-                            "Reject this mutual and cancel the swap? This cannot be undone.",
+                            "Cancel this mutual and undo the swap? This cannot be undone.",
                             () => rejectMutualPosting({ postingId: posting.id }),
                           )
                         }
                         disabled={isSubmitting}
                       >
-                        Reject
+                        Cancel mutual
                       </Button>
                     </div>
                   ) : null}

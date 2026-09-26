@@ -37,9 +37,11 @@
   right: auto;
 }
 
+/* Sits at the right of the row, beside the actions, rather than stretching
+   across the middle. `margin-left: auto` carries the actions right with it. */
 .mutuals-toolbar__search {
-  flex: 1 1 240px;
-  max-width: 360px;
+  flex: 0 1 360px;
+  margin-left: auto;
   min-width: 0;
 }
 
@@ -99,11 +101,6 @@
   color: var(--color-text-secondary);
   font-size: var(--control-font-sm);
   font-weight: 600;
-}
-
-.mutuals-list {
-  display: grid;
-  gap: var(--space-3);
 }
 
 .mutuals-grid {
@@ -166,23 +163,26 @@
 
 /* ---- Open mutual row ---------------------------------------- */
 
+/* Stacked, because these sit beside each other in the same auto-fill grid as
+   the approval cards rather than running the width of the page. */
 .mutual-open-card {
   display: grid;
-  grid-template-columns: minmax(200px, 0.9fr) minmax(0, 2fr) minmax(180px, auto);
-  gap: var(--space-4);
-  align-items: start;
+  gap: var(--space-3);
+  align-content: start;
   padding: var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-surface);
 }
 
+/* Separated above and below now that it is a band across the card rather
+   than the middle of three columns. */
 .mutual-open-card__detail {
   display: grid;
   gap: var(--space-3);
   min-width: 0;
-  padding-inline: var(--space-4);
-  border-inline: 1px solid var(--color-border);
+  padding-block: var(--space-3);
+  border-block: 1px solid var(--color-border);
 }
 
 .mutual-detail-block {
@@ -222,6 +222,9 @@
 /* ---- Exchange card ------------------------------------------ */
 
 .mutual-exchange-card {
+  /* Shared so the approval row can reuse the exchange's columns and the two
+     stay aligned if the glyph is ever resized. */
+  --mutual-swap-size: 1.75rem;
   display: grid;
   gap: var(--space-3);
   align-content: start;
@@ -260,7 +263,7 @@
 /* Two sides of the swap, with the direction glyph between them. */
 .mutual-exchange {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) var(--mutual-swap-size, 1.75rem) minmax(0, 1fr);
   gap: var(--space-3);
   align-items: start;
   padding-top: var(--space-3);
@@ -278,8 +281,8 @@
   align-items: center;
   justify-content: center;
   align-self: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: var(--mutual-swap-size);
+  height: var(--mutual-swap-size);
   border-radius: var(--radius-round);
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border);
@@ -296,19 +299,40 @@
   stroke-linejoin: round;
 }
 
+/* Mirrors the exchange's columns above, so each approval sits directly under
+   the crew it belongs to and fills the same half. */
 .mutual-approval-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--mutual-swap-size, 1.75rem) minmax(0, 1fr);
+  gap: var(--space-3);
+  /* Stretch, so when one approval wraps to two lines the other grows to match
+     rather than leaving a short box beside a tall one. */
+  align-items: stretch;
+}
+
+/* Skips the glyph column so it lands under the applicant's side. */
+.mutual-approval-row > :nth-child(2) {
+  grid-column: 3;
+}
+
+/* These badges carry a sentence, not a one-word status, and they now have a
+   half-card to fill — so they wrap rather than run past their column. The
+   base `.ui-badge` keeps its nowrap for the short pills everywhere else. */
+.mutual-approval-row > .ui-badge {
+  align-items: center;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 /* ---- Date chips ---------------------------------------------
    Tinted by the shift the date belongs to, reusing the grid's own
    day/night hues. This maps existing data; it does not add a state. */
 
+/* One chip per line, each filling its side of the exchange. */
 .mutual-date-summary {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--space-1);
 }
 
@@ -418,19 +442,31 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+  justify-content: center;
 }
 
-/* Reject sits beside two Approve buttons, so it reads as destructive
-   without competing with them for weight. */
-.mutual-reject-button.ui-button {
-  background: transparent;
-  border-color: transparent;
-  color: var(--color-danger);
+/* Same columns as the exchange and the approvals above, so each Approve sits
+   under the crew it approves. Placed by side rather than by order: either
+   button can be absent once that side has already approved. */
+.mutual-card__actions--approval {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--mutual-swap-size, 1.75rem) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
 }
 
-.mutual-reject-button.ui-button:hover:not(:disabled) {
-  background: var(--color-danger-bg);
-  color: var(--color-danger);
+.mutual-approve-button--owner {
+  grid-column: 1;
+}
+
+.mutual-approve-button--applicant {
+  grid-column: 3;
+}
+
+/* Belongs to neither side, so it takes its own row, centred across both. */
+.mutual-card__actions--approval > .mutual-reject-button {
+  grid-column: 1 / -1;
+  justify-self: center;
 }
 
 /* ---- Responsive ---------------------------------------------
@@ -442,12 +478,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .mutual-open-card {
-    grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.6fr);
-  }
-
   .mutual-open-card__actions {
-    grid-column: span 2;
     display: flex;
     flex-wrap: wrap;
   }
@@ -458,19 +489,10 @@
 }
 
 @media (max-width: 720px) {
-  .mutual-open-card {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .mutual-open-card__detail {
-    padding-inline: 0;
-    border-inline: 0;
-    padding-block: var(--space-3);
-    border-block: 1px solid var(--color-border);
-  }
-
-  .mutual-open-card__actions {
-    grid-column: 1 / -1;
+  /* Stacked, so there is no row left to push it to the end of. */
+  .mutuals-toolbar__search {
+    flex: 1 1 100%;
+    margin-left: 0;
   }
 
   .mutual-exchange {
