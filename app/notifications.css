@@ -234,6 +234,49 @@
   color: var(--color-text-secondary);
 }
 
+.notification-settings__section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--color-text);
+}
+
+.notification-settings__address {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.notification-settings__current,
+.notification-settings__pending,
+.notification-settings__message {
+  margin: 0;
+  font-size: var(--control-font-sm);
+  color: var(--color-text-secondary);
+}
+
+.notification-settings__pending {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-field);
+  color: var(--color-warning-text);
+}
+
+.notification-settings__address-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.notification-settings__address-form > :first-child {
+  flex: 1 1 18rem;
+}
+
 .notification-settings__list {
   display: flex;
   flex-direction: column;

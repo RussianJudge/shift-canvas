@@ -6,6 +6,10 @@ import {
   type EmployeeNameParts,
 } from "@/lib/employee-names";
 import { buildOptoutKey, type EmployeeContact } from "@/lib/notification-email";
+import {
+  resolveNotificationAddress,
+  type NotificationEmailOverride,
+} from "@/lib/notification-email-address";
 import { buildAwayOvertimeAssignments } from "@/lib/overtime";
 import {
   buildAssignmentIndex,
@@ -2811,6 +2815,8 @@ export async function getEmployeeContactsByIds(
     last_name: string | null;
   }> | null) ?? [];
 
+  const overrides = await readNotificationEmailOverrides(uniqueIds);
+
   return new Map(
     rows.map((row) => {
       const nameParts: EmployeeNameParts = {
@@ -2821,7 +2827,10 @@ export async function getEmployeeContactsByIds(
       return [
         row.id,
         {
-          email: row.email,
+          email: resolveNotificationAddress({
+            employeeEmail: row.email,
+            override: overrides.get(row.id) ?? null,
+          }).email,
           // A greeting, so the given name rather than the roster's "Last, First".
           name: nameParts.firstName.trim() || formatEmployeeDisplayName(nameParts),
         },
@@ -2873,4 +2882,74 @@ export async function readNotificationEmailOptouts(
     ok: true,
     muted: new Set(rows.map((row) => buildOptoutKey(row.employee_id, row.notification_type))),
   };
+}
+
+/**
+ * The notification addresses people have chosen for themselves.
+ *
+ * Absent for almost everyone, so a missing table or a failed read means "no
+ * override" and mail carries on to the personnel address. That is the safe
+ * direction here: the worst case is email arriving where it already did.
+ */
+export async function readNotificationEmailOverrides(
+  employeeIds: string[],
+): Promise<Map<string, NotificationEmailOverride>> {
+  const uniqueIds = Array.from(new Set(employeeIds));
+  const supabase = getDataClient();
+
+  if (!supabase || uniqueIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("notification_email_overrides")
+    .select("employee_id, email, verified_at, token_expires_at")
+    .in("employee_id", uniqueIds);
+
+  if (error) {
+    if (error.code !== "42P01" && error.code !== "PGRST205") {
+      console.error("Chosen notification addresses could not be read:", error.message);
+    }
+
+    return new Map();
+  }
+
+  const rows = (data as Array<{
+    employee_id: string;
+    email: string;
+    verified_at: string | null;
+    token_expires_at: string | null;
+  }> | null) ?? [];
+
+  return new Map(
+    rows.map((row) => [
+      row.employee_id,
+      { email: row.email, verifiedAt: row.verified_at, tokenExpiresAt: row.token_expires_at },
+    ]),
+  );
+}
+
+/** The signed-in viewer's own address setting, for the settings page. */
+export async function getNotificationEmailSettings(session: AppSession) {
+  if (!session.employeeId) {
+    return null;
+  }
+
+  const supabase = getDataClient();
+
+  if (!supabase) {
+    return null;
+  }
+
+  const employeeResult = await supabase
+    .from("employees")
+    .select("email")
+    .eq("id", session.employeeId)
+    .maybeSingle();
+  const overrides = await readNotificationEmailOverrides([session.employeeId]);
+
+  return resolveNotificationAddress({
+    employeeEmail: (employeeResult.data as { email: string | null } | null)?.email ?? null,
+    override: overrides.get(session.employeeId) ?? null,
+  });
 }

@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash, randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 
@@ -38,11 +39,22 @@ import type {
 } from "@/lib/types";
 import {
   getEmployeeContactsByIds,
+  getNotificationEmailSettings,
   getScheduleReferenceSnapshot,
   readMutualSettings,
   readNotificationEmailOptouts,
+  readNotificationEmailOverrides,
 } from "@/lib/data";
-import { sendNotificationEmails } from "@/lib/email";
+import {
+  isPlausibleEmail,
+  isTokenExpired,
+  normalizeNotificationEmail,
+} from "@/lib/notification-email-address";
+import {
+  getPublicAppUrl,
+  sendNotificationAddressConfirmationEmail,
+  sendNotificationEmails,
+} from "@/lib/email";
 import {
   selectEmailRecipients,
   type EmployeeContact,
@@ -7119,4 +7131,177 @@ export async function setNotificationEmailPreference(input: {
   revalidatePath("/notifications/settings");
 
   return { ok: true, message: "Notification settings saved." };
+}
+
+/** A confirmation link is short-lived; the address is only a preference. */
+const NOTIFICATION_ADDRESS_TOKEN_HOURS = 24;
+
+/** Long enough that the action cannot be used to mail someone repeatedly. */
+const NOTIFICATION_ADDRESS_RESEND_SECONDS = 60;
+
+function hashNotificationAddressToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * Asks to receive notifications somewhere else.
+ *
+ * Nothing changes until the new address confirms itself: the row is written
+ * unverified and mail keeps going where it already did. The employee comes
+ * from the session, never the request, so this can only ever change the
+ * caller's own address.
+ */
+export async function requestNotificationEmailChange(email: string) {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session?.employeeId) {
+    return { ok: false, message: "Your account is not linked to an employee record." };
+  }
+
+  const normalized = normalizeNotificationEmail(email);
+
+  if (!normalized || !isPlausibleEmail(normalized)) {
+    return { ok: false, message: "Enter a valid email address." };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return { ok: false, message: "Supabase is not configured yet. Notification settings are unavailable." };
+  }
+
+  const current = await getNotificationEmailSettings(session);
+
+  if (current?.email === normalized && current.source === "chosen") {
+    return { ok: false, message: "Notifications already go to that address." };
+  }
+
+  const existing = (await readNotificationEmailOverrides([session.employeeId])).get(session.employeeId);
+
+  // A token always expires a fixed time after it was issued, so how far off
+  // expiry is says how recently the last one went out.
+  const issuedSecondsAgo = existing?.tokenExpiresAt
+    ? NOTIFICATION_ADDRESS_TOKEN_HOURS * 3600 -
+      (new Date(existing.tokenExpiresAt).getTime() - Date.now()) / 1000
+    : Number.POSITIVE_INFINITY;
+
+  if (
+    existing &&
+    !existing.verifiedAt &&
+    normalizeNotificationEmail(existing.email) === normalized &&
+    issuedSecondsAgo < NOTIFICATION_ADDRESS_RESEND_SECONDS
+  ) {
+    return { ok: false, message: "A confirmation email was just sent. Check that inbox, including junk." };
+  }
+
+  const rawToken = randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + NOTIFICATION_ADDRESS_TOKEN_HOURS * 60 * 60 * 1000);
+
+  const { error } = await supabase.from("notification_email_overrides").upsert(
+    {
+      employee_id: session.employeeId,
+      email: normalized,
+      verified_at: null,
+      token_hash: hashNotificationAddressToken(rawToken),
+      token_expires_at: expiresAt.toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "employee_id" },
+  );
+
+  if (error) {
+    return { ok: false, message: `Could not save that address: ${error.message}` };
+  }
+
+  const sent = await sendNotificationAddressConfirmationEmail({
+    to: normalized,
+    recipientName: session.displayName?.split(" ")[0] || "there",
+    confirmUrl: `${getPublicAppUrl(null)}/notifications/confirm-email?token=${rawToken}`,
+    currentEmail: current?.email ?? null,
+  });
+
+  revalidatePath("/notifications/settings");
+
+  return sent.ok
+    ? { ok: true, message: `Confirmation sent to ${normalized}. Notifications keep going to your current address until you confirm.` }
+    : { ok: false, message: "That address was saved but the confirmation email could not be sent. Try again shortly." };
+}
+
+/** Drops a pending or confirmed address, reverting to the personnel record. */
+export async function clearNotificationEmailOverride() {
+  const session = await requireActionRole(["admin", "leader", "worker"]);
+
+  if (!session?.employeeId) {
+    return { ok: false, message: "Your account is not linked to an employee record." };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return { ok: false, message: "Supabase is not configured yet. Notification settings are unavailable." };
+  }
+
+  const { error } = await supabase
+    .from("notification_email_overrides")
+    .delete()
+    .eq("employee_id", session.employeeId);
+
+  if (error) {
+    return { ok: false, message: `Could not clear that address: ${error.message}` };
+  }
+
+  revalidatePath("/notifications/settings");
+
+  return { ok: true, message: "Notifications will go to the address on your personnel record." };
+}
+
+/**
+ * Confirms an address from the link that was emailed to it.
+ *
+ * Possessing the token is the proof, exactly as with an invite, so this does
+ * not require a session — the link may well be opened in a different browser
+ * from the one that asked for it.
+ */
+export async function confirmNotificationEmail(token: string) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase || isBlank(token)) {
+    return { ok: false as const, reason: "invalid" as const };
+  }
+
+  const { data, error } = await supabase
+    .from("notification_email_overrides")
+    .select("employee_id, token_expires_at, verified_at")
+    .eq("token_hash", hashNotificationAddressToken(token))
+    .maybeSingle();
+
+  const row = data as
+    | { employee_id: string; token_expires_at: string | null; verified_at: string | null }
+    | null;
+
+  if (error || !row) {
+    return { ok: false as const, reason: "invalid" as const };
+  }
+
+  if (isTokenExpired(row.token_expires_at, new Date().toISOString())) {
+    return { ok: false as const, reason: "expired" as const };
+  }
+
+  const { error: updateError } = await supabase
+    .from("notification_email_overrides")
+    .update({
+      verified_at: new Date().toISOString(),
+      token_hash: null,
+      token_expires_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("employee_id", row.employee_id);
+
+  if (updateError) {
+    return { ok: false as const, reason: "failed" as const };
+  }
+
+  revalidatePath("/notifications/settings");
+
+  return { ok: true as const, reason: "confirmed" as const };
 }

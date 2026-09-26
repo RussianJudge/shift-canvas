@@ -3,8 +3,22 @@
 import { useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import { setNotificationEmailPreference } from "@/app/actions";
+import {
+  clearNotificationEmailOverride,
+  requestNotificationEmailChange,
+  setNotificationEmailPreference,
+} from "@/app/actions";
+import { Button } from "@/components/ui/button";
+import { TextInput } from "@/components/ui/field";
 import { EMAILED_NOTIFICATION_TYPES } from "@/lib/notifications";
+import type { ResolvedNotificationAddress } from "@/lib/notification-email-address";
+
+const CONFIRMATION_MESSAGES: Record<string, string> = {
+  confirmed: "That address is confirmed. Notifications will be emailed there from now on.",
+  expired: "That confirmation link had expired. Send yourself a new one.",
+  invalid: "That confirmation link is not valid. Send yourself a new one.",
+  failed: "That address could not be confirmed. Try again shortly.",
+};
 
 /**
  * Per-type email preferences for the signed-in user.
@@ -13,10 +27,22 @@ import { EMAILED_NOTIFICATION_TYPES } from "@/lib/notifications";
  * the positive way round — people reason about what they want to receive, not
  * about what they have suppressed.
  */
-export function NotificationSettingsPanel({ mutedTypes }: { mutedTypes: string[] }) {
+export function NotificationSettingsPanel({
+  mutedTypes,
+  address,
+  confirmationResult,
+}: {
+  mutedTypes: string[];
+  address: ResolvedNotificationAddress | null;
+  confirmationResult: string | null;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState("");
+  const [addressDraft, setAddressDraft] = useState("");
+  const [addressMessage, setAddressMessage] = useState(
+    confirmationResult ? CONFIRMATION_MESSAGES[confirmationResult] ?? "" : "",
+  );
   const [optimisticMuted, toggleOptimistic] = useOptimistic(
     mutedTypes,
     (current: string[], change: { type: string; muted: boolean }) =>
@@ -43,12 +69,94 @@ export function NotificationSettingsPanel({ mutedTypes }: { mutedTypes: string[]
     });
   }
 
+  function handleAddressSave() {
+    startTransition(async () => {
+      setAddressMessage("");
+
+      const result = await requestNotificationEmailChange(addressDraft);
+
+      setAddressMessage(result.message);
+
+      if (result.ok) {
+        setAddressDraft("");
+      }
+
+      router.refresh();
+    });
+  }
+
+  function handleAddressClear() {
+    startTransition(async () => {
+      setAddressMessage("");
+
+      const result = await clearNotificationEmailOverride();
+
+      setAddressMessage(result.message);
+      router.refresh();
+    });
+  }
+
   return (
     <div className="notification-settings">
       <p className="notification-settings__intro">
         Every update below always appears in Schwifty. These settings only control whether it is also
         emailed to you.
       </p>
+
+      {address ? (
+        <section className="notification-settings__address" aria-label="Where notifications are emailed">
+          <h2 className="notification-settings__section-title">Where notifications are emailed</h2>
+
+          <p className="notification-settings__current">
+            {address.email ? (
+              <>
+                Currently sent to <strong>{address.email}</strong>{" "}
+                <span className="notification-settings__description">
+                  {address.source === "chosen"
+                    ? "(an address you chose)"
+                    : "(from your personnel record)"}
+                </span>
+              </>
+            ) : (
+              <>No address on file, so nothing can be emailed to you yet.</>
+            )}
+          </p>
+
+          {address.pendingEmail ? (
+            <p className="notification-settings__pending">
+              Waiting for confirmation of <strong>{address.pendingEmail}</strong>. Open the link in that
+              inbox — check junk, since a first message from a new sender often lands there.
+            </p>
+          ) : null}
+
+          <div className="notification-settings__address-form">
+            <TextInput
+              label="Send notifications to"
+              type="email"
+              value={addressDraft}
+              placeholder={address.email ?? "you@example.com"}
+              disabled={isPending}
+              onChange={(event) => setAddressDraft(event.target.value)}
+            />
+            <Button variant="secondary" onClick={handleAddressSave} disabled={isPending || !addressDraft.trim()}>
+              Send confirmation
+            </Button>
+            {address.source === "chosen" || address.pendingEmail ? (
+              <Button variant="subtle" onClick={handleAddressClear} disabled={isPending}>
+                Use my personnel address
+              </Button>
+            ) : null}
+          </div>
+
+          {addressMessage ? (
+            <p className="notification-settings__message" role="status">
+              {addressMessage}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      <h2 className="notification-settings__section-title">What gets emailed</h2>
 
       <ul className="notification-settings__list">
         {EMAILED_NOTIFICATION_TYPES.map((type) => {

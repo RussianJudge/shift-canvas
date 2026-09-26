@@ -232,3 +232,65 @@ export async function sendNotificationEmails(input: {
 
   return { sent, failed };
 }
+
+/**
+ * Asks a new address to prove itself before notifications are sent there.
+ *
+ * Sent directly rather than through the outbox: it is a reply to something the
+ * person just did, and holding it back behind a daily budget would leave them
+ * staring at a form. Returns whether it went, so the action can say so.
+ */
+export async function sendNotificationAddressConfirmationEmail(input: {
+  to: string;
+  recipientName: string;
+  confirmUrl: string;
+  currentEmail: string | null;
+  baseUrl?: string | null;
+}) {
+  const config = getResendConfig();
+
+  if (!config) {
+    console.error("Resend is not configured, so no confirmation email was sent.");
+    return { ok: false as const };
+  }
+
+  const allowlist = getNotificationEmailAllowlist();
+
+  if (allowlist && !allowlist.has(input.to.trim().toLowerCase())) {
+    console.info(`Notification email allowlist is on: confirmation to ${input.to} was not sent.`);
+    return { ok: false as const };
+  }
+
+  const { resend, from, replyTo } = config;
+  const appBaseUrl = getPublicAppUrl(input.baseUrl);
+
+  const { error } = await resend.emails.send({
+    from,
+    to: input.to.trim().toLowerCase(),
+    replyTo,
+    subject: "Confirm your Schwifty notification email",
+    react: (
+      <NotificationEmail
+        recipientName={input.recipientName}
+        title="Confirm your notification email"
+        body={
+          input.currentEmail
+            ? `Confirm this address to receive Schwifty notifications here instead of at ${input.currentEmail}. Until you do, they keep going to the address on your personnel record.`
+            : "Confirm this address to receive Schwifty notifications here."
+        }
+        actionUrl={input.confirmUrl}
+        actionLabel="Confirm this address"
+        settingsUrl={`${appBaseUrl}/notifications/settings`}
+        appBaseUrl={appBaseUrl}
+        additionalCount={0}
+      />
+    ),
+  });
+
+  if (error) {
+    console.error(`Confirmation email to ${input.to} failed:`, error.message);
+    return { ok: false as const };
+  }
+
+  return { ok: true as const };
+}

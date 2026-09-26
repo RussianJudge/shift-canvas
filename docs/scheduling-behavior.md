@@ -232,6 +232,22 @@ Manual postings are retired the same way: deleting a posting resolves the
 "overtime available" notices of everyone who was offered it, since only the
 claimants are told separately that it went away.
 
+**Where notification email goes is the worker's to choose.** By default it is
+`employees.email`, the address Personnel manages and the one invites are sent
+to. A worker can point notifications somewhere else — a personal address, when
+a corporate filter buries them — and that choice lives in
+`notification_email_overrides`, keyed by employee, never on the personnel
+record their leader reads.
+
+The override only takes effect once the new address confirms itself. Asking for
+a change writes the row unverified and emails a single-use token, hashed in the
+table exactly as account invites are, expiring in 24 hours; until the link is
+opened, mail keeps going to the personnel address. That ordering is the whole
+point: a mistyped address must never silence someone, and a silent failure here
+is invisible precisely because the person is no longer being written to. The
+confirmation link needs no session, since holding the token is what proves
+control of the mailbox.
+
 **Overtime worked away from the home crew is projected at read time.** A claim
 stores one row, on the schedule that needed the coverage, so the claimant's own
 crew had nothing on that date and fell back to their rotation — reading as OFF

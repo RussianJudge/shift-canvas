@@ -3,7 +3,7 @@ import Link from "next/link";
 import { NotificationSettingsPanel } from "@/components/notification-settings-panel";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
-import { readNotificationEmailOptouts } from "@/lib/data";
+import { getNotificationEmailSettings, readNotificationEmailOptouts } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +16,13 @@ function SpeechBubbleIcon() {
   );
 }
 
-export default async function NotificationSettingsPage() {
+export default async function NotificationSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ address?: string }>;
+}) {
   const session = await requireAppSession(["admin", "leader", "worker"]);
+  const { address: confirmationResult } = await searchParams;
   const optouts = session.employeeId
     ? await readNotificationEmailOptouts([session.employeeId])
     : null;
@@ -27,6 +32,7 @@ export default async function NotificationSettingsPage() {
           .filter((key) => key.startsWith(`${session.employeeId}:`))
           .map((key) => key.slice(key.indexOf(":") + 1))
       : [];
+  const addressSettings = await getNotificationEmailSettings(session);
 
   return (
     <WorkspaceShellFrame viewer={session}>
@@ -52,7 +58,11 @@ export default async function NotificationSettingsPage() {
             <span>Refresh the page to try again.</span>
           </div>
         ) : (
-          <NotificationSettingsPanel mutedTypes={mutedTypes} />
+          <NotificationSettingsPanel
+            mutedTypes={mutedTypes}
+            address={addressSettings}
+            confirmationResult={confirmationResult ?? null}
+          />
         )}
       </section>
     </WorkspaceShellFrame>
