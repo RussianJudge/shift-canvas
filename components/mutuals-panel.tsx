@@ -1234,24 +1234,49 @@ export function MutualsPanel({
           <span className="mutuals-section__count">{completedPostings.length}</span>
         </div>
 
-        <div className="mutuals-grid mutuals-grid--closed">
+        <div className="mutuals-grid">
           {completedPostings.length > 0 ? (
-            completedPostings.map((posting) => (
-              <article key={posting.id} className="mutual-exchange-card mutual-exchange-card--closed">
-                <div className="mutual-exchange-card__header">
-                  <div className="mutual-party">
-                    <MutualAvatar name={posting.ownerEmployeeName} />
+            completedPostings.map((posting) => {
+              const acceptedApplication = posting.applications.find(
+                (application) => application.id === posting.acceptedApplicationId,
+              );
+
+              return (
+                <article key={posting.id} className="mutual-exchange-card mutual-exchange-card--closed">
+                  <div className="mutual-exchange-card__header">
                     <div className="mutual-exchange-card__id">
                       <span className="mutual-eyebrow">Shift {posting.ownerScheduleName}</span>
-                      <h3 className="mutual-exchange-card__title">{posting.ownerEmployeeName}</h3>
+                      <h3 className="mutual-exchange-card__title">
+                        {posting.ownerEmployeeName}
+                        {acceptedApplication ? ` ↔ ${acceptedApplication.applicantEmployeeName}` : ""}
+                      </h3>
                     </div>
+                    <Badge tone="neutral">Completed</Badge>
                   </div>
-                  <Badge tone="neutral">Completed</Badge>
-                </div>
 
-                <MutualDateChips dates={posting.dates} shiftKinds={posting.shiftKinds} />
-              </article>
-            ))
+                  {/* The swap that was worked, not just the side that posted it. */}
+                  <div className="mutual-exchange">
+                    <MutualExchangeSide
+                      name={posting.ownerEmployeeName}
+                      dates={posting.dates}
+                      shiftKinds={posting.shiftKinds}
+                    />
+                    {acceptedApplication ? (
+                      <>
+                        <span className="mutual-exchange__swap" aria-hidden="true">
+                          <ExchangeIcon />
+                        </span>
+                        <MutualExchangeSide
+                          name={acceptedApplication.applicantEmployeeName}
+                          dates={acceptedApplication.dates}
+                          shiftKinds={acceptedApplication.shiftKinds}
+                        />
+                      </>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })
           ) : (
             <div className="empty-state">
               <strong>No completed mutuals.</strong>
