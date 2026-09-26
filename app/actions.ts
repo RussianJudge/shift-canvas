@@ -39,6 +39,7 @@ import type {
 } from "@/lib/types";
 import {
   getEmployeeContactsByIds,
+  getLeaderEmployeeIdsForSchedules,
   getNotificationEmailSettings,
   getScheduleReferenceSnapshot,
   readMutualSettings,
@@ -73,6 +74,8 @@ import {
   buildOvertimePostingNotification,
   buildOvertimePostingNotificationId,
   buildOvertimeRemovedNotificationId,
+  buildMutualApprovalNotification,
+  buildMutualApprovalNotificationPrefix,
   buildShortfallNotification,
   buildShortfallNotificationIdPrefix,
   EMAILED_NOTIFICATION_TYPES,
@@ -810,6 +813,93 @@ async function resolveManualPostingNotices(supabase: SupabaseAdminClient, postin
   if (error) {
     console.error(`Notices for overtime posting ${postingId} could not be retired:`, error.message);
   }
+}
+
+/**
+ * Tells each crew's leaders that a swap is waiting on them.
+ *
+ * Both sides are told as soon as the swap is agreed, rather than the second
+ * waiting on the first: approval order does not matter, and a leader who is
+ * beaten to it has their notice retired rather than left pointing at work
+ * somebody else has done.
+ *
+ * Leaders only. Admins can approve either side, but telling every admin about
+ * every swap would bury the ones that are genuinely theirs.
+ */
+async function createMutualApprovalNotifications(
+  supabase: SupabaseAdminClient,
+  input: {
+    postingId: string;
+    ownerName: string;
+    applicantName: string;
+    dates: string[];
+    month: string;
+    scope: ActionScope;
+    sides: Array<{ side: "owner" | "applicant"; scheduleId: string; scheduleName: string }>;
+  },
+) {
+  const leadersBySchedule = await getLeaderEmployeeIdsForSchedules(
+    input.sides.map((side) => side.scheduleId),
+    input.scope,
+  );
+  const rows = input.sides.flatMap((side) =>
+    (leadersBySchedule.get(side.scheduleId) ?? []).map((employeeId) => ({
+      ...buildMutualApprovalNotification({
+        postingId: input.postingId,
+        side: side.side,
+        employeeId,
+        scheduleName: side.scheduleName,
+        ownerName: input.ownerName,
+        applicantName: input.applicantName,
+        dates: input.dates,
+        month: input.month,
+      }),
+      ...toDatabaseScope(input.scope),
+    })),
+  );
+
+  if (rows.length === 0) {
+    console.warn(`Mutual ${input.postingId} is awaiting approval but neither crew has a leader to tell.`);
+    return;
+  }
+
+  const { error } = await supabase
+    .from("notifications")
+    .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+
+  if (error) {
+    console.error(`Mutual ${input.postingId} approval notices could not be written:`, error.message);
+    return;
+  }
+
+  revalidatePath("/notifications");
+  scheduleEmailFlush(supabase);
+}
+
+/**
+ * Retires approval notices once there is nothing left to approve.
+ *
+ * With no side given it clears both, for a swap that was rejected, withdrawn
+ * or cancelled outright.
+ */
+async function resolveMutualApprovalNotices(
+  supabase: SupabaseAdminClient,
+  postingId: string,
+  side?: "owner" | "applicant",
+) {
+  const { error } = await supabase
+    .from("notifications")
+    .update({ resolved_at: new Date().toISOString() })
+    .eq("type", NOTIFICATION_TYPES.mutualApproval)
+    .like("id", `${buildMutualApprovalNotificationPrefix(postingId, side)}%`)
+    .is("resolved_at", null);
+
+  if (error) {
+    console.error(`Mutual ${postingId} approval notices could not be retired:`, error.message);
+    return;
+  }
+
+  revalidatePath("/notifications");
 }
 
 /** Runs the shortfall notices once the save's response has gone out. */
@@ -4818,6 +4908,52 @@ export async function acceptMutualApplication(input: AcceptMutualApplicationInpu
     .eq("status", "open")
     .neq("id", input.applicationId);
 
+  if (acceptSettings.requireLeaderApproval) {
+    const [namesResult, schedulesResult, datesResult] = await Promise.all([
+      supabase
+        .from("employees")
+        .select("id, first_name, last_name")
+        .in("id", [posting.owner_employee_id, application.applicant_employee_id]),
+      supabase
+        .from("schedules")
+        .select("id, name")
+        .in("id", [posting.owner_schedule_id, application.applicant_schedule_id]),
+      supabase.from("mutual_shift_posting_dates").select("swap_date").eq("posting_id", input.postingId),
+    ]);
+
+    const nameById = new Map(
+      ((namesResult.data as Array<{ id: string; first_name: string | null; last_name: string | null }> | null) ?? [])
+        .map((row) => [row.id, [row.first_name, row.last_name].filter(Boolean).join(" ") || "A worker"] as const),
+    );
+    const scheduleNameById = new Map(
+      ((schedulesResult.data as Array<{ id: string; name: string }> | null) ?? []).map((row) => [row.id, row.name]),
+    );
+    const dates = ((datesResult.data as Array<{ swap_date: string }> | null) ?? [])
+      .map((row) => row.swap_date)
+      .sort();
+
+    await createMutualApprovalNotifications(supabase, {
+      postingId: input.postingId,
+      ownerName: nameById.get(posting.owner_employee_id) ?? "A worker",
+      applicantName: nameById.get(application.applicant_employee_id) ?? "A worker",
+      dates,
+      month: dates[0]?.slice(0, 7) ?? getCurrentDateKey(BUSINESS_TIME_ZONE).slice(0, 7),
+      scope: scopeFromRow(posting),
+      sides: [
+        {
+          side: "owner",
+          scheduleId: posting.owner_schedule_id,
+          scheduleName: scheduleNameById.get(posting.owner_schedule_id) ?? posting.owner_schedule_id,
+        },
+        {
+          side: "applicant",
+          scheduleId: application.applicant_schedule_id,
+          scheduleName: scheduleNameById.get(application.applicant_schedule_id) ?? application.applicant_schedule_id,
+        },
+      ],
+    });
+  }
+
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
 
@@ -5054,6 +5190,9 @@ export async function approveMutualPosting(input: ApproveMutualPostingInput) {
     };
   }
 
+  // Only this side is settled; the other crew is still owed its notice.
+  await resolveMutualApprovalNotices(supabase, input.postingId, input.side);
+
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
 
@@ -5174,6 +5313,8 @@ export async function rejectMutualPosting(input: RejectMutualPostingInput) {
     .update({ status: "rejected" })
     .eq("id", application.id);
 
+  await resolveMutualApprovalNotices(supabase, input.postingId);
+
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
 
@@ -5250,6 +5391,8 @@ export async function withdrawMutualPosting(input: WithdrawMutualPostingInput) {
       message: `Could not cancel mutual posting: ${error.message}`,
     };
   }
+
+  await resolveMutualApprovalNotices(supabase, input.postingId);
 
   revalidatePath("/mutuals");
   revalidatePath("/mutals");
@@ -5486,6 +5629,9 @@ export async function cancelAcceptedMutual(input: CancelAcceptedMutualInput) {
       message: `Could not cancel mutual: ${error.message}`,
     };
   }
+
+  // The swap is undone, so nothing is awaiting anyone.
+  await resolveMutualApprovalNotices(supabase, input.postingId);
 
   revalidatePath("/mutuals");
   revalidatePath("/mutals");

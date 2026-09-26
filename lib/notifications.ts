@@ -4,6 +4,7 @@ export const NOTIFICATION_TYPES = {
   overtimePosted: "overtime_posted",
   overtimeRemoved: "overtime_removed",
   scheduleLoan: "schedule_loan",
+  mutualApproval: "mutual_approval",
 } as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[keyof typeof NOTIFICATION_TYPES];
@@ -24,6 +25,11 @@ export const EMAILED_NOTIFICATION_TYPES = [
     value: NOTIFICATION_TYPES.overtimeRemoved,
     label: "Overtime no longer needed",
     description: "When overtime you claimed is released because the posting was filled or changed.",
+  },
+  {
+    value: NOTIFICATION_TYPES.mutualApproval,
+    label: "Mutual awaiting your approval",
+    description: "When two workers agree a swap that needs your approval as their shift leader.",
   },
 ] as const;
 
@@ -91,6 +97,46 @@ export function buildShortfallNotification(input: {
   };
 }
 
+export type MutualApprovalSide = "owner" | "applicant";
+
+/**
+ * Keyed on the posting and the side, not on the leader: both leaders of a crew
+ * are told, and a retried accept has to collide with what it already wrote
+ * rather than telling them twice.
+ */
+export function buildMutualApprovalNotificationId(
+  postingId: string,
+  side: MutualApprovalSide,
+  employeeId: string,
+) {
+  return `notification-${NOTIFICATION_TYPES.mutualApproval}-${postingId}-${side}-${employeeId}`;
+}
+
+/** The prefix covering both leaders of one side, for retiring them together. */
+export function buildMutualApprovalNotificationPrefix(postingId: string, side?: MutualApprovalSide) {
+  return `notification-${NOTIFICATION_TYPES.mutualApproval}-${postingId}-${side ? `${side}-` : ""}`;
+}
+
+export function buildMutualApprovalNotification(input: {
+  postingId: string;
+  side: MutualApprovalSide;
+  employeeId: string;
+  scheduleName: string;
+  ownerName: string;
+  applicantName: string;
+  dates: string[];
+  month: string;
+}) {
+  return {
+    id: buildMutualApprovalNotificationId(input.postingId, input.side, input.employeeId),
+    recipient_employee_id: input.employeeId,
+    type: NOTIFICATION_TYPES.mutualApproval,
+    title: `Mutual awaiting approval: Shift ${input.scheduleName}`,
+    body: `${input.ownerName} and ${input.applicantName} have agreed a swap on ${describeDateRange(input.dates)}. It needs your approval for Shift ${input.scheduleName}.`,
+    href: `/mutuals?month=${input.month}`,
+  };
+}
+
 export type OvertimePostingNotificationInput = {
   postingId: string;
   employeeId: string;
@@ -115,7 +161,7 @@ export function buildOvertimePostingNotification(input: OvertimePostingNotificat
     recipient_employee_id: input.employeeId,
     type: NOTIFICATION_TYPES.overtimePosted,
     title: `Overtime available: ${input.assignmentLabel}`,
-    body: `${input.scheduleName} needs ${input.assignmentLabel} cover on ${dateLabel}. You are eligible to claim it.`,
+    body: `${input.scheduleName} needs ${input.assignmentLabel} coverage on ${dateLabel}. You are eligible to claim it.`,
     href: `/overtime?month=${input.month}`,
   };
 }
@@ -152,7 +198,7 @@ function addDays(isoDate: string, days: number) {
 }
 
 function formatDate(isoDate: string) {
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", timeZone: "UTC" }).format(
+  return new Intl.DateTimeFormat("en-GB", {month: "long",day: "numeric", timeZone: "UTC" }).format(
     new Date(`${isoDate}T00:00:00Z`),
   );
 }

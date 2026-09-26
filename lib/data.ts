@@ -2953,3 +2953,72 @@ export async function getNotificationEmailSettings(session: AppSession) {
     override: overrides.get(session.employeeId) ?? null,
   });
 }
+
+/**
+ * The leaders who can approve for each crew.
+ *
+ * Found through `profiles.employee_id` to `employees.schedule_id` rather than
+ * `profiles.schedule_id`: the two drift, and only the employee record is kept
+ * current by Personnel. Admins are excluded deliberately — they can approve
+ * either side, but telling every admin about every swap is noise.
+ */
+export async function getLeaderEmployeeIdsForSchedules(
+  scheduleIds: string[],
+  scope: RequiredOrganizationScope,
+): Promise<Map<string, string[]>> {
+  const uniqueIds = Array.from(new Set(scheduleIds.filter(Boolean)));
+  const supabase = getDataClient();
+
+  if (!supabase || uniqueIds.length === 0) {
+    return new Map();
+  }
+
+  const profilesResult = await supabase
+    .from("profiles")
+    .select("employee_id")
+    .eq("role", "leader")
+    .not("employee_id", "is", null);
+
+  if (profilesResult.error) {
+    console.error("Shift leaders could not be read:", profilesResult.error.message);
+    return new Map();
+  }
+
+  const leaderEmployeeIds = Array.from(
+    new Set(
+      ((profilesResult.data as Array<{ employee_id: string | null }> | null) ?? [])
+        .map((row) => row.employee_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+
+  if (leaderEmployeeIds.length === 0) {
+    return new Map();
+  }
+
+  const employeesResult = await supabase
+    .from("employees")
+    .select("id, schedule_id")
+    .in("id", leaderEmployeeIds)
+    .in("schedule_id", uniqueIds)
+    .eq("company_id", scope.companyId)
+    .eq("site_id", scope.siteId)
+    .eq("business_area_id", scope.businessAreaId);
+
+  if (employeesResult.error) {
+    console.error("Shift leaders could not be matched to crews:", employeesResult.error.message);
+    return new Map();
+  }
+
+  const bySchedule = new Map<string, string[]>();
+
+  for (const row of (employeesResult.data as Array<{ id: string; schedule_id: string | null }> | null) ?? []) {
+    if (!row.schedule_id) {
+      continue;
+    }
+
+    bySchedule.set(row.schedule_id, [...(bySchedule.get(row.schedule_id) ?? []), row.id]);
+  }
+
+  return bySchedule;
+}

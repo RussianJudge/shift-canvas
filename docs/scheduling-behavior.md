@@ -292,6 +292,21 @@ Preserve request creation, participants, original/proposed shifts, responses,
 validation, approval chain, rejection, cancellation, schedule mutation, and
 notifications. Show both sides clearly without bypassing approval.
 
+**A swap awaiting approval tells the leaders who can approve it.** When
+`acceptMutualApplication` moves a posting to `pending_leader_approval`, both
+crews' leaders are notified — leaders only, found through
+`profiles.employee_id` to `employees.schedule_id` rather than
+`profiles.schedule_id`, which drifts. Admins can approve either side but are
+not told, because every swap would reach them and bury the ones that are
+genuinely theirs.
+
+Both sides are told at once rather than the second waiting on the first:
+approval order does not matter. The id is derived from the posting, the side
+and the recipient, so a retried accept collides with what it already wrote.
+Approving one side retires that side's notices and leaves the other crew's
+standing; rejecting, withdrawing or cancelling retires both. A notice that
+outlived the approval it asked for is the failure this avoids.
+
 ### Personnel and competencies
 
 Preserve identity, active status, team, shift, role/post, competency,

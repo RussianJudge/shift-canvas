@@ -4,6 +4,9 @@ import test from "node:test";
 import {
   buildOvertimePostingNotification,
   buildOvertimePostingNotificationId,
+  buildMutualApprovalNotification,
+  buildMutualApprovalNotificationId,
+  buildMutualApprovalNotificationPrefix,
   buildOvertimeRemovedNotificationId,
   buildShortfallNotificationIdPrefix,
   buildShortfallPostingId,
@@ -169,4 +172,56 @@ test("generated and manual posting notices cannot collide", () => {
 
   assert.notEqual(generated, manual);
   assert.ok(!manual.startsWith(buildShortfallNotificationIdPrefix("2026-09")));
+});
+
+test("both leaders of a crew get their own approval notice for the same swap", () => {
+  const first = buildMutualApprovalNotificationId("mutual-1", "owner", "emp-1");
+  const second = buildMutualApprovalNotificationId("mutual-1", "owner", "emp-2");
+
+  assert.notEqual(first, second);
+  assert.ok(first.startsWith(buildMutualApprovalNotificationPrefix("mutual-1", "owner")));
+  assert.ok(second.startsWith(buildMutualApprovalNotificationPrefix("mutual-1", "owner")));
+});
+
+test("the two sides of one swap are retired independently", () => {
+  const ownerPrefix = buildMutualApprovalNotificationPrefix("mutual-1", "owner");
+  const applicantId = buildMutualApprovalNotificationId("mutual-1", "applicant", "emp-3");
+
+  // Approving the owner's side must not clear the applicant crew's notice.
+  assert.ok(!applicantId.startsWith(ownerPrefix));
+  assert.ok(applicantId.startsWith(buildMutualApprovalNotificationPrefix("mutual-1")));
+});
+
+test("a retried accept writes the same id rather than a second notice", () => {
+  assert.equal(
+    buildMutualApprovalNotificationId("mutual-1", "owner", "emp-1"),
+    buildMutualApprovalNotificationId("mutual-1", "owner", "emp-1"),
+  );
+});
+
+test("one posting's notices are never retired by another's", () => {
+  assert.ok(
+    !buildMutualApprovalNotificationId("mutual-2", "owner", "emp-1").startsWith(
+      buildMutualApprovalNotificationPrefix("mutual-1"),
+    ),
+  );
+});
+
+test("an approval notice names the crew, the pair and the dates", () => {
+  const notification = buildMutualApprovalNotification({
+    postingId: "mutual-1",
+    side: "owner",
+    employeeId: "emp-1",
+    scheduleName: "2",
+    ownerName: "Adam Bursey",
+    applicantName: "Jeff O'Neil",
+    dates: ["2026-10-05", "2026-10-06"],
+    month: "2026-10",
+  });
+
+  assert.equal(notification.title, "Mutual awaiting approval: Shift 2");
+  assert.match(notification.body, /Adam Bursey and Jeff O'Neil/);
+  assert.match(notification.body, /5–6 October/);
+  assert.equal(notification.href, "/mutuals?month=2026-10");
+  assert.equal(notification.recipient_employee_id, "emp-1");
 });
