@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
 
@@ -136,6 +137,7 @@ export function SignInPanel({
   inviteToken?: string;
   initialMode?: AuthMode;
 }) {
+  const router = useRouter();
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const errorMessage = getErrorMessage(error);
   const noticeMessage = getNoticeMessage(notice);
@@ -236,9 +238,28 @@ export function SignInPanel({
         {isCreateMode || isResetMode ? (
           <div className="auth-mode-switch">
             <span>{isCreateMode ? "Already have an account?" : "Remember your password?"}</span>
-            <Link href="/sign-in" className="ghost-button">
-              Sign in
-            </Link>
+            {isCreateMode ? (
+              <Link href="/sign-in" className="ghost-button">
+                Sign in
+              </Link>
+            ) : (
+              /* Reset is a mode of this page, not a page of its own, so going
+                 back is a state change. Linking to /sign-in left the panel
+                 exactly where it was: from the button the URL never changed,
+                 and from ?mode=reset the initial state had already been read.
+                 The replace clears the parameter so a refresh does not return
+                 here. */
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setMode("sign-in");
+                  router.replace("/sign-in");
+                }}
+              >
+                Sign in
+              </button>
+            )}
           </div>
         ) : (
           <div className="auth-mode-actions">
