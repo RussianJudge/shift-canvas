@@ -902,6 +902,50 @@ async function resolveMutualApprovalNotices(
   revalidatePath("/notifications");
 }
 
+/**
+ * Takes someone off the schedule before they are removed from the roster.
+ *
+ * Every table keyed on an employee cascades, so deleting the row alone would
+ * clear their shifts — but silently, and without the cleanup that normally
+ * follows a post falling vacant. The coverage they were counted in would stay
+ * stale and the overtime their absence opens would never be offered to anyone.
+ *
+ * Returns the months touched, so the caller can run that cleanup once the
+ * roster row is gone.
+ */
+async function clearEmployeeScheduleWork(supabase: SupabaseAdminClient, employeeIds: string[]) {
+  if (employeeIds.length === 0) {
+    return { ok: true as const, months: [] as string[] };
+  }
+
+  const assignmentsResult = await supabase
+    .from("schedule_assignments")
+    .select("assignment_date")
+    .in("employee_id", employeeIds);
+
+  if (assignmentsResult.error) {
+    return { ok: false as const, message: assignmentsResult.error.message, months: [] as string[] };
+  }
+
+  const months = Array.from(
+    new Set(
+      ((assignmentsResult.data as Array<{ assignment_date: string }> | null) ?? []).map((row) =>
+        row.assignment_date.slice(0, 7),
+      ),
+    ),
+  );
+
+  for (const table of ["schedule_assignments", "sub_schedule_assignments", "sub_schedule_members"]) {
+    const { error } = await supabase.from(table).delete().in("employee_id", employeeIds);
+
+    if (error) {
+      return { ok: false as const, message: error.message, months };
+    }
+  }
+
+  return { ok: true as const, months };
+}
+
 /** Runs the shortfall notices once the save's response has gone out. */
 function scheduleShortfallNotifications(
   supabase: SupabaseAdminClient,
@@ -5915,17 +5959,36 @@ export async function savePersonnel(input: SavePersonnelInput) {
     scheduleShortfallNotifications(supabase, removedCompetencyCleanupResult.touchedMonths, session);
   }
 
-  if (input.deletedEmployeeIds.length > 0) {
+  if (employeeIdsToDelete.length > 0) {
+    const clearResult = await clearEmployeeScheduleWork(supabase, employeeIdsToDelete);
+
+    if (!clearResult.ok) {
+      return {
+        ok: false,
+        message: `Could not clear scheduled work before removing employees: ${clearResult.message}`,
+      };
+    }
+
     const { error: deleteError } = await supabase
       .from("employees")
       .delete()
-      .in("id", input.deletedEmployeeIds);
+      .in("id", employeeIdsToDelete);
 
     if (deleteError) {
       return {
         ok: false,
         message: `Could not remove employees: ${deleteError.message}`,
       };
+    }
+
+    // The posts they were filling are open now: release the overtime that
+    // depended on them and offer what their absence created.
+    if (clearResult.months.length > 0) {
+      const cleanupResult = await removeStaleOvertimeClaims(supabase, clearResult.months, session);
+
+      if (!cleanupResult.ok) {
+        console.error(`Overtime cleanup after removing employees failed: ${cleanupResult.message}`);
+      }
     }
   }
 
