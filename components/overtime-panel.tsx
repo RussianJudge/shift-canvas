@@ -15,7 +15,11 @@ import { Button } from "@/components/ui/button";
 import { Select, TextInput } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
 import { parseOvertimeAssignmentNote, resolveDefaultClaimingEmployeeId } from "@/lib/overtime";
-import { describeOvertimeBlocker, findOvertimeBlocker } from "@/lib/overtime-eligibility";
+import {
+  describeOvertimeBlocker,
+  findOvertimeBlocker,
+  isPostingInThePast,
+} from "@/lib/overtime-eligibility";
 import {
   buildCompletedSetCoverage,
   countScheduleAssignmentsForTarget,
@@ -314,6 +318,7 @@ function getClaimStatus(
   employee: Employee | null,
   posting: OvertimePosting,
   snapshot: SchedulerSnapshot,
+  today: string,
 ) {
   // Workers can only claim OT that sits on their scheduled days off and does not
   // conflict with any existing assignment already on the calendar.
@@ -327,6 +332,10 @@ function getClaimStatus(
 
   if (posting.openShifts === 0) {
     return { canClaim: false, blocking: false, reason: "This posting is fully claimed." };
+  }
+
+  if (isPostingInThePast(posting.dates, today)) {
+    return { canClaim: false, blocking: false, reason: "These shifts have already been worked." };
   }
 
   // The blocking rules live in lib/overtime-eligibility so the server can apply
@@ -1749,7 +1758,7 @@ export function OvertimePanel({
         ? allEmployees
             .filter(
               (employee) =>
-                getClaimStatus(employee, selectedEligibilityReportPosting, snapshot).canClaim,
+                getClaimStatus(employee, selectedEligibilityReportPosting, snapshot, todayKey).canClaim,
             )
             .map((employee) => ({
               id: employee.id,
@@ -2219,11 +2228,11 @@ export function OvertimePanel({
                   return true;
                 }
 
-                return getClaimStatus(claimingEmployee, posting, snapshot).canClaim;
+                return getClaimStatus(claimingEmployee, posting, snapshot, todayKey).canClaim;
               }) ?? null;
             const selectedPosting = selectedPostingCandidate ?? preferredClaimablePosting ?? visiblePostings[0];
             const claimStatus = selectedPosting
-              ? getClaimStatus(claimingEmployee, selectedPosting, snapshot)
+              ? getClaimStatus(claimingEmployee, selectedPosting, snapshot, todayKey)
               : { canClaim: false, blocking: false, reason: "No overtime posting selected." };
             const selectedPostingClaimedByViewer = selectedPosting
               ? selectedPosting.claimedEmployeeIds.includes(claimingEmployeeId)

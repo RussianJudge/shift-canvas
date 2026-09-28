@@ -5,6 +5,7 @@ import {
   canBeNotifiedAboutPosting,
   describeOvertimeBlocker,
   findOvertimeBlocker,
+  isPostingInThePast,
 } from "../lib/overtime-eligibility";
 import type { Employee, SchedulerSnapshot, StoredAssignment, SubScheduleAssignment } from "../lib/types";
 
@@ -173,4 +174,27 @@ test("every blocker has a reason the claim form can show", () => {
   ] as const) {
     assert.match(describeOvertimeBlocker(blocker), /\w/);
   }
+});
+
+test("a posting whose last shift has passed cannot be claimed", () => {
+  assert.equal(isPostingInThePast(["2026-09-25"], "2026-09-28"), true);
+});
+
+test("a posting is claimable on the day it runs", () => {
+  // Someone can still pick up tonight's shift this morning.
+  assert.equal(isPostingInThePast(["2026-09-28"], "2026-09-28"), false);
+});
+
+test("a run that started in the past but has not finished is still claimable", () => {
+  // The last date, not the first: there is work left in it.
+  assert.equal(isPostingInThePast(["2026-09-26", "2026-09-27", "2026-09-29"], "2026-09-28"), false);
+});
+
+test("dates in any order give the same answer", () => {
+  assert.equal(isPostingInThePast(["2026-09-29", "2026-09-26"], "2026-09-28"), false);
+  assert.equal(isPostingInThePast(["2026-09-25", "2026-09-24"], "2026-09-28"), true);
+});
+
+test("a posting with no dates is not treated as past", () => {
+  assert.equal(isPostingInThePast([], "2026-09-28"), false);
 });

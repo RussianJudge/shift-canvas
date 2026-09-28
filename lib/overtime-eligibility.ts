@@ -46,6 +46,23 @@ export function describeOvertimeBlocker(blocker: OvertimeBlocker) {
   return BLOCKER_REASONS[blocker];
 }
 
+/**
+ * Whether a posting's shifts have all been and gone.
+ *
+ * Separate from the blocker rules, which describe the employee: this describes
+ * the posting, and it applies to everyone equally. A posting whose last date
+ * has passed cannot be worked by anyone, so it cannot be claimed either.
+ *
+ * The last date, not the first: a run that starts yesterday and ends tomorrow
+ * still has work left in it, and the board's availability filter draws the line
+ * the same way.
+ */
+export function isPostingInThePast(dates: string[], today: string) {
+  const latest = dates.reduce((max, date) => (date > max ? date : max), "");
+
+  return Boolean(latest) && latest < today;
+}
+
 function hasMutualAssignmentOnDate(snapshot: SchedulerSnapshot, employeeId: string, date: string) {
   return snapshot.assignments.some(
     (assignment) =>

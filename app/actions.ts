@@ -69,7 +69,7 @@ import {
   resolveClaimCoverageCompetencyId,
   type OvertimeAssignmentRow,
 } from "@/lib/overtime";
-import { canBeNotifiedAboutPosting } from "@/lib/overtime-eligibility";
+import { canBeNotifiedAboutPosting, isPostingInThePast } from "@/lib/overtime-eligibility";
 import {
   buildOvertimePostingNotification,
   buildOvertimePostingNotificationId,
@@ -339,25 +339,22 @@ function toEmailCandidates(rows: NotificationRowForEmail[]): NotificationEmailCa
 }
 
 /**
- * Hands the send to the runtime once the response has gone out.
+ * Sends the outbox before the action returns.
  *
- * `after` throws synchronously outside a request scope, and a notification
- * write must never be able to fail the mutation that caused it, so the
- * scheduling itself is guarded. `sendNotificationEmails` never rejects, which
- * is what makes the fallback safe to leave floating.
+ * This used to be deferred with `after`, which kept the write fast but meant
+ * nothing was ever sent by the request that created it: in production the
+ * callback did not survive the response closing, and notifications only went
+ * out when some later action's flush swept up the backlog — twenty minutes
+ * late, or not until somebody else posted overtime. Overtime that arrives
+ * after it has been claimed is worth less than the latency it saved.
+ *
+ * One batched Resend call, and it never rejects, so it cannot fail the
+ * mutation that caused it.
  */
-function scheduleEmailFlush(supabase: SupabaseAdminClient) {
-  const run = () =>
-    flushNotificationEmails(supabase).catch((error: unknown) => {
-      console.error("Notification email failed:", error);
-    });
-
-  try {
-    after(run);
-  } catch (error) {
-    console.error("Notification email could not be deferred, sending inline instead:", error);
-    void run();
-  }
+async function flushEmailsBeforeReturning(supabase: SupabaseAdminClient) {
+  await flushNotificationEmails(supabase).catch((error: unknown) => {
+    console.error("Notification email failed:", error);
+  });
 }
 
 /** Resend's daily allowance on this plan, shared with account invites. */
@@ -553,7 +550,7 @@ async function createOvertimeRemovedNotifications(
     ).map((entry) => getEmployeeContactsByIds(entry.employeeIds, entry.scope)),
   );
 
-  scheduleEmailFlush(supabase);
+  await flushEmailsBeforeReturning(supabase);
 
   return { ok: true as const, inserted };
 }
@@ -624,7 +621,7 @@ async function createOvertimePostingNotifications(
   const insertedIds = new Set(((data as Array<{ id: string }> | null) ?? []).map((row) => row.id));
   const inserted = rows.filter((row) => insertedIds.has(row.id));
 
-  scheduleEmailFlush(supabase);
+  await flushEmailsBeforeReturning(supabase);
 
   return { ok: true as const, notified: rows.length, inserted };
 }
@@ -755,6 +752,10 @@ async function reconcileOvertimeShortfallNotices(
 
   if (changedAny) {
     revalidatePath("/notifications");
+    // This whole job is already deferred, so sending here costs the save
+    // nothing and stops generated overtime waiting on an unrelated action's
+    // flush to reach anyone.
+    await flushEmailsBeforeReturning(supabase);
   }
 }
 
@@ -873,7 +874,7 @@ async function createMutualApprovalNotifications(
   }
 
   revalidatePath("/notifications");
-  scheduleEmailFlush(supabase);
+  await flushEmailsBeforeReturning(supabase);
 }
 
 /**
@@ -3437,6 +3438,14 @@ export async function claimOvertimePosting(input: ClaimOvertimePostingInput) {
     return {
       ok: false,
       message: "No overtime dates were provided.",
+    };
+  }
+
+  // The board disables the control, but a disabled control is not a rule.
+  if (isPostingInThePast(normalizedDates, getCurrentDateKey(BUSINESS_TIME_ZONE))) {
+    return {
+      ok: false,
+      message: "That overtime has already been worked and can no longer be claimed.",
     };
   }
 
