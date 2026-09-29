@@ -28,11 +28,11 @@ const CONFIRMATION_MESSAGES: Record<string, string> = {
  * about what they have suppressed.
  */
 export function NotificationSettingsPanel({
-  mutedTypes,
+  subscribedTypes,
   address,
   confirmationResult,
 }: {
-  mutedTypes: string[];
+  subscribedTypes: string[];
   address: ResolvedNotificationAddress | null;
   confirmationResult: string | null;
 }) {
@@ -43,10 +43,10 @@ export function NotificationSettingsPanel({
   const [addressMessage, setAddressMessage] = useState(
     confirmationResult ? CONFIRMATION_MESSAGES[confirmationResult] ?? "" : "",
   );
-  const [optimisticMuted, toggleOptimistic] = useOptimistic(
-    mutedTypes,
-    (current: string[], change: { type: string; muted: boolean }) =>
-      change.muted
+  const [optimisticSubscribed, toggleOptimistic] = useOptimistic(
+    subscribedTypes,
+    (current: string[], change: { type: string; subscribed: boolean }) =>
+      change.subscribed
         ? [...current, change.type]
         : current.filter((entry) => entry !== change.type),
   );
@@ -54,11 +54,11 @@ export function NotificationSettingsPanel({
   function handleToggle(notificationType: string, enabled: boolean) {
     startTransition(async () => {
       setErrorMessage("");
-      toggleOptimistic({ type: notificationType, muted: !enabled });
+      toggleOptimistic({ type: notificationType, subscribed: enabled });
 
       const result = await setNotificationEmailPreference({
         notificationType,
-        muted: !enabled,
+        subscribed: enabled,
       });
 
       if (!result.ok) {
@@ -99,8 +99,7 @@ export function NotificationSettingsPanel({
   return (
     <div className="notification-settings">
       <p className="notification-settings__intro">
-        Every update below always appears in Schwifty. These settings only control whether it is also
-        emailed to you.
+        Every update below always appears in Schwifty. Email is off unless you turn it on here.
       </p>
 
       {address ? (
@@ -160,7 +159,7 @@ export function NotificationSettingsPanel({
 
       <ul className="notification-settings__list">
         {EMAILED_NOTIFICATION_TYPES.map((type) => {
-          const enabled = !optimisticMuted.includes(type.value);
+          const enabled = optimisticSubscribed.includes(type.value);
 
           return (
             <li key={type.value} className="notification-settings__row">

@@ -5,7 +5,7 @@ import {
   formatEmployeeDisplayName,
   type EmployeeNameParts,
 } from "@/lib/employee-names";
-import { buildOptoutKey, type EmployeeContact } from "@/lib/notification-email";
+import { buildSubscriptionKey, type EmployeeContact } from "@/lib/notification-email";
 import {
   resolveNotificationAddress,
   type NotificationEmailOverride,
@@ -2840,39 +2840,39 @@ export async function getEmployeeContactsByIds(
 }
 
 /**
- * Who has muted which notification type for email.
+ * Who has asked for email, and for which notification types.
  *
  * Deliberately not scoped through `applySessionScope`: the table carries no
  * company/site/business-area columns, and that helper always filters on
  * `company_id`, so the query would 400 forever. The ids always arrive from an
  * already-scoped read, and `employees.id` is globally unique.
  *
- * The two failure directions are not the same. A missing table means the
- * migration has not landed, so nobody *can* have opted out yet and sending is
- * safe. Any other error might be hiding real opt-out rows, and mailing someone
- * who asked not to be mailed is the worse mistake — so that fails closed.
+ * Both failure directions now point the same way. Email is opt-in, so an empty
+ * result — whether the migration has not landed or the read failed — means
+ * nobody has asked for email and nothing is sent. Silence is the safe answer
+ * when the subscriptions cannot be read.
  */
-export async function readNotificationEmailOptouts(
+export async function readNotificationEmailSubscriptions(
   employeeIds: string[],
-): Promise<{ ok: true; muted: Set<string> } | { ok: false }> {
+): Promise<{ ok: true; subscribed: Set<string> } | { ok: false }> {
   const uniqueIds = Array.from(new Set(employeeIds));
   const supabase = getDataClient();
 
   if (!supabase || uniqueIds.length === 0) {
-    return { ok: true, muted: new Set() };
+    return { ok: true, subscribed: new Set() };
   }
 
   const { data, error } = await supabase
-    .from("notification_email_optouts")
+    .from("notification_email_subscriptions")
     .select("employee_id, notification_type")
     .in("employee_id", uniqueIds);
 
   if (error) {
     if (error.code === "42P01" || error.code === "PGRST205") {
-      return { ok: true, muted: new Set() };
+      return { ok: true, subscribed: new Set() };
     }
 
-    console.error("Notification email opt-outs could not be read, so no email was sent:", error.message);
+    console.error("Notification email subscriptions could not be read, so no email was sent:", error.message);
     return { ok: false };
   }
 
@@ -2880,7 +2880,7 @@ export async function readNotificationEmailOptouts(
 
   return {
     ok: true,
-    muted: new Set(rows.map((row) => buildOptoutKey(row.employee_id, row.notification_type))),
+    subscribed: new Set(rows.map((row) => buildSubscriptionKey(row.employee_id, row.notification_type))),
   };
 }
 

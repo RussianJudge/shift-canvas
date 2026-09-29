@@ -195,8 +195,11 @@ still unsent is an email owed, so a burst larger than the day's allowance sends
 what it can and the next save carries the rest rather than dropping it. The
 column records that the email was decided, not delivered — rows skipped for an
 opt-out or a missing address are stamped too, or they would be reconsidered
-forever. Sending is never on the request path, never fails the write that
-caused it, and honours the per-type opt-outs on `/notifications/settings`.
+forever. Sending never fails the write that caused it, and is opt-in: a row in
+`notification_email_subscriptions` means somebody asked for that type, and
+without one nothing is sent. The default is off for everyone — an allowance of
+a hundred a day does not stretch to a workforce that never asked, and the
+in-app notification is the one that always arrives.
 
 **Generated overtime notifies too.** The board's generated postings — the gaps a
 completed set leaves — have no posting row, so they are announced from the

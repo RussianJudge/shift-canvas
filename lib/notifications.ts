@@ -10,7 +10,9 @@ export const NOTIFICATION_TYPES = {
 export type NotificationType = (typeof NOTIFICATION_TYPES)[keyof typeof NOTIFICATION_TYPES];
 
 /**
- * The types that also send email, and the only ones the settings page offers.
+ * The types that can send email, and the only ones the settings page offers.
+ *
+ * Email is opt-in: nothing here is sent until somebody asks for it.
  *
  * Schedule loans are absent because their notification ids are still random,
  * so a repeated write would mail the same person twice.

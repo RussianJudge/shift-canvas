@@ -38,7 +38,7 @@ export type EmailRecipientSelection = {
   recipients: NotificationEmailRecipient[];
   skipped: {
     noEmail: number;
-    muted: number;
+    unsubscribed: number;
     collapsed: number;
   };
 };
@@ -48,7 +48,7 @@ export function normalizeRecipientEmail(raw: string | null | undefined) {
   return raw?.trim().toLowerCase() || null;
 }
 
-export function buildOptoutKey(employeeId: string, type: string) {
+export function buildSubscriptionKey(employeeId: string, type: string) {
   return `${employeeId}:${type}`;
 }
 
@@ -60,19 +60,20 @@ export function buildOptoutKey(employeeId: string, type: string) {
  * month of separate emails would read as a malfunction, so the extras are
  * folded into `additionalCount` and the caller mentions them.
  *
- * An opt-out is checked before the address, so someone who muted a type and has
- * no email on file counts once, as muted.
+ * Email is opt-in: without a subscription row for that person and type nothing
+ * is sent. The subscription is checked before the address, so someone who never
+ * asked for email and has none on file counts once, as unsubscribed.
  */
 export function selectEmailRecipients(input: {
   notifications: NotificationEmailCandidate[];
   contactsByEmployeeId: Map<string, EmployeeContact>;
-  mutedKeys: Set<string>;
+  subscribedKeys: Set<string>;
 }): EmailRecipientSelection {
   const recipients = new Map<string, NotificationEmailRecipient>();
-  const skipped = { noEmail: 0, muted: 0, collapsed: 0 };
+  const skipped = { noEmail: 0, unsubscribed: 0, collapsed: 0 };
 
   for (const notification of input.notifications) {
-    const groupKey = buildOptoutKey(notification.employeeId, notification.type);
+    const groupKey = buildSubscriptionKey(notification.employeeId, notification.type);
     const existing = recipients.get(groupKey);
 
     if (existing) {
@@ -82,8 +83,8 @@ export function selectEmailRecipients(input: {
       continue;
     }
 
-    if (input.mutedKeys.has(groupKey)) {
-      skipped.muted += 1;
+    if (!input.subscribedKeys.has(groupKey)) {
+      skipped.unsubscribed += 1;
       continue;
     }
 

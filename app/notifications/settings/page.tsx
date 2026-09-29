@@ -3,7 +3,7 @@ import Link from "next/link";
 import { NotificationSettingsPanel } from "@/components/notification-settings-panel";
 import { WorkspaceShellFrame } from "@/components/workspace-shell-frame";
 import { requireAppSession } from "@/lib/auth";
-import { getNotificationEmailSettings, readNotificationEmailOptouts } from "@/lib/data";
+import { getNotificationEmailSettings, readNotificationEmailSubscriptions } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -23,14 +23,15 @@ export default async function NotificationSettingsPage({
 }) {
   const session = await requireAppSession(["admin", "leader", "worker"]);
   const { address: confirmationResult } = await searchParams;
-  const optouts = session.employeeId
-    ? await readNotificationEmailOptouts([session.employeeId])
+  const subscriptions = session.employeeId
+    ? await readNotificationEmailSubscriptions([session.employeeId])
     : null;
-  const mutedTypes =
-    optouts?.ok && session.employeeId
-      ? Array.from(optouts.muted)
-          .filter((key) => key.startsWith(`${session.employeeId}:`))
-          .map((key) => key.slice(key.indexOf(":") + 1))
+  const employeeId = session.employeeId;
+  const subscribedTypes =
+    subscriptions?.ok && employeeId
+      ? Array.from(subscriptions.subscribed)
+          .filter((key: string) => key.startsWith(`${employeeId}:`))
+          .map((key: string) => key.slice(key.indexOf(":") + 1))
       : [];
   const addressSettings = await getNotificationEmailSettings(session);
 
@@ -52,14 +53,14 @@ export default async function NotificationSettingsPage({
             <strong>Your account is not linked to an employee record.</strong>
             <span>Notifications are addressed to an employee, so there is nothing to configure until a leader links your account.</span>
           </div>
-        ) : optouts && !optouts.ok ? (
+        ) : subscriptions && !subscriptions.ok ? (
           <div className="empty-state">
             <strong>Your notification settings could not be loaded.</strong>
             <span>Refresh the page to try again.</span>
           </div>
         ) : (
           <NotificationSettingsPanel
-            mutedTypes={mutedTypes}
+            subscribedTypes={subscribedTypes}
             address={addressSettings}
             confirmationResult={confirmationResult ?? null}
           />

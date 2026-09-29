@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  buildOptoutKey,
+  buildSubscriptionKey,
   normalizeRecipientEmail,
   selectEmailRecipients,
   type EmployeeContact,
@@ -22,6 +22,30 @@ function candidate(overrides: Partial<NotificationEmailCandidate> = {}): Notific
   };
 }
 
+
+/** Email is opt-in, so a recipient only hears anything with a row per type. */
+function subscribedTo(
+  ...employeeIds: Array<string | { except: Array<[string, string]> }>
+) {
+  const except = employeeIds.find((entry): entry is { except: Array<[string, string]> } =>
+    typeof entry !== "string",
+  )?.except ?? [];
+  const ids = employeeIds.filter((entry): entry is string => typeof entry === "string");
+  const keys = new Set<string>();
+
+  for (const employeeId of ids) {
+    for (const type of Object.values(NOTIFICATION_TYPES)) {
+      if (except.some(([id, excluded]) => id === employeeId && excluded === type)) {
+        continue;
+      }
+
+      keys.add(buildSubscriptionKey(employeeId, type));
+    }
+  }
+
+  return keys;
+}
+
 function contacts(entries: Array<[string, EmployeeContact]>) {
   return new Map<string, EmployeeContact>(entries);
 }
@@ -30,21 +54,21 @@ test("a qualified recipient with an address is selected", () => {
   const result = selectEmailRecipients({
     notifications: [candidate()],
     contactsByEmployeeId: contacts([["emp-1", { email: "adam@example.com", name: "Bursey, Adam" }]]),
-    mutedKeys: new Set(),
+    subscribedKeys: subscribedTo("emp-1", "emp-2"),
   });
 
   assert.equal(result.recipients.length, 1);
   assert.equal(result.recipients[0].email, "adam@example.com");
   assert.equal(result.recipients[0].name, "Bursey, Adam");
   assert.equal(result.recipients[0].additionalCount, 0);
-  assert.deepEqual(result.skipped, { noEmail: 0, muted: 0, collapsed: 0 });
+  assert.deepEqual(result.skipped, { noEmail: 0, unsubscribed: 0, collapsed: 0 });
 });
 
 test("an address is trimmed and lowercased to match the unique index", () => {
   const result = selectEmailRecipients({
     notifications: [candidate()],
     contactsByEmployeeId: contacts([["emp-1", { email: "  Adam@Example.COM  ", name: "Bursey, Adam" }]]),
-    mutedKeys: new Set(),
+    subscribedKeys: subscribedTo("emp-1", "emp-2"),
   });
 
   assert.equal(result.recipients[0].email, "adam@example.com");
@@ -55,7 +79,7 @@ test("null, empty and whitespace addresses are skipped and counted", () => {
     const result = selectEmailRecipients({
       notifications: [candidate()],
       contactsByEmployeeId: contacts([["emp-1", { email, name: "Bursey, Adam" }]]),
-      mutedKeys: new Set(),
+      subscribedKeys: subscribedTo("emp-1", "emp-2"),
     });
 
     assert.equal(result.recipients.length, 0);
@@ -67,14 +91,14 @@ test("an employee with no contact row at all is skipped", () => {
   const result = selectEmailRecipients({
     notifications: [candidate()],
     contactsByEmployeeId: contacts([]),
-    mutedKeys: new Set(),
+    subscribedKeys: subscribedTo("emp-1", "emp-2"),
   });
 
   assert.equal(result.recipients.length, 0);
   assert.equal(result.skipped.noEmail, 1);
 });
 
-test("a muted type is filtered while another type for the same person still sends", () => {
+test("an unsubscribed type is filtered while a subscribed one for the same person still sends", () => {
   const result = selectEmailRecipients({
     notifications: [
       candidate(),
@@ -85,22 +109,22 @@ test("a muted type is filtered while another type for the same person still send
       }),
     ],
     contactsByEmployeeId: contacts([["emp-1", { email: "adam@example.com", name: "Bursey, Adam" }]]),
-    mutedKeys: new Set([buildOptoutKey("emp-1", NOTIFICATION_TYPES.overtimePosted)]),
+    subscribedKeys: subscribedTo("emp-1", "emp-2", { except: [["emp-1", NOTIFICATION_TYPES.overtimePosted]] }),
   });
 
   assert.equal(result.recipients.length, 1);
   assert.equal(result.recipients[0].type, NOTIFICATION_TYPES.overtimeRemoved);
-  assert.equal(result.skipped.muted, 1);
+  assert.equal(result.skipped.unsubscribed, 1);
 });
 
-test("one person's muting does not affect anyone else", () => {
+test("one person's choice does not affect anyone else", () => {
   const result = selectEmailRecipients({
     notifications: [candidate(), candidate({ id: "n2", employeeId: "emp-2" })],
     contactsByEmployeeId: contacts([
       ["emp-1", { email: "adam@example.com", name: "Bursey, Adam" }],
       ["emp-2", { email: "sam@example.com", name: "Doe, Sam" }],
     ]),
-    mutedKeys: new Set([buildOptoutKey("emp-1", NOTIFICATION_TYPES.overtimePosted)]),
+    subscribedKeys: subscribedTo("emp-1", "emp-2", { except: [["emp-1", NOTIFICATION_TYPES.overtimePosted]] }),
   });
 
   assert.equal(result.recipients.length, 1);
@@ -116,7 +140,7 @@ test("several same-type notifications for one person become one email", () => {
       candidate({ id: "n3", type: NOTIFICATION_TYPES.overtimeRemoved }),
     ],
     contactsByEmployeeId: contacts([["emp-1", { email: "adam@example.com", name: "Bursey, Adam" }]]),
-    mutedKeys: new Set(),
+    subscribedKeys: subscribedTo("emp-1", "emp-2"),
   });
 
   assert.equal(result.recipients.length, 1);
@@ -131,7 +155,7 @@ test("a blank name falls back rather than greeting nobody", () => {
   const result = selectEmailRecipients({
     notifications: [candidate()],
     contactsByEmployeeId: contacts([["emp-1", { email: "adam@example.com", name: "   " }]]),
-    mutedKeys: new Set(),
+    subscribedKeys: subscribedTo("emp-1", "emp-2"),
   });
 
   assert.equal(result.recipients[0].name, "there");
@@ -141,11 +165,11 @@ test("no notifications selects nobody and counts nothing", () => {
   const result = selectEmailRecipients({
     notifications: [],
     contactsByEmployeeId: contacts([]),
-    mutedKeys: new Set(),
+    subscribedKeys: subscribedTo("emp-1", "emp-2"),
   });
 
   assert.deepEqual(result.recipients, []);
-  assert.deepEqual(result.skipped, { noEmail: 0, muted: 0, collapsed: 0 });
+  assert.deepEqual(result.skipped, { noEmail: 0, unsubscribed: 0, collapsed: 0 });
 });
 
 test("normalizeRecipientEmail rejects blanks and keeps real addresses", () => {
@@ -153,4 +177,35 @@ test("normalizeRecipientEmail rejects blanks and keeps real addresses", () => {
   assert.equal(normalizeRecipientEmail(undefined), null);
   assert.equal(normalizeRecipientEmail("  "), null);
   assert.equal(normalizeRecipientEmail(" A@B.com "), "a@b.com");
+});
+
+test("nobody is emailed without a subscription", () => {
+  // The default, and the reason for it: email is opt-in, so a workforce that
+  // has asked for nothing receives nothing.
+  const result = selectEmailRecipients({
+    notifications: [candidate(), candidate({ id: "n2", employeeId: "emp-2" })],
+    contactsByEmployeeId: contacts([
+      ["emp-1", { email: "adam@example.com", name: "Bursey, Adam" }],
+      ["emp-2", { email: "sam@example.com", name: "Doe, Sam" }],
+    ]),
+    subscribedKeys: new Set(),
+  });
+
+  assert.deepEqual(result.recipients, []);
+  assert.equal(result.skipped.unsubscribed, 2);
+});
+
+test("a subscription covers only the type it names", () => {
+  const result = selectEmailRecipients({
+    notifications: [
+      candidate(),
+      candidate({ id: "n2", type: NOTIFICATION_TYPES.overtimeRemoved }),
+    ],
+    contactsByEmployeeId: contacts([["emp-1", { email: "adam@example.com", name: "Bursey, Adam" }]]),
+    subscribedKeys: new Set([buildSubscriptionKey("emp-1", NOTIFICATION_TYPES.overtimeRemoved)]),
+  });
+
+  assert.equal(result.recipients.length, 1);
+  assert.equal(result.recipients[0].type, NOTIFICATION_TYPES.overtimeRemoved);
+  assert.equal(result.skipped.unsubscribed, 1);
 });

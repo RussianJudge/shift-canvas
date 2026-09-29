@@ -43,7 +43,7 @@ import {
   getNotificationEmailSettings,
   getScheduleReferenceSnapshot,
   readMutualSettings,
-  readNotificationEmailOptouts,
+  readNotificationEmailSubscriptions,
   readNotificationEmailOverrides,
 } from "@/lib/data";
 import {
@@ -430,9 +430,11 @@ async function flushNotificationEmails(supabase: SupabaseAdminClient) {
     return;
   }
 
-  const optouts = await readNotificationEmailOptouts(pending.map((row) => row.recipient_employee_id));
+  const subscriptions = await readNotificationEmailSubscriptions(
+    pending.map((row) => row.recipient_employee_id),
+  );
 
-  if (!optouts.ok) {
+  if (!subscriptions.ok) {
     return;
   }
 
@@ -457,7 +459,7 @@ async function flushNotificationEmails(supabase: SupabaseAdminClient) {
   const selection = selectEmailRecipients({
     notifications: toEmailCandidates(pending),
     contactsByEmployeeId: contacts,
-    mutedKeys: optouts.muted,
+    subscribedKeys: subscriptions.subscribed,
   });
   const sending = selection.recipients.slice(0, budget);
   const deferred = selection.recipients.slice(budget);
@@ -485,7 +487,7 @@ async function flushNotificationEmails(supabase: SupabaseAdminClient) {
 
   console.info(
     `Notification email: ${sending.length} sent, ${deferred.length} held for the next run, ` +
-      `${selection.skipped.noEmail} without an address, ${selection.skipped.muted} opted out, ` +
+      `${selection.skipped.noEmail} without an address, ${selection.skipped.unsubscribed} not subscribed, ` +
       `${selection.skipped.collapsed} folded into another email.`,
   );
 }
@@ -7304,7 +7306,7 @@ export async function saveTimeCodes(input: SaveTimeCodesInput) {
  */
 export async function setNotificationEmailPreference(input: {
   notificationType: string;
-  muted: boolean;
+  subscribed: boolean;
 }) {
   const session = await requireActionRole(["admin", "leader", "worker"]);
 
@@ -7329,15 +7331,17 @@ export async function setNotificationEmailPreference(input: {
     return { ok: false, message: "Supabase is not configured yet. Notification settings are unavailable." };
   }
 
-  const { error } = input.muted
+  // A row means "email me this"; no row means no email, which is where
+  // everyone starts.
+  const { error } = input.subscribed
     ? await supabase
-        .from("notification_email_optouts")
+        .from("notification_email_subscriptions")
         .upsert(
           { employee_id: session.employeeId, notification_type: input.notificationType },
           { onConflict: "employee_id,notification_type", ignoreDuplicates: true },
         )
     : await supabase
-        .from("notification_email_optouts")
+        .from("notification_email_subscriptions")
         .delete()
         .eq("employee_id", session.employeeId)
         .eq("notification_type", input.notificationType);
