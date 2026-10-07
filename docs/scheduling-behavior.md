@@ -310,6 +310,20 @@ Approving one side retires that side's notices and leaves the other crew's
 standing; rejecting, withdrawing or cancelling retires both. A notice that
 outlived the approval it asked for is the failure this avoids.
 
+**A swap must not reshuffle a third person's work.** When a mutual lands
+someone on a crew that is not their own, `findBestMutualCoverageCompetency`
+(`lib/mutual-coverage.ts`) chooses the post they fill: one they are qualified
+for, that the crew requires, and that has room — overtime cover does not count
+towards a post being filled, since the arriving worker is on regular time.
+
+Where there is a choice, a genuinely open post wins and a post somebody has
+claimed overtime on is taken only when there is nothing else. The order was
+once reversed, so that a mutual's regular-time body would absorb a post
+overtime was paying for. It saved nothing: the shortfall moved to whichever
+post the worker vacated, to be posted and claimed again, while the worker who
+had claimed the original shift had it released and their cells cleared by the
+stale-overtime sweep — all as a side effect of two other people swapping days.
+
 ### Personnel and competencies
 
 Preserve identity, active status, team, shift, role/post, competency,

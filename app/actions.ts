@@ -81,6 +81,13 @@ import {
   EMAILED_NOTIFICATION_TYPES,
   NOTIFICATION_TYPES,
 } from "@/lib/notifications";
+import {
+  findBestMutualCoverageCompetency,
+  type StaffingAssignment,
+  type StaffingCompetency,
+  type StaffingOvertimeClaim,
+  type StaffingSchedule,
+} from "@/lib/mutual-coverage";
 import { findOvertimeShortfalls, groupShortfallNotices } from "@/lib/overtime-shortfalls";
 import {
   buildAcceptedMutualAssignmentRows,
@@ -112,27 +119,6 @@ import { getSupabaseAdminClient } from "@/lib/supabase";
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
 type ActionScope = { companyId: string; siteId: string; businessAreaId: string };
 type ScopedDatabaseRow = { company_id: string; site_id: string; business_area_id: string };
-type StaffingAssignment = {
-  scheduleId: string;
-  date: string;
-  competencyId: string | null;
-  timeCodeId?: string | null;
-  notes?: string | null;
-};
-type StaffingOvertimeClaim = {
-  scheduleId: string | null;
-  date: string;
-  competencyId: string | null;
-};
-type StaffingSchedule = {
-  id: string;
-  competencyIds: string[];
-};
-type StaffingCompetency = {
-  id: string;
-  code: string;
-  requiredStaff: number;
-};
 type RemovedOvertimeClaimNotification = {
   claimId: string;
   employeeId: string;
@@ -996,68 +982,6 @@ async function createTemporaryLoanNotifications(
   }
 
   return { ok: true as const };
-}
-
-function findBestMutualCoverageCompetency({
-  schedule,
-  employeeCompetencyIds,
-  date,
-  competencies,
-  assignments,
-  overtimeClaims,
-  pendingFillCounts,
-}: {
-  schedule: StaffingSchedule;
-  employeeCompetencyIds: string[];
-  date: string;
-  competencies: StaffingCompetency[];
-  assignments: StaffingAssignment[];
-  overtimeClaims: StaffingOvertimeClaim[];
-  pendingFillCounts: Map<string, number>;
-}) {
-  const candidates = competencies
-    .filter(
-      (competency) =>
-        schedule.competencyIds.includes(competency.id) &&
-        employeeCompetencyIds.includes(competency.id),
-    )
-    .map((competency) => {
-      const fillKey = `${schedule.id}:${date}:${competency.id}`;
-      const filledCount =
-        assignments.reduce(
-          (count, assignment) =>
-            count +
-            Number(
-              assignment.scheduleId === schedule.id &&
-                assignment.date === date &&
-                assignment.competencyId === competency.id &&
-                !isOvertimeGeneratedAssignment(assignment.notes),
-            ),
-          0,
-        ) + (pendingFillCounts.get(fillKey) ?? 0);
-      const openSlots = Math.max(0, competency.requiredStaff - filledCount);
-      const attachedOvertimeClaims = overtimeClaims.filter(
-        (claim) =>
-          claim.scheduleId === schedule.id &&
-          claim.date === date &&
-          claim.competencyId === competency.id,
-      ).length;
-
-      return {
-        competency,
-        attachedOvertimeClaims,
-        openSlots,
-      };
-    })
-    .filter((entry) => entry.openSlots > 0)
-    .sort(
-      (left, right) =>
-        right.attachedOvertimeClaims - left.attachedOvertimeClaims ||
-        right.openSlots - left.openSlots ||
-        left.competency.code.localeCompare(right.competency.code),
-    );
-
-  return candidates[0]?.competency.id ?? null;
 }
 
 /**
