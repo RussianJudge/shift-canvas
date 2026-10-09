@@ -14,6 +14,7 @@ import "./shifts.css";
 import "./schedule.css";
 import "./personal-schedule.css";
 import "./notifications.css";
+import "./pat-leave.css";
 
 export const metadata: Metadata = {
   title: "Schwifty",

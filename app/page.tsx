@@ -1,29 +1,17 @@
-import { BrandLockup } from "@/components/brand-lockup";
+import { PatLeaveNotice } from "@/components/pat-leave-notice";
 import { getAppSession, getSessionHomePath } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const session = await getAppSession();
-  const primaryHref = session ? getSessionHomePath() : "/sign-in";
 
   return (
-    <main className="auth-home">
-      <section className="auth-home__panel">
-        <div className="auth-home__copy">
-          <BrandLockup />
-          <h1 className="auth-home__title">Turn your personnel data into clear staffing decisions.</h1>
-          <p className="auth-home__subtitle">
-            Use workforce availability, competencies, and overtime coverage to plan smarter every month.
-          </p>
-        </div>
-
-        <div className="auth-home__actions">
-          <a href={primaryHref} className="primary-button">
-            {session ? "Open workspace" : "Log in"}
-          </a>
-        </div>
-      </section>
-    </main>
+    <PatLeaveNotice
+      eyebrow="Out of office"
+      title="Schwifty is off on pat leave."
+      actionHref={session ? getSessionHomePath() : "/sign-in"}
+      actionLabel={session ? "Open workspace anyway" : "Log in anyway"}
+    />
   );
 }
