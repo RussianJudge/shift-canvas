@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, startTransition } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -1888,20 +1888,24 @@ export function MonthlyScheduler({
     );
   }
 
-  const visibleEmployees = displayEmployees.filter((employee) => {
-    if (
-      selectedCompetencyFilter !== "all" &&
-      !employee.competencyIds.includes(selectedCompetencyFilter)
-    ) {
-      return false;
-    }
+  const visibleEmployees = useMemo(
+    () =>
+      displayEmployees.filter((employee) => {
+        if (
+          selectedCompetencyFilter !== "all" &&
+          !employee.competencyIds.includes(selectedCompetencyFilter)
+        ) {
+          return false;
+        }
 
-    if (!deferredSearch) {
-      return true;
-    }
+        if (!deferredSearch) {
+          return true;
+        }
 
-    return `${employee.name} ${employee.role}`.toLowerCase().includes(deferredSearch);
-  });
+        return `${employee.name} ${employee.role}`.toLowerCase().includes(deferredSearch);
+      }),
+    [deferredSearch, displayEmployees, selectedCompetencyFilter],
+  );
   const displayEmployeeMap = useMemo(
     () => Object.fromEntries(displayEmployees.map((employee) => [employee.sourceEmployeeId, employee])),
     [displayEmployees],
@@ -2047,9 +2051,13 @@ export function MonthlyScheduler({
         .map((competencyId) => competencyMap[competencyId])
         .filter(isCompetency)
     : [];
-  const highlightedMissingDates = selectedCoverageCompetencyId
-    ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
-    : new Set<string>();
+  const highlightedMissingDates = useMemo(
+    () =>
+      selectedCoverageCompetencyId
+        ? new Set(competencyCoverage[selectedCoverageCompetencyId]?.missingDates ?? [])
+        : new Set<string>(),
+    [competencyCoverage, selectedCoverageCompetencyId],
+  );
   const activeDirtyUpdates = useMemo(
     () =>
       dirtyUpdates.filter(
@@ -2229,14 +2237,19 @@ export function MonthlyScheduler({
       }));
   }, [activeSchedule, scheduleEmployeeOrderBySchedule]);
 
-  function getProjectedAssignmentForCell(employeeId: string, date: string) {
-    return projectedAssignmentIndex[createAssignmentKey(activeSchedule.id, employeeId, date)] ?? null;
-  }
+  const getProjectedAssignmentForCell = useCallback(
+    (employeeId: string, date: string) =>
+      projectedAssignmentIndex[createAssignmentKey(activeSchedule.id, employeeId, date)] ?? null,
+    [activeSchedule.id, projectedAssignmentIndex],
+  );
 
-  const gridColumns =
-    viewMode === "week"
-      ? `var(--schedule-name-column-width, 7.75rem) repeat(${gridDays.length}, minmax(var(--schedule-week-day-column-width, 7rem), 1fr))`
-      : `var(--schedule-name-column-width, 7.75rem) repeat(${gridDays.length}, minmax(var(--schedule-day-column-width, 1.72rem), 1fr))`;
+  const gridColumns = useMemo(
+    () =>
+      viewMode === "week"
+        ? `var(--schedule-name-column-width, 7.75rem) repeat(${gridDays.length}, minmax(var(--schedule-week-day-column-width, 7rem), 1fr))`
+        : `var(--schedule-name-column-width, 7.75rem) repeat(${gridDays.length}, minmax(var(--schedule-day-column-width, 1.72rem), 1fr))`,
+    [gridDays.length, viewMode],
+  );
   const rowVirtualizer = useVirtualizer({
     count: visibleEmployees.length,
     getScrollElement: () => scheduleBodyScrollRef.current,
@@ -2678,51 +2691,120 @@ export function MonthlyScheduler({
     });
   }
 
-  function handleCellPointerDown(
-    employeeId: string,
-    date: string,
-    dayIndex: number,
-    selection: AssignmentSelection,
-  ) {
-    if (isScheduleLocked) {
-      return;
-    }
-
-    if (getProjectedAssignmentForCell(employeeId, date)) {
-      return;
-    }
-
-    if (canManageSetBuilder) {
-      setSelectedSetAnchorDate(date);
-      setSelectedCoverageCompetencyId(null);
-    }
-
-    setSelectedCell({ employeeId, date });
-    setDragRange({
-      employeeId,
-      startIndex: dayIndex,
-      currentIndex: dayIndex,
-      selection,
-    });
-  }
-
-  function handleDragHover(employeeId: string, dayIndex: number) {
-    if (isScheduleLocked) {
-      return;
-    }
-
-    setDragRange((current) => {
-      if (!current || current.employeeId !== employeeId || current.currentIndex === dayIndex) {
-        return current;
+  const handleCellPointerDown = useCallback(
+    (employeeId: string, date: string, dayIndex: number, selection: AssignmentSelection) => {
+      if (isScheduleLocked) {
+        return;
       }
 
-      return {
-        ...current,
-        currentIndex: dayIndex,
-      };
-    });
-  }
+      if (getProjectedAssignmentForCell(employeeId, date)) {
+        return;
+      }
 
+      if (canManageSetBuilder) {
+        setSelectedSetAnchorDate(date);
+        setSelectedCoverageCompetencyId(null);
+      }
+
+      setSelectedCell({ employeeId, date });
+      setDragRange({
+        employeeId,
+        startIndex: dayIndex,
+        currentIndex: dayIndex,
+        selection,
+      });
+    },
+    [canManageSetBuilder, getProjectedAssignmentForCell, isScheduleLocked],
+  );
+
+  const handleDragHover = useCallback(
+    (employeeId: string, dayIndex: number) => {
+      if (isScheduleLocked) {
+        return;
+      }
+
+      setDragRange((current) => {
+        if (!current || current.employeeId !== employeeId || current.currentIndex === dayIndex) {
+          return current;
+        }
+
+        return {
+          ...current,
+          currentIndex: dayIndex,
+        };
+      });
+    },
+    [isScheduleLocked],
+  );
+
+  const handleCellClick = useCallback(
+    (cell: { employeeId: string; date: string }) => {
+      if (!canEdit || isScheduleLocked) {
+        return;
+      }
+
+      if (canManageSetBuilder) {
+        setSelectedSetAnchorDate(cell.date);
+        setSelectedCoverageCompetencyId(null);
+      }
+
+      if (completedSetDates.has(cell.date)) {
+        setStatusMessage(
+          "This week is locked. Reopen the set to edit shifts — you can still add a note.",
+        );
+      }
+
+      const projectedAssignment = getProjectedAssignmentForCell(cell.employeeId, cell.date);
+
+      if (projectedAssignment) {
+        setStatusMessage(getProjectedCellMessage(projectedAssignment));
+        return;
+      }
+
+      const clickedEmployee = displayEmployeeMap[cell.employeeId] ?? null;
+      const clickedShiftKind = shiftForDate(activeSchedule, cell.date);
+      const clickedSelection = getSelectionForCell(
+        activeSchedule.id,
+        cell.employeeId,
+        cell.date,
+        clickedShiftKind,
+        effectiveAssignments,
+        snapshot.timeCodes,
+      );
+      const parsedLoan = parseTemporaryLoanAssignmentNote(clickedSelection.notes);
+
+      if (parsedLoan.loanId) {
+        setLoanCancelTarget({
+          loanId: parsedLoan.loanId,
+          employeeName: clickedEmployee?.name ?? "This worker",
+          sourceScheduleName: parsedLoan.sourceScheduleId
+            ? scheduleNameMap[parsedLoan.sourceScheduleId] ?? "their home shift"
+            : "their home shift",
+          targetScheduleName: parsedLoan.targetScheduleId
+            ? scheduleNameMap[parsedLoan.targetScheduleId] ?? "the target shift"
+            : "the target shift",
+          date: cell.date,
+        });
+        setEditorCell(null);
+        return;
+      }
+
+      setSelectedCell(cell);
+      setEditorCell(cell);
+    },
+    [
+      activeSchedule,
+      canEdit,
+      canManageSetBuilder,
+      completedSetDates,
+      displayEmployeeMap,
+      effectiveAssignments,
+      getProjectedAssignmentForCell,
+      isScheduleLocked,
+      scheduleNameMap,
+      snapshot.timeCodes,
+    ],
+  );
   function navigateToScheduleMonth(nextMonth: string) {
     startMonthTransition(async () => {
       const savedDrafts = await saveActiveScheduleDrafts({ reason: "navigation" });
@@ -3637,77 +3719,20 @@ export function MonthlyScheduler({
                       employeeMap={employeeMap}
                       scheduleNameMap={scheduleNameMap}
                       completedSetDates={completedSetDates}
-                      selectedCell={selectedCell}
-                      dragRange={dragRange}
+                      selectedCell={
+                        selectedCell?.employeeId === employee.sourceEmployeeId ? selectedCell : null
+                      }
+                      dragRange={dragRange?.employeeId === employee.sourceEmployeeId ? dragRange : null}
                       highlightedMissingDates={highlightedMissingDates}
                       selectedCoverageCompetencyId={selectedCoverageCompetencyId}
                       selectedSetDays={selectedSetDays}
                       canEdit={canEdit && !isScheduleLocked}
                       onCellPointerDown={handleCellPointerDown}
                       onDragHover={handleDragHover}
-                      onCellClick={(cell) => {
-                        if (!canEdit || isScheduleLocked) {
-                          return;
-                        }
-
-                        if (canManageSetBuilder) {
-                          setSelectedSetAnchorDate(cell.date);
-                          setSelectedCoverageCompetencyId(null);
-                        }
-
-                        if (completedSetDates.has(cell.date)) {
-                          setStatusMessage(
-                            "This week is locked. Reopen the set to edit shifts — you can still add a note.",
-                          );
-                        }
-
-                        const projectedAssignment = getProjectedAssignmentForCell(cell.employeeId, cell.date);
-
-                        if (projectedAssignment) {
-                          setStatusMessage(getProjectedCellMessage(projectedAssignment));
-                          return;
-                        }
-
-                        const clickedEmployee = displayEmployeeMap[cell.employeeId] ?? null;
-                        const clickedShiftKind = shiftForDate(activeSchedule, cell.date);
-                        const clickedSelection = getSelectionForCell(
-                          activeSchedule.id,
-                          cell.employeeId,
-                          cell.date,
-                          clickedShiftKind,
-                          effectiveAssignments,
-                          snapshot.timeCodes,
-                        );
-                        const parsedLoan = parseTemporaryLoanAssignmentNote(clickedSelection.notes);
-
-                        if (parsedLoan.loanId) {
-                          setLoanCancelTarget({
-                            loanId: parsedLoan.loanId,
-                            employeeName: clickedEmployee?.name ?? "This worker",
-                            sourceScheduleName: parsedLoan.sourceScheduleId
-                              ? scheduleNameMap[parsedLoan.sourceScheduleId] ?? "their home shift"
-                              : "their home shift",
-                            targetScheduleName: parsedLoan.targetScheduleId
-                              ? scheduleNameMap[parsedLoan.targetScheduleId] ?? "the target shift"
-                              : "the target shift",
-                            date: cell.date,
-                          });
-                          setEditorCell(null);
-                          return;
-                        }
-
-                        setSelectedCell(cell);
-                        setEditorCell(cell);
-                      }}
-                      rowStyle={{
-                        gridTemplateColumns: gridColumns,
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start}px)`,
-                        height: `${virtualRow.size}px`,
-                      }}
+                      onCellClick={handleCellClick}
+                      gridColumns={gridColumns}
+                      virtualStart={virtualRow.start}
+                      virtualSize={virtualRow.size}
                     />
                   );
                 })}
@@ -3806,7 +3831,13 @@ export function MonthlyScheduler({
   );
 }
 
-function EmployeeRow({
+/**
+ * Memoised because the parent re-renders on every pointer move during a
+ * drag-select, and on every keystroke in the search box. Every prop it takes is
+ * either a primitive or memoised upstream; adding one that is rebuilt per render
+ * silently turns the memo off.
+ */
+const EmployeeRow = memo(function EmployeeRow({
   employee,
   schedule,
   gridDays,
@@ -3828,7 +3859,9 @@ function EmployeeRow({
   onCellPointerDown,
   onDragHover,
   onCellClick,
-  rowStyle,
+  gridColumns,
+  virtualStart,
+  virtualSize,
 }: {
   employee: DisplayEmployee;
   schedule: Schedule;
@@ -3856,7 +3889,9 @@ function EmployeeRow({
   ) => void;
   onDragHover: (employeeId: string, dayIndex: number) => void;
   onCellClick: (cell: SelectedCell) => void;
-  rowStyle?: CSSProperties;
+  gridColumns: string;
+  virtualStart: number;
+  virtualSize: number;
 }) {
   const setDates = useMemo(() => new Set(selectedSetDays.map((day) => day.date)), [selectedSetDays]);
   const overtimeDateSet = useMemo(
@@ -3881,7 +3916,18 @@ function EmployeeRow({
     : null;
 
   return (
-    <div className="schedule-grid-row" style={rowStyle}>
+    <div
+      className="schedule-grid-row"
+      style={{
+        gridTemplateColumns: gridColumns,
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${virtualStart}px)`,
+        height: `${virtualSize}px`,
+      }}
+    >
       <div className={`employee-cell sticky-column ${isSelectedEmployee ? "employee-cell--selected" : ""}`}>
         {initials ? (
           <span className="employee-cell__avatar" aria-hidden="true">
@@ -4073,4 +4119,4 @@ function EmployeeRow({
       })}
     </div>
   );
-}
+});
