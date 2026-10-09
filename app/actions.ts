@@ -301,6 +301,29 @@ function doesAssignmentFillManualPosting(
  */
 const MAX_OVERTIME_REMOVED_EMAILS_PER_SWEEP = 25;
 
+/**
+ * The snapshot shape the stale-overtime sweep and the shortfall reconcile both
+ * request, so that within one save they share a single load.
+ *
+ * It is the union of what each needs: the sweep would manage with a month
+ * window and no employee competencies, but asking for the wider shape once
+ * costs less than loading twice. `getScheduleReferenceSnapshot` keys its cache
+ * on the options, so these must stay identical to keep sharing.
+ */
+const SHARED_SNAPSHOT_OPTIONS = {
+  includeEmployeeCompetencies: true,
+  includeCompetencies: true,
+  includeTimeCodes: true,
+  includeSubSchedules: false,
+  includeAssignments: true,
+  includeSubScheduleAssignments: true,
+  includeOvertimeClaims: true,
+  includeManualOvertimePostings: true,
+  includeCompletedSets: true,
+  assignmentWindow: "extended",
+  completedSetWindow: "extended",
+} as const;
+
 /** The operation's local day decides which shortfalls are still ahead. */
 const BUSINESS_TIME_ZONE = "America/Edmonton";
 
@@ -633,6 +656,15 @@ async function reconcileOvertimeShortfallNotices(
   supabase: SupabaseAdminClient,
   months: string[],
   session: Awaited<ReturnType<typeof getAppSession>> | null,
+  /**
+   * Snapshots the caller has already loaded, keyed by month.
+   *
+   * Filled by the sweep as it runs and read here afterwards, since this job is
+   * deferred until the response has gone out. Handing the object over rather
+   * than relying on React's `cache()` is deliberate: that cache only memoises
+   * inside a render scope, so two calls in a server action load twice.
+   */
+  loadedSnapshots: Map<string, SchedulerSnapshot> = new Map(),
 ) {
   const sessionScope = getSessionScope(session);
 
@@ -648,19 +680,22 @@ async function reconcileOvertimeShortfallNotices(
       continue;
     }
 
-    const snapshot = await getScheduleReferenceSnapshot(month, session, {
-      includeEmployeeCompetencies: true,
-      includeCompetencies: true,
-      includeTimeCodes: true,
-      includeSubSchedules: false,
-      includeAssignments: true,
-      includeSubScheduleAssignments: true,
-      includeOvertimeClaims: false,
-      includeManualOvertimePostings: false,
-      includeCompletedSets: true,
-      assignmentWindow: "extended",
-      completedSetWindow: "extended",
-    });
+    const snapshot =
+      loadedSnapshots.get(month) ??
+      (await getScheduleReferenceSnapshot(month, session, SHARED_SNAPSHOT_OPTIONS));
+
+    // Generated overtime only exists inside a completed set, so a month with
+    // none has nothing to announce and nothing to retire. Most edited months
+    // are still being built and qualify, which skips the whole derivation.
+    const monthEnd = `${month}-31`;
+    const hasCompletedSet = snapshot.completedSets.some(
+      (completedSet) => completedSet.startDate <= monthEnd && completedSet.endDate >= `${month}-01`,
+    );
+
+    if (!hasCompletedSet) {
+      continue;
+    }
+
     const employees = snapshot.schedules.flatMap((schedule) => schedule.employees);
     const notices = groupShortfallNotices(
       findOvertimeShortfalls(snapshot, today).flatMap((shortfall) =>
@@ -940,9 +975,10 @@ function scheduleShortfallNotifications(
   supabase: SupabaseAdminClient,
   months: string[],
   session: Awaited<ReturnType<typeof getAppSession>> | null,
+  loadedSnapshots: Map<string, SchedulerSnapshot> = new Map(),
 ) {
   const run = () =>
-    reconcileOvertimeShortfallNotices(supabase, months, session).catch((error: unknown) => {
+    reconcileOvertimeShortfallNotices(supabase, months, session, loadedSnapshots).catch((error: unknown) => {
       console.error("Generated overtime notifications failed:", error);
     });
 
@@ -1618,23 +1654,17 @@ async function removeStaleOvertimeClaims(
   let removedManualPostings = 0;
 
   // Every save that can open a gap passes through here. Deferred, so it reads
-  // the schedule as this sweep leaves it and never slows the save.
-  scheduleShortfallNotifications(supabase, uniqueMonths, session);
+  // the schedule as this sweep leaves it and never slows the save. The map is
+  // empty now and filled by the loop below; the deferred job runs after the
+  // response, by which time it holds every snapshot this sweep loaded.
+  const loadedSnapshots = new Map<string, SchedulerSnapshot>();
+
+  scheduleShortfallNotifications(supabase, uniqueMonths, session, loadedSnapshots);
 
   for (const month of uniqueMonths) {
-    const snapshot = await getScheduleReferenceSnapshot(month, session, {
-      includeEmployeeCompetencies: false,
-      includeCompetencies: true,
-      includeTimeCodes: true,
-      includeSubSchedules: false,
-      includeAssignments: true,
-      includeSubScheduleAssignments: true,
-      includeOvertimeClaims: true,
-      includeManualOvertimePostings: true,
-      includeCompletedSets: true,
-      assignmentWindow: "month",
-      completedSetWindow: "extended",
-    });
+    const snapshot = await getScheduleReferenceSnapshot(month, session, SHARED_SNAPSHOT_OPTIONS);
+    loadedSnapshots.set(month, snapshot);
+
     const monthDays = getMonthDays(month);
     const completedDateKeys = snapshot.completedSets.reduce<Set<string>>((set, completedSet) => {
       for (const day of monthDays) {

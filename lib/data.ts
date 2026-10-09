@@ -1297,10 +1297,48 @@ type ScheduleReferenceSnapshotOptions = {
  * Loads a narrower schedule/roster snapshot for pages and actions that do not
  * need the full scheduler board state.
  */
+/**
+ * Deduplicates the snapshot across one React render.
+ *
+ * `cache()` keys on its arguments by identity, and every call site passes a
+ * fresh options object, so caching the public function directly would never
+ * hit. The scope and the options are serialised to strings instead — which is
+ * what the scope-key helpers above were written for — and the session is
+ * rebuilt from the key, carrying only the fields `applySessionScope` reads.
+ *
+ * Note the limit: `cache()` only memoises inside a React render scope, so two
+ * calls from the same server action still load twice. Server actions that need
+ * to share a snapshot must hand it over themselves, as the overtime sweep does
+ * for the shortfall reconcile.
+ */
+const loadScheduleReferenceSnapshot = cache(async function loadScheduleReferenceSnapshot(
+  month: string,
+  scopeKey: string,
+  optionsKey: string,
+) {
+  const session = sessionFromScopeCacheKey(JSON.parse(scopeKey) as ScopeCacheKey);
+  const options = JSON.parse(optionsKey) as ScheduleReferenceSnapshotOptions;
+
+  return runScheduleReferenceSnapshot(month, session, options);
+});
+
 export async function getScheduleReferenceSnapshot(
   month: string,
   session?: AppSession | null,
   options: ScheduleReferenceSnapshotOptions = {},
+) {
+  // Sorted, so two option objects that differ only in key order share a key.
+  const optionsKey = JSON.stringify(
+    Object.fromEntries(Object.entries(options).sort(([left], [right]) => left.localeCompare(right))),
+  );
+
+  return loadScheduleReferenceSnapshot(month, JSON.stringify(toScopeCacheKey(session)), optionsKey);
+}
+
+async function runScheduleReferenceSnapshot(
+  month: string,
+  session: AppSession | null,
+  options: ScheduleReferenceSnapshotOptions,
 ) {
   const supabase = getDataClient();
 
