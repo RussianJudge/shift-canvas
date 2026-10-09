@@ -11,6 +11,7 @@ import { Button, IconButton } from "@/components/ui/button";
 import { Select, TextInput } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
 import { formatEmployeeDisplayName, splitEmployeeDisplayName } from "@/lib/employee-names";
+import { mergeServerRows } from "@/lib/draft-sync";
 import { deriveInitials } from "@/lib/initials";
 import { ROLE_LABELS } from "@/lib/types";
 import type {
@@ -429,6 +430,22 @@ function cloneEmployees(employees: EditableEmployee[]) {
   }));
 }
 
+/**
+ * Order-insensitive content key for a server payload.
+ *
+ * Every revalidation mints a new snapshot, so object identity cannot tell a
+ * genuine change from a re-render — and this panel's own autosave revalidates
+ * `/personnel`. Normalizing first means "changed" has the same definition here
+ * as it does for deciding what to save.
+ */
+function buildEmployeesSignature(employees: EditableEmployee[]) {
+  return JSON.stringify(
+    employees
+      .map((employee) => normalizeEmployee(employee))
+      .sort((left, right) => left.employeeId.localeCompare(right.employeeId)),
+  );
+}
+
 /** Normalizes UI row state into the payload expected by the save action. */
 function normalizeEmployee(employee: EditableEmployee): PersonnelUpdate {
   return {
@@ -823,6 +840,8 @@ export function PersonnelPanel({
   const csvInputRef = useRef<HTMLInputElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const lastPersonnelSaveSignatureRef = useRef("");
+  /** The server payload the local rows were last synced from. */
+  const appliedEmployeesSignatureRef = useRef<string | null>(null);
   const initialEmployees = useMemo<EditableEmployee[]>(
     () =>
       [
@@ -984,23 +1003,53 @@ export function PersonnelPanel({
     [deletedEmployeeIds, dirtyUpdates],
   );
 
+  /**
+   * Adopts a changed server payload without discarding the viewer's work.
+   *
+   * This used to reset on the identity of `initialEmployees`, which changes on
+   * every revalidation — including the one this panel's own autosave triggers.
+   * The search, both filters, a staged CSV import, a half-typed new employee and
+   * any row edited during the save round trip all went with it, and a removal
+   * waiting on autosave lost the id it needed to delete.
+   *
+   * So the sync runs only when the server data actually differs, and then merges
+   * rather than replaces: rows the viewer has edited stay theirs, rows they
+   * added that have not reached the server survive, and pending removals keep
+   * their place. Nothing the server does not own is touched.
+   */
   useEffect(() => {
-    setEmployees(cloneEmployees(initialEmployees));
+    const signature = buildEmployeesSignature(initialEmployees);
+
+    if (appliedEmployeesSignatureRef.current === null) {
+      appliedEmployeesSignatureRef.current = signature;
+      return;
+    }
+
+    if (signature === appliedEmployeesSignatureRef.current) {
+      return;
+    }
+
+    appliedEmployeesSignatureRef.current = signature;
+
+    const serverIds = new Set(initialEmployees.map((employee) => employee.id));
+
+    setEmployees((current) =>
+      cloneEmployees(
+        mergeServerRows({
+          serverRows: initialEmployees,
+          localRows: current,
+          baselineRows: baselineEmployees,
+          getId: (employee) => employee.id,
+          isEdited: (local) => dirtyEmployeeIds.has(local.id),
+          removalPendingIds: deletedEmployeeIds,
+        }),
+      ),
+    );
+
     setBaselineEmployees(cloneEmployees(initialEmployees));
-    setDeletedEmployeeIds([]);
-    setStatusMessage("");
-    setSearch("");
-    setSelectedScheduleFilter("all");
-    setSelectedCompetencyFilter("all");
-    setPendingCsvImport(null);
-    setDraftEmployee(null);
-    setAddInviteLink("");
-    setPendingRemoveEmployeeId(null);
-    setPendingCompetencyRemoval(null);
-    setShowActionsMenu(false);
-    setPendingAccountLink(null);
+    setDeletedEmployeeIds((current) => current.filter((employeeId) => serverIds.has(employeeId)));
     lastPersonnelSaveSignatureRef.current = "";
-  }, [initialEmployees]);
+  }, [baselineEmployees, deletedEmployeeIds, dirtyEmployeeIds, initialEmployees]);
 
 
   useEffect(() => {

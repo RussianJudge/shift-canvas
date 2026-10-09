@@ -13,6 +13,7 @@ import {
 } from "@/app/actions";
 import { AppDateSelector } from "@/components/app-date-selector";
 import { useWorkspaceNavigationGuard } from "@/components/workspace-shell";
+import { mergeDraftCells, mergeServerRows } from "@/lib/draft-sync";
 import { deriveInitials } from "@/lib/initials";
 import { useBusinessToday } from "@/lib/use-business-today";
 import { parseOvertimeAssignmentNote } from "@/lib/overtime";
@@ -119,6 +120,29 @@ function cloneCellSelections(selections: Record<string, SubScheduleCellSelection
   return Object.fromEntries(
     Object.entries(selections).map(([key, selection]) => [key, { ...selection }]),
   ) as Record<string, SubScheduleCellSelection>;
+}
+
+/**
+ * Order-insensitive content keys for the two server payloads this panel syncs.
+ *
+ * Every revalidation mints a new snapshot, so object identity cannot tell a
+ * genuine change from a re-render, and this panel revalidates itself twice over
+ * — once for definitions, once for assignments.
+ */
+function buildSubSchedulesSignature(subSchedules: EditableSubSchedule[]) {
+  return JSON.stringify(
+    subSchedules
+      .map((subSchedule) => ({ ...subSchedule, competencyIds: [...subSchedule.competencyIds].sort() }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  );
+}
+
+function buildCellSelectionsSignature(selections: Record<string, SubScheduleCellSelection>) {
+  return JSON.stringify(
+    Object.keys(selections)
+      .sort()
+      .map((key) => [key, selections[key]]),
+  );
 }
 
 function buildCellSelectionMap(snapshot: SchedulerSnapshot, subScheduleId: string, month: string) {
@@ -636,12 +660,17 @@ export function SubSchedulesPanel({
   const [isDeletingDefinition, startDefinitionDeleteTransition] = useTransition();
   const [isSavingAssignments, startAssignmentSaveTransition] = useTransition();
   const lastAssignmentSaveSignatureRef = useRef("");
+  /** The server payloads the local definitions and grid draft were last synced from. */
+  const appliedSubSchedulesSignatureRef = useRef<string | null>(null);
+  const appliedSelectionsRef = useRef<{
+    subScheduleId: string;
+    signature: string;
+    baseline: Record<string, SubScheduleCellSelection>;
+  } | null>(null);
 
   useEffect(() => {
-    setSubSchedules(cloneSubSchedules(initialSubSchedules));
-    setBaselineSubSchedules(cloneSubSchedules(initialSubSchedules));
     setSelectedSubScheduleId((current) => {
-      if (initialSubSchedules.some((subSchedule) => subSchedule.id === current)) {
+      if (subSchedules.some((subSchedule) => subSchedule.id === current)) {
         return current;
       }
 
@@ -651,40 +680,118 @@ export function SubSchedulesPanel({
 
       return initialSubSchedules.find((subSchedule) => !subSchedule.isArchived)?.id ?? initialSubSchedules[0]?.id ?? "";
     });
-    setAddedEmployeeIds([]);
-    setEmployeeToAddId("");
-    setIsEmployeePickerOpen(false);
-    setIsSettingsModalOpen(false);
-    setStatusMessage("");
-    setAssignmentMessage("");
-  }, [initialSelectedSubScheduleId, initialSubSchedules]);
+  }, [initialSelectedSubScheduleId, initialSubSchedules, subSchedules]);
+
+  /**
+   * Adopts changed definitions without discarding the viewer's work.
+   *
+   * This used to reset on the identity of `initialSubSchedules`, which changes
+   * on every revalidation — and a brand-new sub-schedule lives only in local
+   * state until its autosave lands, so an unrelated revalidation deleted it out
+   * from under the naming modal it had just opened. Unsaved renames, the rows
+   * added to the grid and the open modal went the same way.
+   *
+   * So the sync runs only when the server data actually differs, and then keeps
+   * definitions the viewer has edited and ones the server has not seen yet.
+   */
+  useEffect(() => {
+    const signature = buildSubSchedulesSignature(initialSubSchedules);
+
+    if (appliedSubSchedulesSignatureRef.current === null) {
+      appliedSubSchedulesSignatureRef.current = signature;
+      return;
+    }
+
+    if (signature === appliedSubSchedulesSignatureRef.current) {
+      return;
+    }
+
+    appliedSubSchedulesSignatureRef.current = signature;
+
+    setSubSchedules((current) =>
+      cloneSubSchedules(
+        mergeServerRows({
+          serverRows: initialSubSchedules,
+          localRows: current,
+          baselineRows: baselineSubSchedules,
+          getId: (subSchedule) => subSchedule.id,
+          isEdited: (local, baseline) => JSON.stringify(local) !== JSON.stringify(baseline),
+        }),
+      ),
+    );
+
+    setBaselineSubSchedules(cloneSubSchedules(initialSubSchedules));
+  }, [baselineSubSchedules, initialSubSchedules]);
 
   const activeSubSchedule =
     subSchedules.find((subSchedule) => subSchedule.id === selectedSubScheduleId) ?? null;
   const isPersistedActiveSubSchedule = activeSubSchedule
     ? snapshot.subSchedules.some((subSchedule) => subSchedule.id === activeSubSchedule.id)
     : false;
+  /**
+   * Keyed on the id, not on `activeSubSchedule` — that is a `find()` result, so
+   * it was a new object on every definition keystroke, and the sync below read
+   * that as a new baseline and threw the unsaved grid away mid-rename.
+   */
+  const activeSubScheduleId = activeSubSchedule?.id ?? "";
   const baselineAssignmentSelections = useMemo(
-    () =>
-      activeSubSchedule
-        ? buildCellSelectionMap(snapshot, activeSubSchedule.id, snapshot.month)
-        : {},
-    [activeSubSchedule, snapshot],
+    () => (activeSubScheduleId ? buildCellSelectionMap(snapshot, activeSubScheduleId, snapshot.month) : {}),
+    [activeSubScheduleId, snapshot],
   );
   const [draftAssignmentSelections, setDraftAssignmentSelections] = useState<Record<string, SubScheduleCellSelection>>(
     baselineAssignmentSelections,
   );
 
+  /**
+   * Switching sub-schedule replaces the draft; a changed server baseline for the
+   * same one is merged into it.
+   *
+   * The per-cell state — the open editor, the drag range, the rows added to the
+   * grid — belongs to the sub-schedule being edited, so it is cleared on a
+   * context switch and left alone otherwise. A revalidation from anywhere in the
+   * app used to clear all of it and drop every unsaved cell with it.
+   */
   useEffect(() => {
-    setDraftAssignmentSelections(cloneCellSelections(baselineAssignmentSelections));
-    setEditorCell(null);
-    setDragRange(null);
-    setAddedEmployeeIds([]);
-    setEmployeeToAddId("");
-    setIsEmployeePickerOpen(false);
-    setAssignmentMessage("");
+    const signature = buildCellSelectionsSignature(baselineAssignmentSelections);
+    const applied = appliedSelectionsRef.current;
+    const contextChanged = applied?.subScheduleId !== activeSubScheduleId;
+
+    if (applied && !contextChanged && signature === applied.signature) {
+      return;
+    }
+
+    appliedSelectionsRef.current = {
+      subScheduleId: activeSubScheduleId,
+      signature,
+      baseline: cloneCellSelections(baselineAssignmentSelections),
+    };
+
+    if (!applied) {
+      return;
+    }
+
     lastAssignmentSaveSignatureRef.current = "";
-  }, [baselineAssignmentSelections]);
+
+    if (contextChanged) {
+      setDraftAssignmentSelections(cloneCellSelections(baselineAssignmentSelections));
+      setEditorCell(null);
+      setDragRange(null);
+      setAddedEmployeeIds([]);
+      setEmployeeToAddId("");
+      setIsEmployeePickerOpen(false);
+      setAssignmentMessage("");
+      return;
+    }
+
+    setDraftAssignmentSelections((current) =>
+      mergeDraftCells({
+        previousBaseline: applied.baseline,
+        nextBaseline: baselineAssignmentSelections,
+        draft: current,
+        cloneCell: (cell) => ({ ...cell }),
+      }),
+    );
+  }, [activeSubScheduleId, baselineAssignmentSelections]);
 
   const dirtySubScheduleIds = useMemo(
     () =>
