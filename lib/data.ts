@@ -15,9 +15,8 @@ import {
   buildAssignmentIndex,
   getCompletedSetDatesForMonth,
   getEmployeeMap,
-  getExtendedMonthDays,
   getMonthDays,
-  getWorkedSetDays,
+  getSetAwareDateBounds,
   shiftMonthKey,
 } from "@/lib/scheduling";
 import {
@@ -603,31 +602,6 @@ function resolvePreferredScheduleId(
   }
 
   return schedules[0]?.id ?? null;
-}
-
-function getSchedulePageDateBounds(month: string, schedule: Schedule | null | undefined) {
-  const visibleMonthDays = getMonthDays(month);
-  const firstVisibleDay = visibleMonthDays[0]?.date ?? `${month}-01`;
-  const lastVisibleDay = visibleMonthDays[visibleMonthDays.length - 1]?.date ?? firstVisibleDay;
-
-  if (!schedule) {
-    return {
-      monthStart: firstVisibleDay,
-      monthEnd: lastVisibleDay,
-    };
-  }
-
-  const extendedMonthDays = getExtendedMonthDays(month);
-  const boundarySetDays = [
-    ...getWorkedSetDays(schedule, extendedMonthDays, firstVisibleDay),
-    ...getWorkedSetDays(schedule, extendedMonthDays, lastVisibleDay),
-  ];
-  const boundaryDates = boundarySetDays.map((day) => day.date);
-
-  return {
-    monthStart: [firstVisibleDay, ...boundaryDates].sort()[0] ?? firstVisibleDay,
-    monthEnd: [lastVisibleDay, ...boundaryDates].sort().at(-1) ?? lastVisibleDay,
-  };
 }
 
 function mapProductionUnits(rows: ProductionUnitRow[]) {
@@ -1288,7 +1262,7 @@ type ScheduleReferenceSnapshotOptions = {
   includeCompletedSets?: boolean;
   includeProjectedAssignments?: boolean;
   includeAwayAssignments?: boolean;
-  assignmentWindow?: "month" | "extended" | "schedule-page";
+  assignmentWindow?: "month" | "extended" | "schedule-page" | "all-schedule-sets";
   completedSetWindow?: "month" | "extended";
   scheduleDataScheduleId?: string | null;
 };
@@ -1432,13 +1406,14 @@ async function runScheduleReferenceSnapshot(
   const scheduleForDataWindow = resolvedScheduleDataScheduleId
     ? scheduleReference.schedules.find((schedule) => schedule.id === resolvedScheduleDataScheduleId) ?? null
     : null;
-  const schedulePageBounds = getSchedulePageDateBounds(month, scheduleForDataWindow);
-  const { monthStart, monthEnd, windowMonths } =
+  const { monthStart, monthEnd } =
     assignmentWindow === "extended"
       ? getExtendedMonthBounds(month)
       : assignmentWindow === "schedule-page"
-        ? { ...schedulePageBounds, windowMonths: getExtendedMonthBounds(month).windowMonths }
-        : { ...getMonthBounds(month), windowMonths: [month] };
+        ? getSetAwareDateBounds(month, scheduleForDataWindow ? [scheduleForDataWindow] : [])
+        : assignmentWindow === "all-schedule-sets"
+          ? getSetAwareDateBounds(month, scheduleReference.schedules)
+          : getMonthBounds(month);
   const visibleEmployeeIds = scheduleReference.employeeRows.map((employee) => employee.id);
   const selectedScheduleEmployeeIds = scheduleForDataWindow?.employees.map((employee) => employee.id) ?? [];
 
@@ -1725,7 +1700,19 @@ export const getOvertimeBoardSnapshot = cache(async function getOvertimeBoardSna
     includeOvertimeClaims: true,
     includeManualOvertimePostings: true,
     includeCompletedSets: true,
-    assignmentWindow: "extended",
+    /**
+     * The board renders one month: `buildCompletedSetCoverage` discards any
+     * segment whose first date falls outside it. What it still needs is the
+     * tail of a set that starts inside the month and runs past its end, so the
+     * window is the month plus the straddling sets of every crew — not the two
+     * neighbouring months entire, which was 3,589 assignment rows to display
+     * one month's postings.
+     *
+     * The completed-set window stays extended: those are month-keyed rows, and
+     * a set is matched by the range key of its own first and last day, which
+     * can sit in an adjacent month.
+     */
+    assignmentWindow: "all-schedule-sets",
     completedSetWindow: "extended",
   });
 });
@@ -2409,23 +2396,40 @@ export async function getOvertimeMonths(currentMonth: string, session?: AppSessi
    * will still calculate the exact postings for the selected month after the
    * page loads.
    */
+  /**
+   * Bounded to the months the picker can actually offer.
+   *
+   * These reads are capped at 1,000 rows by PostgREST, and everything below
+   * `currentMonth` is discarded further down anyway — so an unbounded read
+   * spent the whole allowance on history and, once a table outgrew the cap,
+   * truncation took the newest rows: precisely the months the picker exists to
+   * offer. It failed by quietly showing fewer months, not by erroring.
+   *
+   * The bound makes the cap unreachable in practice, and leaves ascending order
+   * as the right one: if it were ever hit, the months lost would be the most
+   * distant, not next month's.
+   */
+  const monthStart = `${currentMonth}-01`;
   const [completedSetsResult, overtimeClaimsResult, manualPostingsResult] = await Promise.all([
     applySessionScope(
       supabase
         .from("completed_sets")
-        .select("month_key"),
+        .select("month_key")
+        .gte("month_key", currentMonth),
       session,
     ).order("month_key"),
     applySessionScope(
       supabase
         .from("overtime_claims")
-        .select("assignment_date"),
+        .select("assignment_date")
+        .gte("assignment_date", monthStart),
       session,
     ).order("assignment_date"),
     applySessionScope(
       supabase
         .from("manual_overtime_postings")
-        .select("month_key"),
+        .select("month_key")
+        .gte("month_key", currentMonth),
       session,
     ).order("month_key"),
   ]);

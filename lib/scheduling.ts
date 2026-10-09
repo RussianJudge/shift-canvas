@@ -358,6 +358,43 @@ export function getWorkedSetDays(
   return monthDays.slice(startIndex, endIndex + 1);
 }
 
+/**
+ * The date range a month's rosters need, including the sets that straddle it.
+ *
+ * A set running across a month boundary still has to be read whole, or its
+ * coverage is counted against a truncated set. Reading the two neighbouring
+ * months entire is the blunt way to guarantee that; this is the exact way —
+ * the month plus only the days of the sets its first and last day belong to.
+ *
+ * Several schedules union to the widest straddle, because the crews run offset
+ * rotations and a window that fits one can cut another's set in half.
+ */
+export function getSetAwareDateBounds(
+  month: string,
+  schedules: Array<Pick<Schedule, "startDate" | "dayShiftDays" | "nightShiftDays" | "offDays">>,
+) {
+  const visibleMonthDays = getMonthDays(month);
+  const firstVisibleDay = visibleMonthDays[0]?.date ?? `${month}-01`;
+  const lastVisibleDay = visibleMonthDays[visibleMonthDays.length - 1]?.date ?? firstVisibleDay;
+
+  if (schedules.length === 0) {
+    return { monthStart: firstVisibleDay, monthEnd: lastVisibleDay };
+  }
+
+  const extendedMonthDays = getExtendedMonthDays(month);
+  const boundaryDates = schedules.flatMap((schedule) =>
+    [
+      ...getWorkedSetDays(schedule, extendedMonthDays, firstVisibleDay),
+      ...getWorkedSetDays(schedule, extendedMonthDays, lastVisibleDay),
+    ].map((day) => day.date),
+  );
+
+  return {
+    monthStart: [firstVisibleDay, ...boundaryDates].sort()[0] ?? firstVisibleDay,
+    monthEnd: [lastVisibleDay, ...boundaryDates].sort().at(-1) ?? lastVisibleDay,
+  };
+}
+
 /** Unique key for a month-scoped completed-set row. */
 export function createCompletedSetKey(
   scheduleId: string,
