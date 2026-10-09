@@ -1858,23 +1858,20 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     (employeeCompetenciesResult.data as EmployeeCompetencyRow[] | null) ?? [],
   );
   const employeeIds = ((employeesResult.data as EmployeeRow[] | null) ?? []).map((employee) => employee.id);
+  /*
+   * Deliberately no assignments, sub-schedule assignments or overtime claims.
+   *
+   * They were read here filtered only by employee — no date bound — which came
+   * to 8,312 rows over nine sequential requests for a table showing names,
+   * emails, shifts and competencies, and grew with every month the app ran.
+   * Their single consumer was the dialog confirming a competency removal, so
+   * it fetches what it needs for that one employee and competency when it
+   * opens: see getCompetencyRemovalImpacts in app/actions.ts.
+   */
   const [
-    assignmentsResult,
     subSchedulesResult,
     subScheduleCompetenciesResult,
-    subScheduleAssignmentsResult,
-    overtimeClaimsResult,
   ] = await Promise.all([
-    employeeIds.length > 0
-      ? fetchAllRows<AssignmentRow>(
-          applySessionScope(
-            supabase
-              .from("schedule_assignments")
-              .select("employee_id, schedule_id, assignment_date, competency_id, time_code_id, notes, shift_kind"),
-            session,
-          ).in("employee_id", employeeIds),
-        )
-      : Promise.resolve({ data: [], error: null }),
     applySessionScope(
       supabase.from("sub_schedules").select("id, name, summary_time_code_id, is_archived, company_id, site_id, business_area_id"),
       session,
@@ -1883,26 +1880,6 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
       supabase.from("sub_schedule_competencies").select("sub_schedule_id, competency_id, company_id, site_id, business_area_id"),
       session,
     ),
-    employeeIds.length > 0
-      ? fetchAllRows<SubScheduleAssignmentRow>(
-          applySessionScope(
-            supabase
-              .from("sub_schedule_assignments")
-              .select("id, sub_schedule_id, employee_id, assignment_date, competency_id, time_code_id, notes, company_id, site_id, business_area_id"),
-            session,
-          ).in("employee_id", employeeIds),
-        )
-      : Promise.resolve({ data: [], error: null }),
-    employeeIds.length > 0
-      ? fetchAllRows<OvertimeClaimRow>(
-          applySessionScope(
-            supabase
-              .from("overtime_claims")
-              .select("id, schedule_id, sub_schedule_id, employee_id, competency_id, time_code_id, assignment_date, manual_posting_id"),
-            session,
-          ).in("employee_id", employeeIds),
-        )
-      : Promise.resolve({ data: [], error: null }),
   ]);
   const unassignedEmployees = mapUnassignedEmployees(
     (employeesResult.data as EmployeeRow[] | null) ?? [],
@@ -1910,12 +1887,9 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
   );
   const scheduleCompetencyRows = (scheduleCompetenciesResult.data as ScheduleCompetencyRow[] | null) ?? [];
 
-  logSnapshotQueryErrors("Personnel cleanup preview", [
-    ["schedule_assignments", assignmentsResult.error],
+  logSnapshotQueryErrors("Personnel sub-schedules", [
     ["sub_schedules", subSchedulesResult.error],
     ["sub_schedule_competencies", subScheduleCompetenciesResult.error],
-    ["sub_schedule_assignments", subScheduleAssignmentsResult.error],
-    ["overtime_claims", overtimeClaimsResult.error],
   ]);
 
   logScopedEmptyState(
@@ -1935,18 +1909,16 @@ export async function getPersonnelSnapshot(month: string, session?: AppSession |
     timeCodes: [],
     schedules: mapSchedules((schedulesResult.data as ScheduleRow[] | null) ?? [], employeesBySchedule, scheduleCompetencyRows),
     unassignedEmployees,
-    assignments: mapAssignments((assignmentsResult.data as AssignmentRow[] | null) ?? []),
+    assignments: [],
     projectedAssignments: [],
-    overtimeClaims: mapOvertimeClaims((overtimeClaimsResult.data as OvertimeClaimRow[] | null) ?? []),
+    overtimeClaims: [],
     manualOvertimePostings: [],
     completedSets: [],
     subSchedules: mapSubSchedules(
       (subSchedulesResult.data as SubScheduleRow[] | null) ?? [],
       (subScheduleCompetenciesResult.data as SubScheduleCompetencyRow[] | null) ?? [],
     ),
-    subScheduleAssignments: mapSubScheduleAssignments(
-      (subScheduleAssignmentsResult.data as SubScheduleAssignmentRow[] | null) ?? [],
-    ),
+    subScheduleAssignments: [],
     subScheduleMembers: [],
   };
 }

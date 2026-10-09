@@ -7481,3 +7481,84 @@ export async function confirmNotificationEmail(token: string) {
 
   return { ok: true as const, reason: "confirmed" as const };
 }
+
+/**
+ * What removing one competency from one person would clear.
+ *
+ * Fetched when the confirmation dialog opens rather than with the page. The
+ * Personnel snapshot used to carry every assignment, sub-schedule assignment
+ * and overtime claim ever written for the whole roster — thousands of rows,
+ * none of them displayed — so that this dialog could filter three of them.
+ */
+export async function getCompetencyRemovalImpacts(input: {
+  employeeId: string;
+  competencyId: string;
+}) {
+  const session = await requireActionRole(["admin", "leader"]);
+
+  if (!session) {
+    return { ok: false as const, message: "You do not have permission to edit personnel." };
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return { ok: false as const, message: "Supabase is not configured yet." };
+  }
+
+  const employeeResult = await supabase
+    .from("employees")
+    .select("id, company_id, site_id, business_area_id")
+    .eq("id", input.employeeId)
+    .maybeSingle();
+  const employeeRow = employeeResult.data as ScopedDatabaseRow | null;
+
+  if (employeeResult.error || !employeeRow || !canAccessScope(session, scopeFromRow(employeeRow))) {
+    return { ok: false as const, message: "You do not have permission to edit that employee." };
+  }
+
+  const [assignmentsResult, subScheduleResult, claimsResult] = await Promise.all([
+    supabase
+      .from("schedule_assignments")
+      .select("schedule_id, assignment_date")
+      .eq("employee_id", input.employeeId)
+      .eq("competency_id", input.competencyId),
+    supabase
+      .from("sub_schedule_assignments")
+      .select("sub_schedule_id, assignment_date")
+      .eq("employee_id", input.employeeId)
+      .eq("competency_id", input.competencyId),
+    supabase
+      .from("overtime_claims")
+      .select("id, schedule_id, sub_schedule_id, assignment_date")
+      .eq("employee_id", input.employeeId)
+      .eq("competency_id", input.competencyId),
+  ]);
+
+  const firstError = assignmentsResult.error ?? subScheduleResult.error ?? claimsResult.error;
+
+  if (firstError) {
+    return { ok: false as const, message: `Could not check what that change affects: ${firstError.message}` };
+  }
+
+  return {
+    ok: true as const,
+    assignments: ((assignmentsResult.data as Array<{ schedule_id: string | null; assignment_date: string }> | null) ?? []).map(
+      (row) => ({ scheduleId: row.schedule_id, date: row.assignment_date }),
+    ),
+    subScheduleAssignments: ((subScheduleResult.data as Array<{ sub_schedule_id: string; assignment_date: string }> | null) ?? []).map(
+      (row) => ({ subScheduleId: row.sub_schedule_id, date: row.assignment_date }),
+    ),
+    overtimeClaims: ((claimsResult.data as Array<{
+      id: string;
+      schedule_id: string | null;
+      sub_schedule_id: string | null;
+      assignment_date: string;
+    }> | null) ?? []).map((row) => ({
+      id: row.id,
+      scheduleId: row.schedule_id,
+      subScheduleId: row.sub_schedule_id,
+      date: row.assignment_date,
+    })),
+  };
+}

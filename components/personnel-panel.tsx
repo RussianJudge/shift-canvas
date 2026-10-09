@@ -4,7 +4,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import { savePersonnel } from "@/app/actions";
+import { getCompetencyRemovalImpacts, savePersonnel } from "@/app/actions";
 import { createAccountInvite, linkExistingAccountToEmployee, updateAccountRole } from "@/app/auth-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
@@ -868,6 +868,12 @@ export function PersonnelPanel({
   const [settingsInviteLink, setSettingsInviteLink] = useState("");
   const [settingsStatusMessage, setSettingsStatusMessage] = useState("");
   const [pendingCompetencyRemoval, setPendingCompetencyRemoval] = useState<PendingCompetencyRemoval | null>(null);
+  /** Which competency button is waiting on its impact check, so it can show it. */
+  const [checkingCompetencyRemoval, setCheckingCompetencyRemoval] = useState<{
+    employeeId: string;
+    competencyId: string;
+  } | null>(null);
+  const [, startCompetencyCheckTransition] = useTransition();
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [pendingAccountLink, setPendingAccountLink] = useState<PendingAccountLink | null>(null);
   const [isSaving, startSaveTransition] = useTransition();
@@ -1119,39 +1125,42 @@ export function PersonnelPanel({
     );
   }
 
-  function getCompetencyRemovalImpacts(employeeId: string, competencyId: string) {
+  function buildCompetencyRemovalImpacts(
+    competencyId: string,
+    impacts: {
+      assignments: Array<{ scheduleId: string | null; date: string }>;
+      subScheduleAssignments: Array<{ subScheduleId: string; date: string }>;
+      overtimeClaims: Array<{ id: string; scheduleId: string | null; subScheduleId: string | null; date: string }>;
+    },
+  ) {
     const competencyLabel = competencyLabelById[competencyId] ?? "Removed competency";
-    const mainScheduleImpacts = snapshot.assignments
-      .filter((assignment) => assignment.employeeId === employeeId && assignment.competencyId === competencyId)
-      .map<CompetencyCleanupImpact>((assignment) => ({
-        id: `main:${assignment.scheduleId}:${assignment.date}:${assignment.competencyId}`,
-        type: "Primary schedule",
-        date: assignment.date,
-        targetLabel: assignment.scheduleId ? `Shift ${scheduleNameById[assignment.scheduleId] ?? assignment.scheduleId}` : "Main schedule",
-        competencyLabel,
-      }));
-    const subScheduleImpacts = snapshot.subScheduleAssignments
-      .filter((assignment) => assignment.employeeId === employeeId && assignment.competencyId === competencyId)
-      .map<CompetencyCleanupImpact>((assignment) => ({
-        id: `sub:${assignment.subScheduleId}:${assignment.date}:${assignment.competencyId}`,
-        type: "Sub-schedule",
-        date: assignment.date,
-        targetLabel: subScheduleNameById[assignment.subScheduleId] ?? "Sub-schedule",
-        competencyLabel,
-      }));
-    const overtimeImpacts = snapshot.overtimeClaims
-      .filter((claim) => claim.employeeId === employeeId && claim.competencyId === competencyId)
-      .map<CompetencyCleanupImpact>((claim) => ({
-        id: `ot:${claim.id}`,
-        type: "Overtime claim",
-        date: claim.date,
-        targetLabel: claim.subScheduleId
-          ? subScheduleNameById[claim.subScheduleId] ?? "Sub-schedule"
-          : claim.scheduleId
-            ? `Shift ${scheduleNameById[claim.scheduleId] ?? claim.scheduleId}`
-            : "Overtime",
-        competencyLabel,
-      }));
+    const mainScheduleImpacts = impacts.assignments.map<CompetencyCleanupImpact>((assignment) => ({
+      id: `main:${assignment.scheduleId}:${assignment.date}:${competencyId}`,
+      type: "Primary schedule",
+      date: assignment.date,
+      targetLabel: assignment.scheduleId
+        ? `Shift ${scheduleNameById[assignment.scheduleId] ?? assignment.scheduleId}`
+        : "Main schedule",
+      competencyLabel,
+    }));
+    const subScheduleImpacts = impacts.subScheduleAssignments.map<CompetencyCleanupImpact>((assignment) => ({
+      id: `sub:${assignment.subScheduleId}:${assignment.date}:${competencyId}`,
+      type: "Sub-schedule",
+      date: assignment.date,
+      targetLabel: subScheduleNameById[assignment.subScheduleId] ?? "Sub-schedule",
+      competencyLabel,
+    }));
+    const overtimeImpacts = impacts.overtimeClaims.map<CompetencyCleanupImpact>((claim) => ({
+      id: `ot:${claim.id}`,
+      type: "Overtime claim",
+      date: claim.date,
+      targetLabel: claim.subScheduleId
+        ? subScheduleNameById[claim.subScheduleId] ?? "Sub-schedule"
+        : claim.scheduleId
+          ? `Shift ${scheduleNameById[claim.scheduleId] ?? claim.scheduleId}`
+          : "Overtime",
+      competencyLabel,
+    }));
 
     return [...mainScheduleImpacts, ...subScheduleImpacts, ...overtimeImpacts].sort(
       (left, right) => left.date.localeCompare(right.date) || left.type.localeCompare(right.type),
@@ -1168,18 +1177,40 @@ export function PersonnelPanel({
     const isSelected = employee.competencyIds.includes(competencyId);
 
     if (isSelected) {
-      const impacts = getCompetencyRemovalImpacts(employeeId, competencyId);
+      // What this would clear is read now rather than carried by the page, so
+      // the removal waits on one small query instead of the roster's entire
+      // assignment history loading on every visit.
+      setCheckingCompetencyRemoval({ employeeId, competencyId });
+      startCompetencyCheckTransition(async () => {
+        const result = await getCompetencyRemovalImpacts({ employeeId, competencyId });
 
-      if (impacts.length > 0) {
-        setPendingCompetencyRemoval({
-          employeeId,
-          employeeName: getEditableEmployeeDisplayName(employee),
-          competencyId,
-          competencyLabel: competencyLabelById[competencyId] ?? "Removed competency",
-          impacts,
-        });
-        return;
-      }
+        setCheckingCompetencyRemoval(null);
+
+        if (!result.ok) {
+          setStatusMessage(result.message);
+          return;
+        }
+
+        const impacts = buildCompetencyRemovalImpacts(competencyId, result);
+
+        if (impacts.length > 0) {
+          setPendingCompetencyRemoval({
+            employeeId,
+            employeeName: getEditableEmployeeDisplayName(employee),
+            competencyId,
+            competencyLabel: competencyLabelById[competencyId] ?? "Removed competency",
+            impacts,
+          });
+          return;
+        }
+
+        updateEmployee(employeeId, (current) => ({
+          ...current,
+          competencyIds: current.competencyIds.filter((id) => id !== competencyId),
+        }));
+      });
+
+      return;
     }
 
     updateEmployee(employeeId, (current) => ({
@@ -1941,11 +1972,16 @@ export function PersonnelPanel({
                     <div className="table-pills table-pills--editable">
                       {snapshot.competencies.map((competency) => {
                         const isSelected = entry.value.competencyIds.includes(competency.id);
+                        const isChecking =
+                          checkingCompetencyRemoval?.employeeId === entry.value.id &&
+                          checkingCompetencyRemoval.competencyId === competency.id;
 
                         return (
                           <button
                             type="button"
                             key={competency.id}
+                            disabled={isChecking}
+                            aria-busy={isChecking}
                             onClick={() => toggleCompetency(entry.value.id, competency.id)}
                             className={`legend-pill legend-pill--${competency.colorToken.toLowerCase()} ${
                               isSelected ? "legend-pill--selected" : "legend-pill--muted"
