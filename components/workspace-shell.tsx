@@ -12,6 +12,7 @@ import {
   type MouseEvent,
 } from "react";
 import Link from "next/link";
+import { Suspense, use } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { setAdminViewingScope, signOut } from "@/app/auth-actions";
@@ -19,13 +20,12 @@ import { BrandLockup } from "@/components/brand-lockup";
 import { Button, IconButton } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
 import { deriveInitials } from "@/lib/initials";
-import { countUnread } from "@/lib/notifications";
 import {
   SIDEBAR_COLLAPSE_STORAGE_KEY,
   resolveSidebarCollapseForViewport,
   serializeSidebarCollapsePreference,
 } from "@/lib/sidebar-preference";
-import type { AppNotification, AppSession } from "@/lib/types";
+import type { AppSession } from "@/lib/types";
 
 const MOBILE_SIDEBAR_MAX_WIDTH = 600;
 const MONTH_ROUTE_HREFS = new Set(["/schedule", "/overtime", "/metrics", "/mutuals", "/sub-schedules"]);
@@ -267,16 +267,71 @@ function NotificationsIcon() {
 }
 
 /** Responsive shell with a collapsible toolbar and role-scoped nav. */
+type NotificationsNavLinkProps = {
+  pathname: string;
+  isFinePointer: boolean;
+  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
+};
+
+/**
+ * The bell, rendered from a count the sidebar may not have yet.
+ *
+ * Split out so the shell can paint before the count arrives: the fallback is
+ * this same link with no badge, which is also what someone with nothing unread
+ * sees, so the streamed version never rearranges the nav.
+ */
+function NotificationsNavLink({
+  unreadCount,
+  pathname,
+  isFinePointer,
+  onNavigate,
+}: NotificationsNavLinkProps & { unreadCount: number }) {
+  return (
+    <div className="workspace-nav-notifications">
+      <Link
+        href="/notifications"
+        prefetch={isFinePointer ? undefined : false}
+        {...dynamicHoverProps(isFinePointer)}
+        className={`workspace-nav-link ${pathname === "/notifications" ? "workspace-nav-link--active" : ""}`}
+        title="Notifications"
+        aria-current={pathname === "/notifications" ? "page" : undefined}
+        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+        onClick={(event) => onNavigate(event, "/notifications")}
+      >
+        <span className="workspace-nav-icon">
+          <NotificationsIcon />
+        </span>
+        <strong>Notifications</strong>
+        {/* The count is already in the link's accessible name, so the badge
+            itself is decoration and must not be announced twice. */}
+        {unreadCount > 0 ? (
+          <span className="workspace-notifications__badge" aria-hidden="true">
+            {unreadCount > 49 ? "49+" : unreadCount}
+          </span>
+        ) : null}
+      </Link>
+    </div>
+  );
+}
+
+function StreamedNotificationsNavLink({
+  countPromise,
+  ...linkProps
+}: NotificationsNavLinkProps & { countPromise: Promise<number> }) {
+  return <NotificationsNavLink unreadCount={use(countPromise)} {...linkProps} />;
+}
+
 export function WorkspaceShell({
   children,
   viewer,
   initialAdminScope = null,
-  initialNotifications = [],
+  unreadCountPromise = Promise.resolve(0),
 }: {
   children: React.ReactNode;
   viewer: AppSession;
   initialAdminScope?: AdminScopePayload | null;
-  initialNotifications?: AppNotification[];
+  /** Unresolved on purpose: the chrome renders while the count is still in flight. */
+  unreadCountPromise?: Promise<number>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -297,7 +352,6 @@ export function WorkspaceShell({
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [adminScope, setAdminScope] = useState<AdminScopePayload | null>(initialAdminScope);
   const [isAdminScopeCollapsed, setIsAdminScopeCollapsed] = useState(true);
-  const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
   const [isUpdatingScope, startScopeTransition] = useTransition();
   /** null until the first viewport measurement, so mount counts as a change. */
   const wasMobileSidebarModeRef = useRef<boolean | null>(null);
@@ -391,18 +445,6 @@ export function WorkspaceShell({
     setAdminScope(initialAdminScope);
   }, [initialAdminScope]);
 
-  useEffect(() => {
-    setNotifications((previous) => {
-      const unchanged =
-        previous.length === initialNotifications.length &&
-        previous.every((entry, index) => entry.id === initialNotifications[index]?.id);
-
-      // Returning the existing reference makes React skip the update, so an
-      // unstable (new-each-render) prop can't drive an infinite render loop.
-      return unchanged ? previous : initialNotifications;
-    });
-  }, [initialNotifications]);
-
   /**
    * Navigation is derived directly from the resolved app role so page
    * visibility stays centralized here instead of being scattered through the UI.
@@ -491,37 +533,15 @@ export function WorkspaceShell({
     }
   };
 
-  // The frame loads unread notifications only, so the list length is the count.
-  const unreadCount = countUnread(notifications);
+  const notificationsLinkProps = {
+    pathname,
+    isFinePointer,
+    onNavigate: handleNavLinkNavigate,
+  };
   const notificationsNavItem = (
-    <div className="workspace-nav-notifications">
-      <Link
-        href="/notifications"
-        prefetch={isFinePointer ? undefined : false}
-        {...dynamicHoverProps(isFinePointer)}
-        className={`workspace-nav-link ${pathname === "/notifications" ? "workspace-nav-link--active" : ""}`}
-        title="Notifications"
-        aria-current={pathname === "/notifications" ? "page" : undefined}
-        aria-label={
-          unreadCount > 0
-            ? `Notifications, ${unreadCount} unread`
-            : "Notifications"
-        }
-        onClick={(event) => handleNavLinkNavigate(event, "/notifications")}
-      >
-        <span className="workspace-nav-icon">
-          <NotificationsIcon />
-        </span>
-        <strong>Notifications</strong>
-        {/* The count is already in the link's accessible name, so the badge
-            itself is decoration and must not be announced twice. */}
-        {unreadCount > 0 ? (
-          <span className="workspace-notifications__badge" aria-hidden="true">
-            {unreadCount > 49 ? "49+" : unreadCount}
-          </span>
-        ) : null}
-      </Link>
-    </div>
+    <Suspense fallback={<NotificationsNavLink unreadCount={0} {...notificationsLinkProps} />}>
+      <StreamedNotificationsNavLink countPromise={unreadCountPromise} {...notificationsLinkProps} />
+    </Suspense>
   );
 
   return (

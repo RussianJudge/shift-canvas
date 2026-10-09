@@ -453,23 +453,18 @@ export async function getAdminScopeOptions(session: AppSession) {
     };
   }
 
-  const sitesResult = await supabase
-    .from("sites")
-    .select("id, name")
-    .eq("company_id", session.companyId)
-    .order("name");
+  // Both in one wave. Business areas carry no company of their own, so they are
+  // filtered through their site rather than by waiting for the site ids.
+  const [sitesResult, businessAreasResult] = await Promise.all([
+    supabase.from("sites").select("id, name").eq("company_id", session.companyId).order("name"),
+    supabase
+      .from("business_areas")
+      .select("id, site_id, name, sites!site_id!inner(company_id)")
+      .eq("sites.company_id", session.companyId)
+      .order("name"),
+  ]);
 
   const sites = ((sitesResult.data as Array<{ id: string; name: string }> | null) ?? []);
-  const siteIds = sites.map((site) => site.id);
-
-  const businessAreasResult =
-    siteIds.length > 0
-      ? await supabase
-          .from("business_areas")
-          .select("id, site_id, name")
-          .in("site_id", siteIds)
-          .order("name")
-      : { data: [], error: null };
 
   return {
     sites,
@@ -2714,6 +2709,51 @@ export async function getMutualsSnapshot(month: string, session?: AppSession | n
     postings,
     settings,
   };
+}
+
+/**
+ * Just the number behind the bell.
+ *
+ * The shell used to read fifty whole rows to render a count, on every page.
+ * This asks the database for the count instead.
+ */
+export async function countUnreadNotificationsForViewer(session: AppSession) {
+  const supabase = getDataClient();
+
+  if (!supabase || !session.employeeId) {
+    return 0;
+  }
+
+  const run = (withLifecycle: boolean) => {
+    let query = applySessionScope(
+      supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("recipient_employee_id", session.employeeId)
+        .is("read_at", null),
+      session,
+    );
+
+    if (withLifecycle) {
+      query = query.is("dismissed_at", null).is("resolved_at", null);
+    }
+
+    return query;
+  };
+
+  let { count, error } = await run(true);
+
+  // Before the lifecycle migration lands there is nothing to hide.
+  if (error?.code === "42703") {
+    ({ count, error } = await run(false));
+  }
+
+  if (error) {
+    console.error("Unread notification count failed to load:", error.message);
+    return 0;
+  }
+
+  return count ?? 0;
 }
 
 export async function getNotificationsForViewer(
