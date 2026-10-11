@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { cookies, headers } from "next/headers";
 
+import { canAccessScope } from "@/lib/action-scope";
 import { clearAppSession, getAppSession, getSessionHomePath, setAppSession } from "@/lib/auth";
 import { buildCreateAccountInviteUrl, sendAccountInviteEmail } from "@/lib/email";
 import { formatEmployeeDisplayName } from "@/lib/employee-names";
@@ -660,11 +661,23 @@ export async function createAccountInvite(input: {
     };
   }
 
+  /**
+   * The same boundary every other mutation uses: an admin is bounded by their
+   * company, everyone else by their own site and business area.
+   *
+   * This comparison used to be written out here, without the admin branch, so
+   * it measured an admin against the site and business area on their own
+   * profile. An admin could read, edit, schedule and delete an employee in
+   * another business area but not invite them, and switching the workspace
+   * selector did not help, because the check never looked at the active scope.
+   */
   if (
     linkedEmployee &&
-    (linkedEmployee.company_id !== session.companyId ||
-      linkedEmployee.site_id !== session.siteId ||
-      linkedEmployee.business_area_id !== session.businessAreaId)
+    !canAccessScope(session, {
+      companyId: linkedEmployee.company_id,
+      siteId: linkedEmployee.site_id,
+      businessAreaId: linkedEmployee.business_area_id,
+    })
   ) {
     return {
       ok: false,

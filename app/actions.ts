@@ -69,6 +69,7 @@ import {
   resolveClaimCoverageCompetencyId,
   type OvertimeAssignmentRow,
 } from "@/lib/overtime";
+import { canAccessScope, type ActionScope } from "@/lib/action-scope";
 import { canBeNotifiedAboutPosting, isPostingInThePast } from "@/lib/overtime-eligibility";
 import {
   buildOvertimePostingNotification,
@@ -117,7 +118,6 @@ import {
 import { getAppSession } from "@/lib/auth";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 type SupabaseAdminClient = NonNullable<ReturnType<typeof getSupabaseAdminClient>>;
-type ActionScope = { companyId: string; siteId: string; businessAreaId: string };
 type ScopedDatabaseRow = { company_id: string; site_id: string; business_area_id: string };
 type RemovedOvertimeClaimNotification = {
   claimId: string;
@@ -234,25 +234,6 @@ function scopeFromRow(row: ScopedDatabaseRow): ActionScope {
 }
 
 /** Company-wide admins pass on company match; others must match the exact business area. */
-function canAccessScope(
-  session: Awaited<ReturnType<typeof getAppSession>>,
-  scope: ActionScope,
-) {
-  if (!session?.companyId) {
-    return false;
-  }
-
-  if (session.role === "admin") {
-    return session.companyId === scope.companyId;
-  }
-
-  return (
-    session.companyId === scope.companyId &&
-    session.siteId === scope.siteId &&
-    session.businessAreaId === scope.businessAreaId
-  );
-}
-
 function isOvertimeGeneratedAssignment(notes: string | null | undefined) {
   return notes?.startsWith("OT|") ?? false;
 }
